@@ -1,16 +1,15 @@
 package com.gathin.tvhome;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
+import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.drawable.ColorDrawable;
-import android.graphics.drawable.GradientDrawable;
 import android.media.tv.TvContract;
 import android.media.tv.TvInputInfo;
 import android.media.tv.TvInputManager;
@@ -29,6 +28,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.animation.AnimationUtils;
+import android.view.animation.DecelerateInterpolator;
 import android.view.animation.LayoutAnimationController;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
@@ -50,13 +50,23 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * tvOS style home: black, a pinned dock row, an app grid, and one glass highlight that springs between tiles.
+ * tvOS style home with three states:
+ * <ul>
+ *   <li>Dock: clock, top buttons and the dock row at the bottom; nothing else is visible.</li>
+ *   <li>All apps (Down from the dock): the background blurs, the clock, buttons and dock fade out and only
+ *       the apps that are not in the dock are listed.</li>
+ *   <li>Arrange: every app, dock included, can be moved to any position.</li>
+ * </ul>
  */
 public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     /** Tiles per row and dock slots (res/values/config.xml, columns). Set in onCreate. */
     static int COLUMNS = 4;
     private static final long MINUTE_MS = 60_000L;
+    /** Where the first row of the app list sits (dp from the top) when it opens. Keeps the dock row off screen. */
+    private static final int ALL_TOP_DP = 30;
+    /** Top padding of the grid while arranging, so the dock row and the rows below are all visible. */
+    private static final int ARRANGE_TOP_DP = 36;
     private String liveTvPkg;
     private static final int REQUEST_WALLPAPER = 71;
     private static final String PREFS = "launcher_preferences";
@@ -64,31 +74,35 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     private AppAdapter adapter;
     private RecyclerView grid;
+    private DockDecoration dockDecoration;
     private FrameLayout root;
+    private View header;
     private ImageView wallpaperView;
     private ImageView wallpaperBlurView;
     private View allAppsScrim;
-    /** True while focus is on the app grid below the dock: the background blurs and dims. */
-    private boolean allAppsMode;
     private GlassView glass;
-    private View ambient;
     private TextView heroName;
-    private GradientDrawable ambientGlow;
-    private int ambientColor;
     private boolean heroShown;
     private TextView greeting;
     private TextView btnWifi;
     private SpringAnimation springX, springY;
     private float glassTargetX, glassTargetY;
     private boolean glassShown;
+    /** True while focus is on the app list below the dock. */
+    private boolean allAppsMode;
+    /** True while apps are being rearranged. */
+    private boolean arranging;
+    /** What the blur / header state on screen currently reflects (see refreshChrome). */
+    private boolean overlayApplied;
+    /** Align the focused row to the top of the screen on the next focus, even if we were already in the app list. */
+    private boolean alignNext;
+    private List<String> arrangeBackup;
     // Static so they survive the activity being destroyed while another app is open (low-memory TVs,
     // or Developer options → "Don't keep activities"); they only reset when the process dies.
     private static int lastFocused = 0;
     /** App of the last focused tile, so focus follows it when the app list changes. */
     private static String lastFocusedKey;
     private float density;
-    private boolean arrangingDock;
-    private List<String> dockOrderBeforeEdit;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     /** Refreshes the network pill when the connection changes: at boot Wi-Fi often connects after Home is shown. */
@@ -111,6 +125,14 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             handler.postDelayed(this, MINUTE_MS);
         }
     };
+    /** In dock mode, hide everything below the dock band (the second row would otherwise peek in). */
+    private final Runnable clipRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (grid == null || grid.getHeight() == 0) return;
+            grid.setClipBounds(new Rect(0, 0, grid.getWidth(), grid.getHeight() - (int) (40 * density)));
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -121,40 +143,37 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         liveTvPkg = getString(R.string.live_tv_package).trim();
 
         root = findViewById(R.id.root);
+        header = findViewById(R.id.header);
         wallpaperView = findViewById(R.id.wallpaper);
         wallpaperBlurView = findViewById(R.id.wallpaperBlur);
         allAppsScrim = findViewById(R.id.allAppsScrim);
-        restoreWallpaper();
         glass = findViewById(R.id.glass);
-        ambient = findViewById(R.id.ambient);
         heroName = findViewById(R.id.heroName);
-        ambientGlow = new GradientDrawable();
-        ambientGlow.setGradientType(GradientDrawable.RADIAL_GRADIENT);
-        ambientGlow.setGradientCenter(0.32f, 0.42f);
-        ambient.setBackground(ambientGlow);
-        ambient.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) ->
-                ambientGlow.setGradientRadius((r - l) * 0.62f));
         greeting = findViewById(R.id.greeting);
         btnWifi = findViewById(R.id.btnWifi);
 
         grid = findViewById(R.id.grid);
-        grid.setLayoutManager(new GridLayoutManager(this, COLUMNS));
+        grid.setLayoutManager(new GridLayoutManager(this, COLUMNS) {
+            @Override
+            protected void calculateExtraLayoutSpace(@NonNull RecyclerView.State state, @NonNull int[] extraLayoutSpace) {
+                // Keep the rows just above and below the screen laid out, so focus can jump to them at once.
+                extraLayoutSpace[0] = getHeight() / 2;
+                extraLayoutSpace[1] = getHeight();
+            }
+        });
         grid.setHasFixedSize(true);
         grid.setItemAnimator(null);
-        grid.addItemDecoration(new DockDecoration(COLUMNS, density));
+        dockDecoration = new DockDecoration(COLUMNS, density);
+        grid.addItemDecoration(dockDecoration);
         grid.setLayoutAnimation(new LayoutAnimationController(
                 AnimationUtils.loadAnimation(this, R.anim.tile_enter), 0.06f));
         adapter = new AppAdapter(this, this, COLUMNS);
         grid.setAdapter(adapter);
 
-        // tvOS layout: push the dock row to the bottom of the screen; the grid hides below until you press Down.
+        // tvOS layout: the dock row sits at the bottom of the screen; the app list is below it, out of sight.
         grid.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
-            int h = b - t;
-            int dockRow = (int) ((145 + 6 + 12) * density);   // item height plus DockDecoration offsets
-            int want = Math.max(0, h - dockRow - (int) (30 * density));
-            if (grid.getPaddingTop() != want) {
-                grid.setPadding(grid.getPaddingLeft(), want, grid.getPaddingRight(), grid.getPaddingBottom());
-            }
+            updateGridPadding();
+            if (!overlayApplied) clipRunnable.run();
         });
 
         // Keep the glass glued to its tile while the grid scrolls.
@@ -198,12 +217,17 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             boolean onTile = newF != null && newF.getId() == R.id.card;
             if (!onTile) {
                 hideGlass();
-                setAllAppsMode(false);
+                if (allAppsMode) {
+                    allAppsMode = false;
+                    refreshChrome();
+                }
             }
         });
 
         ConnectivityManager cm = getSystemService(ConnectivityManager.class);
         if (cm != null) cm.registerDefaultNetworkCallback(networkCallback);
+
+        restoreWallpaper();   // after the grid exists: the dock band uses the blurred wallpaper too
     }
 
     @Override
@@ -211,12 +235,21 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         super.onResume();
         glassShown = false;
         glass.setAlpha(0f);
-        allAppsMode = false;
-        wallpaperBlurView.setAlpha(0f);
-        allAppsScrim.setAlpha(0f);
         heroShown = false;
         heroName.setAlpha(0f);
-        ambient.setAlpha(0f);
+        // Start in the dock state; focusing a tile in the app list switches to the blurred state again.
+        allAppsMode = false;
+        arranging = false;
+        overlayApplied = false;
+        wallpaperBlurView.animate().cancel();
+        allAppsScrim.animate().cancel();
+        header.animate().cancel();
+        wallpaperBlurView.setAlpha(0f);
+        allAppsScrim.setAlpha(0f);
+        header.setAlpha(1f);
+        header.setVisibility(View.VISIBLE);
+        updateGridPadding();
+        clipRunnable.run();
         // Read these before reload(): rebinding can move focus to the first tile and overwrite them.
         final String returnKey = lastFocusedKey;
         final int returnSlot = lastFocused;
@@ -238,6 +271,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     protected void onPause() {
         super.onPause();
         handler.removeCallbacks(minuteTick);
+        if (arranging) finishArrange(false);
     }
 
     @Override
@@ -262,17 +296,88 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        handler.removeCallbacks(clipRunnable);
         ConnectivityManager cm = getSystemService(ConnectivityManager.class);
         if (cm != null) cm.unregisterNetworkCallback(networkCallback);
     }
 
     @Override
     public void onBackPressed() {
-        if (arrangingDock) {
-            finishDockArrange(false);
+        if (arranging) {
+            finishArrange(false);
             return;
         }
         // Home screen: Back goes nowhere.
+    }
+
+    // ---- grid layout and modes -------------------------------------------------------------------
+
+    /**
+     * Dock mode parks the dock row at the bottom (big top padding) and leaves enough bottom padding to scroll
+     * the last row up to the top; arrange mode uses a small top padding so everything is visible at once.
+     */
+    private void updateGridPadding() {
+        int h = grid.getHeight();
+        if (h == 0) return;
+        int top, bottom;
+        if (arranging) {
+            top = (int) (ARRANGE_TOP_DP * density);
+            bottom = (int) (40 * density);
+        } else {
+            int dockRow = (int) ((145 + 6 + 12) * density);   // item height plus DockDecoration offsets
+            top = Math.max(0, h - dockRow - (int) (30 * density));
+            bottom = Math.max((int) (40 * density), h - (int) ((145 + ALL_TOP_DP) * density));
+        }
+        if (grid.getPaddingTop() != top || grid.getPaddingBottom() != bottom) {
+            grid.setPadding(grid.getPaddingLeft(), top, grid.getPaddingRight(), bottom);
+        }
+    }
+
+    /**
+     * The "overlay" state (app list or arrange mode) blurs and dims the background and hides the clock,
+     * date, top buttons and (by scrolling) the dock. The dock state shows them and hides the app list.
+     */
+    private void refreshChrome() {
+        boolean overlay = allAppsMode || arranging;
+        if (overlay == overlayApplied) return;
+        overlayApplied = overlay;
+        wallpaperBlurView.animate().alpha(overlay ? 0.82f : 0f).setDuration(350).start();
+        allAppsScrim.animate().alpha(overlay ? 1f : 0f).setDuration(350).start();
+        setHeaderShown(!overlay);
+        handler.removeCallbacks(clipRunnable);
+        if (overlay) {
+            grid.setClipBounds(null);
+        } else {
+            handler.postDelayed(clipRunnable, 380);   // after the app list has slid away
+        }
+    }
+
+    private void setHeaderShown(boolean show) {
+        header.animate().cancel();
+        if (show) {
+            header.setVisibility(View.VISIBLE);
+            header.animate().alpha(1f).setDuration(300).start();
+        } else {
+            header.animate().alpha(0f).setDuration(180).withEndAction(() -> {
+                if (overlayApplied) header.setVisibility(View.INVISIBLE);
+            }).start();
+        }
+    }
+
+    private void scrollGridBy(int dy) {
+        if (dy == 0) return;
+        int duration = Math.min(380, 140 + Math.abs(dy) / 3);
+        grid.smoothScrollBy(0, dy, new DecelerateInterpolator(1.4f), duration);
+    }
+
+    /** Scrolls just enough so the whole tile, with its glass and name, is on screen. */
+    private void ensureVisible(View item, int topMarginDp) {
+        int topLimit = (int) (topMarginDp * density);
+        int bottomLimit = grid.getHeight() - (int) (16 * density);
+        int dy = 0;
+        if (item.getTop() < topLimit) dy = item.getTop() - topLimit;
+        else if (item.getBottom() > bottomLimit) dy = item.getBottom() - bottomLimit;
+        scrollGridBy(dy);
     }
 
     // ---- glass highlight -------------------------------------------------------------------------
@@ -310,19 +415,32 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             springX.animateToFinalPosition(x);
             springY.animateToFinalPosition(y);
         }
-        setAllAppsMode(position >= COLUMNS);
         View item = (View) card.getParent();
+
+        if (arranging) {
+            hideHero();
+            ensureVisible(item, 12);
+            return;
+        }
+
+        boolean entering = alignNext || (!allAppsMode && position >= COLUMNS);
+        alignNext = false;
+        allAppsMode = position >= COLUMNS;
+        refreshChrome();
         if (position < COLUMNS) {
             // Dock: park it at the bottom of the screen and show the top shelf for this app.
             int decoratedTop = item.getTop() - (int) (6 * density);
             int dy = decoratedTop - grid.getPaddingTop();
-            if (Math.abs(dy) > 1) grid.smoothScrollBy(0, dy);
+            scrollGridBy(dy);
             showHero(position, r.top - dy);
         } else {
             hideHero();
-            // Scroll just enough so the whole glass (not only the tile) is visible.
-            Rect want = new Rect(0, -(int) pad * 2, item.getWidth(), item.getHeight() + (int) pad);
-            grid.requestChildRectangleOnScreen(item, want, false);
+            if (entering) {
+                // The list opens with its first row at the top of the screen, dock out of sight above it.
+                scrollGridBy(item.getTop() - (int) (ALL_TOP_DP * density));
+            } else {
+                ensureVisible(item, 14);
+            }
         }
     }
 
@@ -330,7 +448,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     private void showHero(int position, float dockTopInRoot) {
         String label = adapter.labelAt(position);
-        int color = adapter.ambientColorAt(position);
         float y = dockTopInRoot - 14 * density - 26 * density - heroName.getHeight();
         boolean changed = !label.contentEquals(heroName.getText());
 
@@ -339,8 +456,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             heroName.setY(y);
             heroName.setTranslationX(0f);
             heroName.animate().alpha(1f).setDuration(260).start();
-            setAmbient(color);
-            ambient.animate().alpha(1f).setDuration(600).start();
             heroShown = true;
         } else if (changed) {
             heroName.animate().alpha(0f).translationX(-12 * density).setDuration(120).withEndAction(() -> {
@@ -349,36 +464,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 heroName.setTranslationX(12 * density);
                 heroName.animate().alpha(1f).translationX(0f).setDuration(200).start();
             }).start();
-            if (color != ambientColor) {
-                ambient.animate().alpha(0.35f).setDuration(200).withEndAction(() -> {
-                    setAmbient(color);
-                    ambient.animate().alpha(1f).setDuration(500).start();
-                }).start();
-            }
         } else {
             heroName.setY(y);
         }
-    }
-
-    private void setAmbient(int color) {
-        ambientColor = color;
-        int c = color & 0x00FFFFFF;
-        ambientGlow.setColors(new int[]{0x5C000000 | c, 0x26000000 | c, 0x00000000 | c});
     }
 
     private void hideHero() {
         if (!heroShown) return;
         heroShown = false;
         heroName.animate().alpha(0f).setDuration(160).start();
-        ambient.animate().alpha(0f).setDuration(300).start();
-    }
-
-    /** Blur (and dim) the background while the full app list is in use; restore it on the dock. */
-    private void setAllAppsMode(boolean on) {
-        if (allAppsMode == on) return;
-        allAppsMode = on;
-        wallpaperBlurView.animate().alpha(on ? 0.82f : 0f).setDuration(350).start();
-        allAppsScrim.animate().alpha(on ? 1f : 0f).setDuration(350).start();
     }
 
     private void hideGlass() {
@@ -391,8 +485,18 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     @Override
     public boolean onTileVerticalKey(int position, int keyCode) {
-        if (arrangingDock && position < COLUMNS) return true;
         int count = adapter.getItemCount();
+        if (arranging) {
+            int target = keyCode == KeyEvent.KEYCODE_DPAD_UP ? position - COLUMNS : position + COLUMNS;
+            if (target < 0) return true;
+            if (target >= count) {
+                int lastRowStart = ((count - 1) / COLUMNS) * COLUMNS;
+                if (position >= lastRowStart) return true;
+                target = count - 1;
+            }
+            moveGrabbed(position, target);
+            return true;
+        }
         int target;
         if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
             if (position < COLUMNS) return false;          // dock row: let focus move to the top bar
@@ -408,70 +512,81 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     @Override
     public boolean onTileHorizontalKey(int position, int keyCode) {
-        if (!arrangingDock || position >= Math.min(COLUMNS, adapter.getItemCount())) return false;
-        int direction = keyCode == KeyEvent.KEYCODE_DPAD_LEFT ? -1 : 1;
-        int target = position + direction;
-        int dockCount = Math.min(COLUMNS, adapter.getItemCount());
-        if (target < 0 || target >= dockCount) return true;
-        adapter.swapDockPositions(position, target);
-        String movedKey = adapter.keyAt(target);
-        grid.post(() -> focusTile(adapter.positionOf(movedKey)));
+        if (!arranging) return false;
+        int target = position + (keyCode == KeyEvent.KEYCODE_DPAD_LEFT ? -1 : 1);
+        if (target < 0 || target >= adapter.getItemCount()) return true;
+        moveGrabbed(position, target);
         return true;
     }
 
     @Override
-    public void onDockLongPressed(int position) {
-        if (position >= Math.min(COLUMNS, adapter.getItemCount())) return;
-        beginDockArrange(position);
-    }
-
-    private void beginDockArrange(int position) {
-        if (position < 0 || position >= Math.min(COLUMNS, adapter.getItemCount())) return;
-        if (!arrangingDock) {
-            arrangingDock = true;
-            dockOrderBeforeEdit = adapter.getDockOrder();
-            Toast.makeText(this, R.string.arrange_dock_help, Toast.LENGTH_LONG).show();
-        }
-        focusTile(position);
+    public void onTileLongPressed(int position) {
+        beginArrange(position);
     }
 
     @Override
-    public boolean onDockClick(int position) {
-        if (!arrangingDock) return false;
-        finishDockArrange(true);
+    public boolean onTileClick(int position) {
+        if (!arranging) return false;
+        finishArrange(true);
         return true;
     }
 
-    private void finishDockArrange(boolean save) {
-        if (!arrangingDock) return;
-        arrangingDock = false;
+    private void moveGrabbed(int from, int to) {
+        adapter.moveItem(from, to);
+        final String key = adapter.keyAt(to);
+        grid.post(() -> focusTile(adapter.positionOf(key)));
+    }
+
+    private void beginArrange(int position) {
+        if (arranging || adapter.getItemCount() == 0) return;
+        arranging = true;
+        arrangeBackup = adapter.orderSnapshot();
+        Toast.makeText(this, R.string.arrange_help, Toast.LENGTH_LONG).show();
+        hideHero();
+        updateGridPadding();
+        refreshChrome();
+        final int pos = Math.max(0, Math.min(position, adapter.getItemCount() - 1));
+        grid.scrollToPosition(pos);
+        grid.post(() -> focusTile(pos));
+    }
+
+    private void finishArrange(boolean save) {
+        if (!arranging) return;
+        arranging = false;
         if (save) {
-            adapter.saveDockOrder();
-            Toast.makeText(this, R.string.dock_order_saved, Toast.LENGTH_SHORT).show();
+            adapter.saveOrder();
+            Toast.makeText(this, R.string.order_saved, Toast.LENGTH_SHORT).show();
         } else {
-            adapter.setDockOrder(dockOrderBeforeEdit);
-            Toast.makeText(this, R.string.dock_order_cancelled, Toast.LENGTH_SHORT).show();
+            adapter.restoreOrder(arrangeBackup);
+            Toast.makeText(this, R.string.order_cancelled, Toast.LENGTH_SHORT).show();
         }
-        dockOrderBeforeEdit = null;
-        String focusKey = lastFocusedKey;
-        grid.post(() -> {
-            int position = adapter.positionOf(focusKey);
-            focusTile(position >= 0 ? position : lastFocused);
-        });
+        arrangeBackup = null;
+        int pos = adapter.positionOf(lastFocusedKey);
+        if (pos < 0) pos = Math.max(0, Math.min(lastFocused, adapter.getItemCount() - 1));
+        final int target = pos;
+        // Go back to the state that matches where the app ended up, without a flicker through the dock state.
+        allAppsMode = target >= COLUMNS;
+        alignNext = allAppsMode;
+        updateGridPadding();
+        refreshChrome();
+        grid.scrollToPosition(target);
+        grid.post(() -> focusTile(target));
     }
 
     private void showLauncherSettings() {
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.launcher_settings)
-                .setItems(R.array.launcher_settings_items, (dialog, which) -> {
-                    if (which == 0) chooseWallpaper();
-                    else if (which == 1) resetWallpaper();
-                    else if (which == 2) {
-                        if (adapter.getItemCount() == 0) return;
-                        beginDockArrange(Math.min(lastFocused, Math.min(COLUMNS, adapter.getItemCount()) - 1));
-                    } else open(new Intent(Settings.ACTION_SETTINGS));
-                })
-                .show();
+        View anchor = findViewById(R.id.btnSettings);
+        View panel = getLayoutInflater().inflate(R.layout.popup_inputs, root, false);
+        LinearLayout rows = panel.findViewById(R.id.rows);
+        int minWidth = (int) (220 * density);
+        final PopupWindow popup = newDropdown(panel, minWidth);
+        addInputRow(rows, popup, R.drawable.ic_wallpaper, getString(R.string.choose_wallpaper), -1, this::chooseWallpaper);
+        addInputRow(rows, popup, R.drawable.ic_reset, getString(R.string.reset_wallpaper), -1, this::resetWallpaper);
+        addInputRow(rows, popup, R.drawable.ic_arrange, getString(R.string.arrange_apps), -1,
+                () -> beginArrange(lastFocused));
+        addSeparator(rows);
+        addInputRow(rows, popup, R.drawable.ic_settings, getString(R.string.system_settings), -1,
+                () -> open(new Intent(Settings.ACTION_SETTINGS)));
+        showDropdown(popup, panel, anchor, minWidth, true);
     }
 
     private void chooseWallpaper() {
@@ -488,10 +603,16 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     private void resetWallpaper() {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(WALLPAPER_URI).apply();
+        clearWallpaperViews();
+    }
+
+    private void clearWallpaperViews() {
         wallpaperView.setImageDrawable(null);
         wallpaperView.setVisibility(View.GONE);
         wallpaperBlurView.setImageDrawable(null);
         wallpaperBlurView.setVisibility(View.GONE);
+        if (dockDecoration != null) dockDecoration.setBackdrop(null);
+        if (grid != null) grid.invalidate();
     }
 
     private void restoreWallpaper() {
@@ -517,21 +638,22 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             while (bounds.outWidth / sample > targetWidth * 2 || bounds.outHeight / sample > targetHeight * 2) sample *= 2;
             BitmapFactory.Options options = new BitmapFactory.Options();
             options.inSampleSize = sample;
-            options.inPreferredConfig = android.graphics.Bitmap.Config.RGB_565;
-            android.graphics.Bitmap bitmap;
+            options.inPreferredConfig = Bitmap.Config.RGB_565;
+            Bitmap bitmap;
             try (java.io.InputStream in = getContentResolver().openInputStream(uri)) {
                 bitmap = BitmapFactory.decodeStream(in, null, options);
             }
             if (bitmap == null) throw new IllegalArgumentException("Unable to decode wallpaper");
             wallpaperView.setImageBitmap(bitmap);
             wallpaperView.setVisibility(View.VISIBLE);
-            wallpaperBlurView.setImageBitmap(BlurUtil.blur(bitmap, 256, 8));
+            // One blurred copy serves the full-screen blur (app list) and the frosted dock band.
+            Bitmap blurred = BlurUtil.blur(bitmap, 256, 8);
+            wallpaperBlurView.setImageBitmap(blurred);
             wallpaperBlurView.setVisibility(View.VISIBLE);
+            if (dockDecoration != null) dockDecoration.setBackdrop(blurred);
+            if (grid != null) grid.invalidate();
         } catch (Exception e) {
-            wallpaperView.setImageDrawable(null);
-            wallpaperView.setVisibility(View.GONE);
-            wallpaperBlurView.setImageDrawable(null);
-            wallpaperBlurView.setVisibility(View.GONE);
+            clearWallpaperViews();
             Toast.makeText(this, R.string.wallpaper_failed, Toast.LENGTH_SHORT).show();
         }
     }
@@ -616,11 +738,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
         // Compact: as wide as the Inputs pill (a touch wider so "HDMI 1" fits), hanging right below it.
         int width = Math.max(anchor.getWidth(), (int) (150 * density));
-        final PopupWindow popup = new PopupWindow(panel, width, ViewGroup.LayoutParams.WRAP_CONTENT, true);
-        popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));   // needed for Back to dismiss
-        popup.setOutsideTouchable(true);
-        popup.setAnimationStyle(0);
-        popup.setElevation(0f);
+        final PopupWindow popup = newDropdown(panel, width);
 
         TvInputManager tim = (TvInputManager) getSystemService(TV_INPUT_SERVICE);
         boolean sawNonHdmi = false;
@@ -678,19 +796,34 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             return;
         }
 
-        // Fit the widest row: TVs that report a status on every port (Sony) would otherwise squeeze the names out.
-        panel.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
-        popup.setWidth(Math.max(width, panel.getMeasuredWidth()));
+        showDropdown(popup, panel, anchor, width, false);
+    }
 
-        // Drop in: fade and unfold from the top edge.
+    private PopupWindow newDropdown(View panel, int width) {
+        PopupWindow popup = new PopupWindow(panel, width, ViewGroup.LayoutParams.WRAP_CONTENT, true);
+        popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));   // needed for Back to dismiss
+        popup.setOutsideTouchable(true);
+        popup.setAnimationStyle(0);
+        popup.setElevation(0f);
+        return popup;
+    }
+
+    /** Fits the popup to its widest row, drops it in under the anchor (unfolding from the top) and focuses row one. */
+    private void showDropdown(PopupWindow popup, View panel, View anchor, int minWidth, boolean alignEnd) {
+        LinearLayout rows = panel.findViewById(R.id.rows);
+        panel.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
+        int width = Math.max(minWidth, panel.getMeasuredWidth());
+        popup.setWidth(width);
+
         panel.setAlpha(0f);
         panel.setPivotY(0f);
         panel.setScaleY(0.92f);
         panel.setTranslationY(-8 * density);
-        popup.showAsDropDown(anchor, 0, (int) (10 * density), Gravity.START);
+        int xOff = alignEnd ? anchor.getWidth() - width : 0;
+        popup.showAsDropDown(anchor, xOff, (int) (10 * density), Gravity.START);
         panel.animate().alpha(1f).scaleY(1f).translationY(0f).setDuration(220)
-                .setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f)).start();
-        rows.getChildAt(0).requestFocus();
+                .setInterpolator(new DecelerateInterpolator(1.6f)).start();
+        if (rows.getChildCount() > 0) rows.getChildAt(0).requestFocus();
     }
 
     private void addSeparator(LinearLayout rows) {

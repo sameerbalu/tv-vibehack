@@ -42,14 +42,15 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         void onTileFocused(int position, View card);
         boolean onTileVerticalKey(int position, int keyCode);
         boolean onTileHorizontalKey(int position, int keyCode);
-        void onDockLongPressed(int position);
-        boolean onDockClick(int position);
+        void onTileLongPressed(int position);
+        boolean onTileClick(int position);
     }
 
     static final class Entry {
         final String label;
         final ComponentName component;
         final String pkg;
+        final String key;
         final Drawable banner;
         final Drawable icon;
         int ambient;
@@ -58,6 +59,7 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
             this.label = label;
             this.component = component;
             this.pkg = component.getPackageName();
+            this.key = component.flattenToShortString();
             this.banner = banner;
             this.icon = icon;
         }
@@ -65,7 +67,8 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
 
     static final float FOCUS_SCALE = 1.10f;
     private static final String PREFS = "launcher_preferences";
-    private static final String DOCK_ORDER = "dock_order";
+    private static final String DOCK_ORDER = "dock_order";      // old: dock packages only
+    private static final String APP_ORDER = "app_order";        // new: every app, in order; the first dockSize are the dock
 
     private final Context ctx;
     private final TileListener listener;
@@ -73,13 +76,21 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
     private final List<String> favourites = new ArrayList<>();
     private final Set<String> hidden;
     private final List<Entry> items = new ArrayList<>();
+    /** Saved order of all apps (component keys), or null while the default order is in use. */
+    private List<String> order;
 
     AppAdapter(Context ctx, TileListener listener, int dockSize) {
         this.ctx = ctx;
         this.listener = listener;
         this.dockSize = dockSize;
         List<String> defaults = new ArrayList<>(Arrays.asList(ctx.getResources().getStringArray(R.array.dock_apps)));
-        String saved = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(DOCK_ORDER, null);
+        SharedPreferences prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        String savedAll = prefs.getString(APP_ORDER, null);
+        if (savedAll != null && !savedAll.trim().isEmpty()) {
+            order = new ArrayList<>();
+            for (String key : savedAll.split(";")) if (!key.trim().isEmpty()) order.add(key.trim());
+        }
+        String saved = prefs.getString(DOCK_ORDER, null);
         if (saved != null && !saved.trim().isEmpty()) {
             for (String pkg : saved.split(";")) {
                 if (!pkg.trim().isEmpty() && !favourites.contains(pkg.trim())) favourites.add(pkg.trim());
@@ -105,7 +116,17 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
             String label = String.valueOf(ri.loadLabel(pm));
             fresh.add(new Entry(label, new ComponentName(pkg, ri.activityInfo.name), banner, icon));
         }
+        final List<String> ord = order;
         Collections.sort(fresh, (a, b) -> {
+            if (ord != null) {
+                int ia = ord.indexOf(a.key), ib = ord.indexOf(b.key);
+                if (ia >= 0 || ib >= 0) {
+                    if (ia < 0) return 1;
+                    if (ib < 0) return -1;
+                    return Integer.compare(ia, ib);
+                }
+                return a.label.compareToIgnoreCase(b.label);
+            }
             int fa = favourites.indexOf(a.pkg), fb = favourites.indexOf(b.pkg);
             if (fa >= 0 || fb >= 0) {
                 if (fa < 0) return 1;
@@ -119,37 +140,41 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         notifyDataSetChanged();
     }
 
-    List<String> getDockOrder() {
-        return new ArrayList<>(favourites);
+    private List<String> currentKeys() {
+        List<String> keys = new ArrayList<>();
+        for (Entry e : items) keys.add(e.key);
+        return keys;
     }
 
-    void setDockOrder(List<String> order) {
-        favourites.clear();
-        for (String pkg : order) if (pkg != null && !pkg.isEmpty() && !favourites.contains(pkg)) favourites.add(pkg);
-        for (String pkg : ctx.getResources().getStringArray(R.array.dock_apps)) {
-            if (!favourites.contains(pkg)) favourites.add(pkg);
-        }
+    /** The current arrangement, to restore if the person cancels while arranging. */
+    List<String> orderSnapshot() {
+        return currentKeys();
+    }
+
+    void restoreOrder(List<String> snapshot) {
+        order = snapshot == null ? null : new ArrayList<>(snapshot);
         reload();
     }
 
-    void saveDockOrder() {
+    void saveOrder() {
+        order = currentKeys();
         StringBuilder serialized = new StringBuilder();
-        for (String pkg : favourites) {
+        for (String key : order) {
             if (serialized.length() > 0) serialized.append(';');
-            serialized.append(pkg);
+            serialized.append(key);
         }
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(DOCK_ORDER, serialized.toString()).apply();
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(APP_ORDER, serialized.toString()).apply();
     }
 
-    void swapDockPositions(int first, int second) {
-        if (first < 0 || second < 0 || first >= dockSize || second >= dockSize
-                || first >= items.size() || second >= items.size()) return;
-        String a = items.get(first).pkg;
-        String b = items.get(second).pkg;
-        int ai = favourites.indexOf(a), bi = favourites.indexOf(b);
-        if (ai < 0 || bi < 0) return;
-        Collections.swap(favourites, ai, bi);
-        reload();
+    /** Moves one app to any position; everything in between shifts by one. Positions below dockSize are the dock. */
+    void moveItem(int from, int to) {
+        if (from == to || from < 0 || to < 0 || from >= items.size() || to >= items.size()) return;
+        Entry e = items.remove(from);
+        items.add(to, e);
+        order = currentKeys();
+        notifyItemMoved(from, to);
+        // Rebind the range: tiles that crossed the dock boundary change how they look, and click targets move.
+        notifyItemRangeChanged(Math.min(from, to), Math.abs(from - to) + 1);
     }
 
     @NonNull
@@ -182,20 +207,14 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
             h.label.setVisibility(View.VISIBLE);
         }
         h.card.setOnClickListener(v -> {
-            if (position < dockSize && listener != null && listener.onDockClick(position)) return;
-            launch(e);
+            int p = h.getBindingAdapterPosition();
+            if (p == RecyclerView.NO_POSITION || p >= items.size()) return;
+            if (listener != null && listener.onTileClick(p)) return;
+            launch(items.get(p));
         });
         h.card.setOnLongClickListener(v -> {
-            if (position < dockSize && listener != null) {
-                listener.onDockLongPressed(position);
-                return true;
-            }
-            Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + e.pkg));
-            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            try {
-                ctx.startActivity(i);
-            } catch (ActivityNotFoundException ignored) {
-            }
+            int p = h.getBindingAdapterPosition();
+            if (p != RecyclerView.NO_POSITION && listener != null) listener.onTileLongPressed(p);
             return true;
         });
     }

@@ -31,4 +31,11 @@
     <string name="dock_order_cancelled">Dock changes cancelled</string>
     <string name="date_format">EEEE  d MMMM</string>
     <string name="dream_name">Clock</string>
+    <string name="choose_wallpaper">Choose wallpaper</string>
+    <string name="reset_wallpaper">Reset wallpaper</string>
+    <string name="arrange_apps">Arrange apps</string>
+    <string name="system_settings">System settings</string>
+    <string name="arrange_help">Arrange apps: move with the arrow keys, OK to place, BACK to cancel.</string>
+    <string name="order_saved">Layout saved</string>
+    <string name="order_cancelled">Changes cancelled</string>
 </resources>
