@@ -36,6 +36,14 @@
         android:importantForAccessibility="no" />
 
 
+    <!-- Ambient glow in the colour of the focused dock app (dock state only). -->
+    <View
+        android:id="@+id/ambient"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:alpha="0"
+        android:importantForAccessibility="no" />
+
     <!-- Full-screen grid: the dock row is parked at the bottom in code; the rest scrolls in from below. -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/grid"

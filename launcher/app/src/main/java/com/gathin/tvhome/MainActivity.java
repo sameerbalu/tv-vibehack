@@ -9,6 +9,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Rect;
+import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.ColorDrawable;
 import android.media.tv.TvContract;
 import android.media.tv.TvInputInfo;
@@ -82,6 +83,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private View allAppsScrim;
     private GlassView glass;
     private TextView heroName;
+    private View ambient;
+    private GradientDrawable ambientGlow;
+    private int ambientColor;
     private boolean heroShown;
     private TextView greeting;
     private TextView btnWifi;
@@ -149,11 +153,33 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         allAppsScrim = findViewById(R.id.allAppsScrim);
         glass = findViewById(R.id.glass);
         heroName = findViewById(R.id.heroName);
+        ambient = findViewById(R.id.ambient);
+        ambientGlow = new GradientDrawable();
+        ambientGlow.setGradientType(GradientDrawable.RADIAL_GRADIENT);
+        ambientGlow.setGradientCenter(0.32f, 0.42f);
+        ambient.setBackground(ambientGlow);
+        ambient.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) ->
+                ambientGlow.setGradientRadius((r - l) * 0.62f));
         greeting = findViewById(R.id.greeting);
         btnWifi = findViewById(R.id.btnWifi);
 
         grid = findViewById(R.id.grid);
         grid.setLayoutManager(new GridLayoutManager(this, COLUMNS) {
+            // The grid scrolls itself (scrollGridBy). RecyclerView's built-in "scroll the focused tile into
+            // view" works from the padding, which is deliberately huge here, and made the rows jump around.
+            @Override
+            public boolean requestChildRectangleOnScreen(@NonNull RecyclerView parent, @NonNull View child,
+                                                         @NonNull Rect rect, boolean immediate,
+                                                         boolean focusedChildVisible) {
+                return false;
+            }
+
+            @Override
+            public boolean requestChildRectangleOnScreen(@NonNull RecyclerView parent, @NonNull View child,
+                                                         @NonNull Rect rect, boolean immediate) {
+                return false;
+            }
+
             @Override
             protected void calculateExtraLayoutSpace(@NonNull RecyclerView.State state, @NonNull int[] extraLayoutSpace) {
                 // Keep the rows just above and below the screen laid out, so focus can jump to them at once.
@@ -237,6 +263,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         glass.setAlpha(0f);
         heroShown = false;
         heroName.setAlpha(0f);
+        ambient.animate().cancel();
+        ambient.setAlpha(0f);
         // Start in the dock state; focusing a tile in the app list switches to the blurred state again.
         allAppsMode = false;
         arranging = false;
@@ -456,6 +484,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             heroName.setY(y);
             heroName.setTranslationX(0f);
             heroName.animate().alpha(1f).setDuration(260).start();
+            setAmbient(adapter.ambientColorAt(position));
+            ambient.animate().alpha(1f).setDuration(600).start();
             heroShown = true;
         } else if (changed) {
             heroName.animate().alpha(0f).translationX(-12 * density).setDuration(120).withEndAction(() -> {
@@ -464,15 +494,35 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 heroName.setTranslationX(12 * density);
                 heroName.animate().alpha(1f).translationX(0f).setDuration(200).start();
             }).start();
+            final int color = adapter.ambientColorAt(position);
+            if (color != ambientColor) {
+                ambient.animate().alpha(0.35f).setDuration(200).withEndAction(() -> {
+                    setAmbient(color);
+                    ambient.animate().alpha(1f).setDuration(500).start();
+                }).start();
+            }
         } else {
             heroName.setY(y);
         }
+    }
+
+    /** Soft radial glow behind the dock, darker than the app's own colour so it stays easy on the eyes. */
+    private void setAmbient(int color) {
+        ambientColor = color;
+        int c = darken(color) & 0x00FFFFFF;
+        ambientGlow.setColors(new int[]{0x48000000 | c, 0x1C000000 | c, 0x00000000 | c});
+    }
+
+    private static int darken(int color) {
+        return Color.rgb((int) (Color.red(color) * 0.8f), (int) (Color.green(color) * 0.8f),
+                (int) (Color.blue(color) * 0.8f));
     }
 
     private void hideHero() {
         if (!heroShown) return;
         heroShown = false;
         heroName.animate().alpha(0f).setDuration(160).start();
+        ambient.animate().alpha(0f).setDuration(300).start();
     }
 
     private void hideGlass() {

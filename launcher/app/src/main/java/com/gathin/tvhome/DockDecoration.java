@@ -38,10 +38,10 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
         this.density = density;
         base.setColor(0xFF0C0C0E);
         image.setAlpha(209);                 // same 0.82 as the wallpaper view
-        dim.setColor(0x55000000);            // same dim as the wallpaper view
+        dim.setColor(0x73000000);            // a little darker than the wallpaper view, so the glass is not washed out
         edge.setStyle(Paint.Style.STROKE);
         edge.setStrokeWidth(1.2f * density);
-        edge.setColor(0x4DFFFFFF);
+        edge.setColor(0x33FFFFFF);
     }
 
     /** Blurred wallpaper (or null for none). Must be the same bitmap the full-screen blur uses. */
@@ -105,7 +105,7 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
             c.drawRoundRect(rect, radius, radius, dim);
         }
         // Frosted veil: brighter at the top edge, fading down.
-        sheen.setShader(new LinearGradient(0, rect.top, 0, rect.bottom, 0x40FFFFFF, 0x14FFFFFF, Shader.TileMode.CLAMP));
+        sheen.setShader(new LinearGradient(0, rect.top, 0, rect.bottom, 0x24FFFFFF, 0x0AFFFFFF, Shader.TileMode.CLAMP));
         c.drawRoundRect(rect, radius, radius, sheen);
         c.drawRoundRect(rect, radius, radius, edge);
     }
