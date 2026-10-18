@@ -276,6 +276,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         allAppsScrim.setAlpha(0f);
         header.setAlpha(1f);
         header.setVisibility(View.VISIBLE);
+        grid.animate().cancel();
+        grid.setAlpha(1f);
         updateGridPadding();
         clipRunnable.run();
         // Read these before reload(): rebinding can move focus to the first tile and overwrite them.
@@ -398,6 +400,27 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         grid.smoothScrollBy(0, dy, new DecelerateInterpolator(1.4f), duration);
     }
 
+    /**
+     * Coming back to the dock from the app list: jump instead of sliding, so the first row of apps never
+     * crosses the screen. The tiles fade in at their final place and the glass follows without a sweep.
+     */
+    private void snapToDock(int dy) {
+        grid.stopScroll();
+        grid.animate().cancel();
+        grid.setAlpha(0f);
+        grid.scrollBy(0, dy);
+        springX.cancel();
+        springY.cancel();
+        glass.setTranslationX(glassTargetX);
+        glass.setTranslationY(glassTargetY);
+        glass.animate().cancel();
+        glass.setAlpha(0f);
+        glass.animate().alpha(1f).setDuration(220).start();
+        grid.animate().alpha(1f).setDuration(220).start();
+        handler.removeCallbacks(clipRunnable);
+        clipRunnable.run();     // hide the rows below the dock right away
+    }
+
     /** Scrolls just enough so the whole tile, with its glass and name, is on screen. */
     private void ensureVisible(View item, int topMarginDp) {
         int topLimit = (int) (topMarginDp * density);
@@ -452,6 +475,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         }
 
         boolean entering = alignNext || (!allAppsMode && position >= COLUMNS);
+        boolean leavingAll = allAppsMode && position < COLUMNS;
         alignNext = false;
         allAppsMode = position >= COLUMNS;
         refreshChrome();
@@ -459,7 +483,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             // Dock: park it at the bottom of the screen and show the top shelf for this app.
             int decoratedTop = item.getTop() - (int) (6 * density);
             int dy = decoratedTop - grid.getPaddingTop();
-            scrollGridBy(dy);
+            if (leavingAll) snapToDock(dy);
+            else scrollGridBy(dy);
             showHero(position, r.top - dy);
         } else {
             hideHero();
@@ -633,10 +658,62 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         addInputRow(rows, popup, R.drawable.ic_reset, getString(R.string.reset_wallpaper), -1, this::resetWallpaper);
         addInputRow(rows, popup, R.drawable.ic_arrange, getString(R.string.arrange_apps), -1,
                 () -> beginArrange(lastFocused));
+        addInputRow(rows, popup, R.drawable.ic_hide, getString(R.string.hide_apps), -1, this::showHideApps);
         addSeparator(rows);
         addInputRow(rows, popup, R.drawable.ic_settings, getString(R.string.system_settings), -1,
                 () -> open(new Intent(Settings.ACTION_SETTINGS)));
         showDropdown(popup, panel, anchor, minWidth, true);
+    }
+
+    /** Scrollable list of every app; click one to hide it from (or show it on) the home screen. */
+    private void showHideApps() {
+        View anchor = findViewById(R.id.btnSettings);
+        View panel = getLayoutInflater().inflate(R.layout.popup_apps, root, false);
+        LinearLayout rows = panel.findViewById(R.id.rows);
+        View scroll = panel.findViewById(R.id.scroll);
+        int minWidth = (int) (320 * density);
+        final PopupWindow popup = newDropdown(panel, minWidth);
+        final boolean[] changed = {false};
+        for (AppAdapter.AppRef app : adapter.allApps()) {
+            final String pkg = app.pkg;
+            final View row = getLayoutInflater().inflate(R.layout.item_input, rows, false);
+            ImageView icon = row.findViewById(R.id.icon);
+            icon.setImageTintList(null);                       // keep the app's own colours
+            icon.setImageDrawable(app.icon);
+            ViewGroup.LayoutParams ilp = icon.getLayoutParams();
+            ilp.width = (int) (26 * density);
+            ilp.height = (int) (26 * density);
+            ((TextView) row.findViewById(R.id.title)).setText(app.label);
+            updateHideRow(row, adapter.isUserHidden(pkg));
+            row.setOnClickListener(v -> {
+                boolean nowHidden = !adapter.isUserHidden(pkg);
+                adapter.setUserHidden(pkg, nowHidden);
+                changed[0] = true;
+                updateHideRow(row, nowHidden);
+            });
+            rows.addView(row);
+        }
+        if (rows.getChildCount() == 0) {
+            Toast.makeText(this, R.string.not_available, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        // Tall lists scroll inside the popup instead of running off the screen.
+        rows.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
+        ViewGroup.LayoutParams slp = scroll.getLayoutParams();
+        slp.height = Math.min(rows.getMeasuredHeight(), (int) (root.getHeight() * 0.6f));
+        scroll.setLayoutParams(slp);
+        popup.setOnDismissListener(() -> {
+            if (changed[0]) adapter.reload();
+        });
+        showDropdown(popup, panel, anchor, minWidth, true);
+    }
+
+    private void updateHideRow(View row, boolean hidden) {
+        TextView status = row.findViewById(R.id.status);
+        status.setText(hidden ? R.string.app_hidden : R.string.app_shown);
+        row.findViewById(R.id.dot).setVisibility(hidden ? View.GONE : View.VISIBLE);
+        row.findViewById(R.id.title).setAlpha(hidden ? 0.45f : 1f);
+        row.findViewById(R.id.icon).setAlpha(hidden ? 0.45f : 1f);
     }
 
     private void chooseWallpaper() {

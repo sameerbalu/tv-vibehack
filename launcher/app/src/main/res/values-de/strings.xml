@@ -26,4 +26,8 @@
     <string name="arrange_help">Apps anordnen: mit den Pfeiltasten bewegen, OK zum Ablegen, ZURÜCK zum Abbrechen.</string>
     <string name="order_saved">Anordnung gespeichert</string>
     <string name="order_cancelled">Änderungen verworfen</string>
+    <string name="hide_apps">Apps ausblenden</string>
+    <string name="hide_apps_title">App antippen zum Aus- oder Einblenden</string>
+    <string name="app_shown">Sichtbar</string>
+    <string name="app_hidden">Ausgeblendet</string>
 </resources>

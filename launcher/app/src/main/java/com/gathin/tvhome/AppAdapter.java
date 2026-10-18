@@ -46,6 +46,19 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         boolean onTileClick(int position);
     }
 
+    /** An installed app as listed in the "Hide apps" menu. */
+    static final class AppRef {
+        final String label;
+        final String pkg;
+        final Drawable icon;
+
+        AppRef(String label, String pkg, Drawable icon) {
+            this.label = label;
+            this.pkg = pkg;
+            this.icon = icon;
+        }
+    }
+
     static final class Entry {
         final String label;
         final ComponentName component;
@@ -68,6 +81,7 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
     static final float FOCUS_SCALE = 1.10f;
     private static final String PREFS = "launcher_preferences";
     private static final String DOCK_ORDER = "dock_order";      // old: dock packages only
+    private static final String HIDDEN_APPS = "hidden_apps";    // packages the person chose to hide
     private static final String APP_ORDER = "app_order";        // new: every app, in order; the first dockSize are the dock
 
     private final Context ctx;
@@ -76,6 +90,7 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
     private final List<String> favourites = new ArrayList<>();
     private final Set<String> hidden;
     private final List<Entry> items = new ArrayList<>();
+    private final Set<String> userHidden = new HashSet<>();
     /** Saved order of all apps (component keys), or null while the default order is in use. */
     private List<String> order;
 
@@ -89,6 +104,10 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         if (savedAll != null && !savedAll.trim().isEmpty()) {
             order = new ArrayList<>();
             for (String key : savedAll.split(";")) if (!key.trim().isEmpty()) order.add(key.trim());
+        }
+        String hiddenSaved = prefs.getString(HIDDEN_APPS, null);
+        if (hiddenSaved != null) {
+            for (String pkg : hiddenSaved.split(";")) if (!pkg.trim().isEmpty()) userHidden.add(pkg.trim());
         }
         String saved = prefs.getString(DOCK_ORDER, null);
         if (saved != null && !saved.trim().isEmpty()) {
@@ -109,7 +128,7 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         for (ResolveInfo ri : found) {
             if (ri.activityInfo == null) continue;
             String pkg = ri.activityInfo.packageName;
-            if (pkg.equals(ctx.getPackageName()) || hidden.contains(pkg)) continue;
+            if (pkg.equals(ctx.getPackageName()) || hidden.contains(pkg) || userHidden.contains(pkg)) continue;
             Drawable banner = ri.activityInfo.loadBanner(pm);
             if (banner == null) banner = ri.activityInfo.applicationInfo.loadBanner(pm);
             Drawable icon = ri.loadIcon(pm);
@@ -138,6 +157,38 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         items.clear();
         items.addAll(fresh);
         notifyDataSetChanged();
+    }
+
+    /** Every launchable app, hidden or not (except the ones config.xml always hides), sorted by name. */
+    List<AppRef> allApps() {
+        PackageManager pm = ctx.getPackageManager();
+        Intent probe = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
+        List<AppRef> out = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (ResolveInfo ri : pm.queryIntentActivities(probe, 0)) {
+            if (ri.activityInfo == null) continue;
+            String pkg = ri.activityInfo.packageName;
+            if (pkg.equals(ctx.getPackageName()) || hidden.contains(pkg) || !seen.add(pkg)) continue;
+            out.add(new AppRef(String.valueOf(ri.loadLabel(pm)), pkg, ri.loadIcon(pm)));
+        }
+        Collections.sort(out, (a, b) -> a.label.compareToIgnoreCase(b.label));
+        return out;
+    }
+
+    boolean isUserHidden(String pkg) {
+        return userHidden.contains(pkg);
+    }
+
+    /** Remembers the choice; call reload() afterwards to apply it. */
+    void setUserHidden(String pkg, boolean hide) {
+        if (hide) userHidden.add(pkg);
+        else userHidden.remove(pkg);
+        StringBuilder serialized = new StringBuilder();
+        for (String p : userHidden) {
+            if (serialized.length() > 0) serialized.append(';');
+            serialized.append(p);
+        }
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(HIDDEN_APPS, serialized.toString()).apply();
     }
 
     private List<String> currentKeys() {

@@ -38,4 +38,8 @@
     <string name="arrange_help">Arrange apps: move with the arrow keys, OK to place, BACK to cancel.</string>
     <string name="order_saved">Layout saved</string>
     <string name="order_cancelled">Changes cancelled</string>
+    <string name="hide_apps">Hide apps</string>
+    <string name="hide_apps_title">Tap an app to hide or show it</string>
+    <string name="app_shown">Shown</string>
+    <string name="app_hidden">Hidden</string>
 </resources>
