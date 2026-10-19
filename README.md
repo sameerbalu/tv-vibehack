@@ -280,3 +280,14 @@ MIT, see [`LICENSE`](LICENSE). The Outfit typeface is under the SIL Open Font Li
 - Settings > Widgets: Now playing (Spotify), Date, Storage, Memory, Network. Shown on the right above the dock; cards that do not fit are left out.
 - Bluetooth tab also reads the connected speaker from the audio outputs (no permission needed).
 - Icon packs were removed.
+
+
+## v8 highlights
+
+- Spotify glow now drifts through the album's colours instead of sitting on one.
+- New widgets: Volume, Today, Uptime. Colour-coded bars (memory/storage turn amber then red as they fill).
+- Aurora screensaver with day progress and the Spotify song that is playing.
+- Bluetooth pill opens a device list (connected first), Settings pill is icon only.
+- Dock/app names take the colour of the focused app.
+- All apps: "All apps" caption, coloured icon tiles and a Discover row (what to watch -> Nuvio, trending songs -> Spotify).
+  Optional: put a free TMDB API key in `res/values/config.xml` (`tmdb_api_key`) for real TMDB trending.

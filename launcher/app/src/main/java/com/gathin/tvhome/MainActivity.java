@@ -23,6 +23,7 @@ import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
@@ -60,9 +61,12 @@ import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * tvOS style home with three states:
@@ -73,15 +77,20 @@ import java.util.List;
  *   <li>Arrange: every app, dock included, can be moved to any position.</li>
  * </ul>
  */
-public class MainActivity extends Activity implements AppAdapter.TileListener {
+public class MainActivity extends Activity implements AppAdapter.TileListener, DiscoverStrip.Listener {
 
     /** Tiles per row and dock slots (res/values/config.xml, columns). Set in onCreate. */
     static int COLUMNS = 4;
     private static final long MINUTE_MS = 60_000L;
     /** Where the glass panel starts (dp from the top) when the app list opens. Keeps the dock row off screen. */
     private static final int PANEL_TOP_DP = 28;
+    /** Panel start when the Discover row sits above it. */
+    private static final int PANEL_TOP_DISCOVER_DP = 168;
+    /** Room at the top of the panel for the "All apps" caption; tiles are clipped below it. */
+    private static final int PANEL_HEAD_DP = 30;
+    private static final long MUSIC_CYCLE_MS = 6500L;
     private static final int PANEL_BOTTOM_DP = 24;
-    private static final int ROW_INSET_DP = 14;          // first row of apps sits this far inside the panel
+    private static final int ROW_INSET_DP = 38;          // first row of apps sits this far inside the panel
     /** Top padding of the grid while arranging, so the dock row and the rows below are all visible. */
     private static final int ARRANGE_TOP_DP = 36;
     private String liveTvPkg;
@@ -110,6 +119,14 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private ValueAnimator ambientAnim;
     // Spotify: album colour while a song plays (0 = nothing playing)
     private int musicColor;
+    /** Colours of the song playing; the glow walks through them every few seconds. */
+    private int[] musicPalette;
+    private int musicIndex;
+    private String musicSongId = "";
+    private DiscoverStrip discover;
+    private TextView allAppsTitle;
+    private boolean discoverOn;
+    private int lastDockPos;
     private MediaSessionManager sessionManager;
     private final List<MediaController> watched = new ArrayList<>();
     private static boolean btPermissionAsked;
@@ -161,6 +178,17 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             updateMusicGlow();
         }
     };
+    /** While a song plays, move the glow to the next album colour. */
+    private final Runnable musicCycle = new Runnable() {
+        @Override
+        public void run() {
+            if (musicPalette == null || musicPalette.length < 2) return;
+            musicIndex = (musicIndex + 1) % musicPalette.length;
+            musicColor = musicPalette[musicIndex];
+            if (heroShown) animateAmbient(ambientFor(lastFocused), 3200);
+            handler.postDelayed(this, MUSIC_CYCLE_MS);
+        }
+    };
     private final Runnable minuteTick = new Runnable() {
         @Override
         public void run() {
@@ -181,7 +209,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 grid.setClipBounds(null);
             } else if (allUiApplied) {
                 // All apps: tiles scroll inside the glass panel.
-                grid.setClipBounds(new Rect(0, panelTopPx(), w, h - (int) (PANEL_BOTTOM_DP * density)));
+                grid.setClipBounds(new Rect(0, panelTopPx() + (int) (PANEL_HEAD_DP * density), w, h - (int) (PANEL_BOTTOM_DP * density)));
             } else if (overlayApplied) {
                 grid.setClipBounds(null);
             } else {
@@ -216,6 +244,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 ambientGlow.setGradientRadius((r - l) * 0.62f));
         greeting = findViewById(R.id.greeting);
         btnBluetooth = findViewById(R.id.btnBluetooth);
+        allAppsTitle = findViewById(R.id.allAppsTitle);
+        discover = findViewById(R.id.discover);
+        discover.setListener(this);
+        discover.setOnContentChanged(this::syncDiscover);
 
         grid = findViewById(R.id.grid);
         grid.setLayoutManager(new GridLayoutManager(this, COLUMNS) {
@@ -289,7 +321,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         View btnInputs = findViewById(R.id.btnInputs);
         View btnSettings = findViewById(R.id.btnSettings);
         btnInputs.setOnClickListener(v -> showInputs());
-        btnBluetooth.setOnClickListener(v -> openRemotesAndAccessories());
+        btnBluetooth.setOnClickListener(v -> showBluetooth());
+        btnSettings.setOnFocusChangeListener((v, f) -> v.animate().rotation(f ? 60f : 0f).setDuration(300).start());
         btnSettings.setOnClickListener(v -> showLauncherSettings());
 
         // Keep focus on the top bar at its ends and at the top: Android's focus finder would otherwise
@@ -307,6 +340,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         // Hide the glass when focus leaves the tiles.
         getWindow().getDecorView().getViewTreeObserver().addOnGlobalFocusChangeListener((oldF, newF) -> {
             boolean onTile = newF != null && newF.getId() == R.id.card;
+            if (DiscoverStrip.isCard(newF)) {
+                // Discover row: part of the all-apps screen. Coming from the dock this opens it.
+                hideGlass();
+                hideHero();
+                if (!allAppsMode && !arranging) enterAllApps();
+                return;
+            }
             if (!onTile) {
                 hideGlass();
                 if (allAppsMode) {
@@ -348,12 +388,21 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         grid.animate().cancel();
         grid.setAlpha(1f);
         grid.setTranslationY(0f);
+        discover.animate().cancel();
+        discover.setAlpha(0f);
+        discover.setVisibility(View.INVISIBLE);
+        allAppsTitle.animate().cancel();
+        allAppsTitle.setAlpha(0f);
+        allAppsTitle.setVisibility(View.INVISIBLE);
+        discover.load(false);
+        syncDiscover();
         updateGridPadding();
         clipRunnable.run();
         // Read these before reload(): rebinding can move focus to the first tile and overwrite them.
         final String returnKey = lastFocusedKey;
         final int returnSlot = lastFocused;
         adapter.reload();
+        allAppsTitle.setText(getString(R.string.all_apps) + "  \u00B7  " + Math.max(0, adapter.getItemCount() - COLUMNS));
         grid.scheduleLayoutAnimation();
         updateGreeting();
         updateBluetoothLabel();
@@ -484,12 +533,37 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private void setAllUiShown(boolean show) {
         allAppsPanel.animate().cancel();
         allAppsPanel.animate().alpha(show ? 1f : 0f).setDuration(show ? 350 : 200).start();
+        fadeExtra(allAppsTitle, show);
+        if (discoverOn && discover.hasItems()) fadeExtra(discover, show);
+    }
+
+    /** Fades a view of the all-apps screen in or out; hidden views also drop out of focus. */
+    private void fadeExtra(final View v, boolean show) {
+        v.animate().cancel();
+        if (show) {
+            v.setVisibility(View.VISIBLE);
+            v.animate().alpha(1f).setDuration(350).start();
+        } else {
+            v.animate().alpha(0f).setDuration(200).withEndAction(() -> {
+                if (!allUiApplied) v.setVisibility(View.INVISIBLE);
+            }).start();
+        }
+    }
+
+    /** Leaves room for the Discover row only while it has something to show (checked when the home screen is idle). */
+    private void syncDiscover() {
+        if (overlayApplied || arranging || discover == null) return;
+        boolean now = discover.hasItems();
+        if (now != discoverOn) {
+            discoverOn = now;
+            applyAllLayout();
+        }
     }
 
     // ---- all apps: glass panel ---------------------------------------------------------------------
 
     private int panelTopPx() {
-        return (int) (PANEL_TOP_DP * density);
+        return (int) ((discoverOn ? PANEL_TOP_DISCOVER_DP : PANEL_TOP_DP) * density);
     }
 
     /** Where the first row of apps sits when the list opens: just inside the glass panel. */
@@ -504,6 +578,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         if (lp.topMargin != top) {
             lp.topMargin = top;
             allAppsPanel.setLayoutParams(lp);
+        }
+        ViewGroup.MarginLayoutParams tl = (ViewGroup.MarginLayoutParams) allAppsTitle.getLayoutParams();
+        int titleTop = top + (int) (10 * density);
+        if (tl.topMargin != titleTop) {
+            tl.topMargin = titleTop;
+            allAppsTitle.setLayoutParams(tl);
         }
         updateGridPadding();
         if (overlayApplied) clipRunnable.run();
@@ -581,6 +661,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             DecelerateInterpolator rise = new DecelerateInterpolator(1.8f);
             grid.animate().alpha(1f).translationY(0f).setDuration(340).setInterpolator(rise)
                     .withEndAction(() -> snapActive = false).start();
+            glassShown = true;
             glass.animate().alpha(1f).translationY(glassTargetY).setDuration(340).setInterpolator(rise).start();
         }).start();
     }
@@ -602,7 +683,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             topLimit = (int) (12 * density);
             bottomLimit = grid.getHeight() - (int) (16 * density);
         } else {
-            topLimit = panelTopPx() + (int) (10 * density);
+            topLimit = panelTopPx() + (int) ((PANEL_HEAD_DP + 4) * density);
             bottomLimit = grid.getHeight() - (int) ((PANEL_BOTTOM_DP + 8) * density);
         }
         int dy = 0;
@@ -657,6 +738,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         glass.setColor(adapter.ambientColorAt(position), glassWasShown);   // cursor takes the app's colour
         Rect r = moveGlassTo(card, !leavingAll);      // leaving the list: snapToDock moves the glass itself
         View item = (View) card.getParent();
+        if (position < COLUMNS) lastDockPos = position;
+        View nameView = item.findViewById(R.id.name);
+        if (nameView instanceof TextView) {
+            ((TextView) nameView).setTextColor(AppAdapter.textTint(adapter.ambientColorAt(position)));
+        }
 
         if (arranging) {
             hideHero();
@@ -686,6 +772,61 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         }
     }
 
+    // ---- Discover row ------------------------------------------------------------------------------
+
+    @Override
+    public void onUp() {
+        focusTile(Math.min(lastDockPos, COLUMNS - 1));
+    }
+
+    @Override
+    public void onDown() {
+        if (adapter.getItemCount() > COLUMNS) focusTile(COLUMNS);
+    }
+
+    @Override
+    public void onOpen(DiscoverStrip.Item item) {
+        if (item.song) openSpotifySong(item);
+        else openNuvio();
+    }
+
+    private void openNuvio() {
+        PackageManager pm = getPackageManager();
+        Intent probe = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
+        for (ResolveInfo ri : pm.queryIntentActivities(probe, 0)) {
+            if (ri.activityInfo == null) continue;
+            String pkg = ri.activityInfo.packageName.toLowerCase();
+            String label = String.valueOf(ri.loadLabel(pm)).toLowerCase();
+            if (pkg.contains("nuvio") || label.contains("nuvio")) {
+                open(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER)
+                        .setComponent(new ComponentName(ri.activityInfo.packageName, ri.activityInfo.name)));
+                return;
+            }
+        }
+        Toast.makeText(this, R.string.nuvio_missing, Toast.LENGTH_SHORT).show();
+    }
+
+    private void openSpotifySong(DiscoverStrip.Item item) {
+        Intent search = new Intent(Intent.ACTION_VIEW,
+                Uri.parse("spotify:search:" + Uri.encode(item.title + " " + item.sub)));
+        search.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            startActivity(search);
+            return;
+        } catch (Exception ignored) {
+        }
+        PackageManager pm = getPackageManager();
+        Intent probe = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
+        for (ResolveInfo ri : pm.queryIntentActivities(probe, 0)) {
+            if (ri.activityInfo != null && ri.activityInfo.packageName.startsWith("com.spotify")) {
+                open(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER)
+                        .setComponent(new ComponentName(ri.activityInfo.packageName, ri.activityInfo.name)));
+                return;
+            }
+        }
+        Toast.makeText(this, R.string.spotify_missing, Toast.LENGTH_SHORT).show();
+    }
+
     // ---- top shelf -------------------------------------------------------------------------------
 
     private void showHero(int position, float dockTopInRoot) {
@@ -694,9 +835,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         String label = adapter.labelAt(position);
         float y = dockTopInRoot - 14 * density - 26 * density - heroName.getHeight();
         boolean changed = !label.contentEquals(heroName.getText());
+        final int tint = AppAdapter.textTint(adapter.ambientColorAt(position));
 
         if (!heroShown) {
             heroName.setText(label);
+            heroName.setTextColor(tint);
             heroName.setY(y);
             heroName.setTranslationX(0f);
             heroName.animate().alpha(1f).setDuration(260).start();
@@ -707,6 +850,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         } else if (changed) {
             heroName.animate().alpha(0f).translationX(-12 * density).setDuration(120).withEndAction(() -> {
                 heroName.setText(label);
+                heroName.setTextColor(tint);
                 heroName.setY(y);
                 heroName.setTranslationX(12 * density);
                 heroName.animate().alpha(1f).translationX(0f).setDuration(200).start();
@@ -714,6 +858,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             animateAmbient(ambientFor(position), 600);   // cross-fade to the next app's colour
         } else {
             heroName.setY(y);
+            heroName.setTextColor(tint);
         }
     }
 
@@ -783,8 +928,17 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         int target;
         if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
             if (position < COLUMNS) return false;          // dock row: let focus move to the top bar
+            if (position < 2 * COLUMNS && discoverOn && discover.hasItems()) {
+                discover.focusRemembered();                // first row of apps: up into the Discover row
+                return true;
+            }
             target = position - COLUMNS;
         } else {
+            if (position < COLUMNS && discoverOn && discover.hasItems() && count > COLUMNS) {
+                enterAllApps();                            // dock: down into the Discover row
+                discover.post(() -> discover.focusRemembered());
+                return true;
+            }
             int lastRowStart = ((count - 1) / COLUMNS) * COLUMNS;
             if (position >= lastRowStart) return true;     // already on the last row: stay put
             target = Math.min(position + COLUMNS, count - 1);
@@ -883,6 +1037,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 () -> beginArrange(lastFocused));
         addInputRow(rows, popup, R.drawable.ic_hide, getString(R.string.hide_apps), -1, this::showHideApps);
         addInputRow(rows, popup, R.drawable.ic_widgets, getString(R.string.widgets), -1, this::showWidgets);
+        addInputRow(rows, popup, R.drawable.ic_reset, getString(R.string.refresh_discover), -1,
+                () -> discover.load(true));
         if (!hasListenerAccess()) {
             addInputRow(rows, popup, R.drawable.ic_saver, getString(R.string.music_access), -1, this::openMusicAccess);
         }
@@ -1246,6 +1402,139 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         return null;
     }
 
+    private static final class BtDev {
+        final String name;
+        final String address;
+        boolean connected;
+
+        BtDev(String name, String address) {
+            this.name = name;
+            this.address = address;
+        }
+    }
+
+    /** Dropdown under the Bluetooth pill: connected devices first, then paired ones, then the settings page. */
+    private void showBluetooth() {
+        View anchor = btnBluetooth;
+        View panel = getLayoutInflater().inflate(R.layout.popup_apps, root, false);
+        panel.findViewById(R.id.title).setVisibility(View.GONE);
+        LinearLayout rows = panel.findViewById(R.id.rows);
+        int minWidth = (int) (260 * density);
+        final PopupWindow popup = newDropdown(panel, minWidth);
+        final BluetoothAdapter ba = BluetoothAdapter.getDefaultAdapter();
+        final Map<String, View> rowByAddress = new HashMap<>();
+
+        if (ba == null || !ba.isEnabled()) {
+            addBtRow(rows, popup, getString(R.string.bt_off), null, false, 0.6f);
+        } else {
+            List<BtDev> devices = new ArrayList<>();
+            try {
+                Map<String, Boolean> audio = connectedAudioNames();
+                for (BluetoothDevice dev : ba.getBondedDevices()) {
+                    String n = dev.getName();
+                    BtDev b = new BtDev(n == null || n.trim().isEmpty() ? dev.getAddress() : n.trim(), dev.getAddress());
+                    try {
+                        b.connected = Boolean.TRUE.equals(BluetoothDevice.class.getMethod("isConnected").invoke(dev));
+                    } catch (Exception ignored) {
+                    }
+                    if (!b.connected && audio.containsKey(b.name.toLowerCase())) b.connected = true;
+                    devices.add(b);
+                }
+            } catch (RuntimeException ignored) {
+            }
+            Collections.sort(devices, (a, b) -> {
+                if (a.connected != b.connected) return a.connected ? -1 : 1;
+                return a.name.compareToIgnoreCase(b.name);
+            });
+            for (BtDev b : devices) {
+                View row = addBtRow(rows, popup, b.name, b.connected ? getString(R.string.connected) : getString(R.string.bt_paired),
+                        b.connected, b.connected ? 1f : 0.65f);
+                rowByAddress.put(b.address, row);
+            }
+            if (devices.isEmpty()) addBtRow(rows, popup, getString(R.string.bt_none), null, false, 0.6f);
+            // Some devices (remotes, keyboards) only report "connected" through their Bluetooth profile.
+            final int[] profiles = {BluetoothProfile.A2DP, BluetoothProfile.HEADSET, 4 /* HID host */, BluetoothProfile.GATT};
+            final BluetoothProfile.ServiceListener listener = new BluetoothProfile.ServiceListener() {
+                @Override
+                public void onServiceConnected(int profile, BluetoothProfile proxy) {
+                    final List<String> found = new ArrayList<>();
+                    try {
+                        List<BluetoothDevice> list = proxy.getConnectedDevices();
+                        if (list != null) for (BluetoothDevice d : list) found.add(d.getAddress());
+                    } catch (RuntimeException ignored) {
+                    }
+                    try {
+                        ba.closeProfileProxy(profile, proxy);
+                    } catch (RuntimeException ignored) {
+                    }
+                    handler.post(() -> {
+                        if (!popup.isShowing()) return;
+                        for (String addr : found) {
+                            View row = rowByAddress.get(addr);
+                            if (row != null) markBtConnected(row);
+                        }
+                    });
+                }
+
+                @Override
+                public void onServiceDisconnected(int profile) {
+                }
+            };
+            for (int profile : profiles) {
+                try {
+                    ba.getProfileProxy(this, listener, profile);
+                } catch (RuntimeException ignored) {
+                }
+            }
+        }
+        addSeparator(rows);
+        addInputRow(rows, popup, R.drawable.ic_bluetooth, getString(R.string.bt_settings), -1, this::openRemotesAndAccessories);
+        fitScroll(panel);
+        showDropdown(popup, panel, anchor, minWidth, false);
+    }
+
+    private View addBtRow(LinearLayout rows, PopupWindow popup, String title, String status, boolean connected, float alpha) {
+        View row = getLayoutInflater().inflate(R.layout.item_input, rows, false);
+        ((ImageView) row.findViewById(R.id.icon)).setImageResource(R.drawable.ic_bluetooth);
+        ((TextView) row.findViewById(R.id.title)).setText(title);
+        TextView st = row.findViewById(R.id.status);
+        if (status == null) st.setVisibility(View.GONE);
+        else st.setText(status);
+        row.findViewById(R.id.dot).setVisibility(connected ? View.VISIBLE : View.GONE);
+        row.findViewById(R.id.title).setAlpha(alpha);
+        row.findViewById(R.id.icon).setAlpha(alpha);
+        row.setOnClickListener(v -> {
+            popup.dismiss();
+            openRemotesAndAccessories();
+        });
+        rows.addView(row);
+        return row;
+    }
+
+    private void markBtConnected(View row) {
+        ((TextView) row.findViewById(R.id.status)).setText(R.string.connected);
+        row.findViewById(R.id.dot).setVisibility(View.VISIBLE);
+        row.findViewById(R.id.title).setAlpha(1f);
+        row.findViewById(R.id.icon).setAlpha(1f);
+    }
+
+    /** Lower-case names of the Bluetooth audio outputs that are connected right now. */
+    private Map<String, Boolean> connectedAudioNames() {
+        Map<String, Boolean> names = new HashMap<>();
+        try {
+            AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            for (AudioDeviceInfo info : am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+                int t = info.getType();
+                if (t == 7 || t == 8 || t == 26 || t == 27) {
+                    CharSequence n = info.getProductName();
+                    if (n != null && n.toString().trim().length() > 0) names.put(n.toString().trim().toLowerCase(), true);
+                }
+            }
+        } catch (RuntimeException ignored) {
+        }
+        return names;
+    }
+
     /** Opens the TV's "Remotes & Accessories" page (the Bluetooth device list). */
     private void openRemotesAndAccessories() {
         Intent[] tries = {
@@ -1294,6 +1583,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     }
 
     private void stopMusicWatch() {
+        handler.removeCallbacks(musicCycle);
+        musicSongId = "";
+        musicPalette = null;
+        musicColor = 0;
         for (MediaController c : watched) c.unregisterCallback(mediaCallback);
         watched.clear();
         if (sessionManager != null) {
@@ -1318,53 +1611,50 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         updateMusicGlow();
     }
 
-    /** Picks the colour of the song playing in Spotify (album art, else a colour from the title) or clears it. */
+    /** While a Spotify song plays the glow walks through the album's colours; otherwise it follows the focused app. */
     private void updateMusicGlow() {
-        int color = 0;
         MediaMetadata meta = null;
+        boolean playing = false;
         for (MediaController c : watched) {
             PlaybackState st = c.getPlaybackState();
             if (st == null || st.getState() != PlaybackState.STATE_PLAYING) continue;
             meta = c.getMetadata();
-            color = songColor(meta);
+            playing = true;
             break;
         }
-        if (color != 0) {
+        boolean changed = false;
+        if (playing) {
+            String id = SongColors.idOf(meta);
+            int[] fresh = SongColors.palette(meta);
+            boolean sameSong = id.equals(musicSongId);
+            if (!sameSong || !Arrays.equals(fresh, musicPalette)) {
+                changed = true;
+                if (!sameSong) musicIndex = 0;
+                musicSongId = id;
+                musicPalette = fresh;
+                musicIndex = musicIndex % fresh.length;
+            }
+            int color = musicPalette[musicIndex];
+            if (color != musicColor) changed = true;
+            musicColor = color;
             String artist = meta == null ? null : meta.getString(MediaMetadata.METADATA_KEY_ARTIST);
             if (artist == null && meta != null) artist = meta.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST);
             widgets.setNowPlaying(meta == null ? null : meta.getString(MediaMetadata.METADATA_KEY_TITLE),
-                    artist, artOf(meta), color);
+                    artist, SongColors.artOf(meta), color);
+            if (changed) {
+                handler.removeCallbacks(musicCycle);
+                handler.postDelayed(musicCycle, MUSIC_CYCLE_MS);
+            }
         } else {
+            if (musicColor != 0) changed = true;
+            musicPalette = null;
+            musicColor = 0;
+            musicSongId = "";
+            handler.removeCallbacks(musicCycle);
             widgets.clearNowPlaying();
         }
         positionWidgets();
-        if (color == musicColor) return;
-        musicColor = color;
-        if (heroShown) animateAmbient(ambientFor(lastFocused), 1800);   // slow, soft fade between songs
-    }
-
-    private static Bitmap artOf(MediaMetadata m) {
-        if (m == null) return null;
-        Bitmap art = m.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART);
-        if (art == null) art = m.getBitmap(MediaMetadata.METADATA_KEY_ART);
-        if (art == null) art = m.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON);
-        return art;
-    }
-
-    private static int songColor(MediaMetadata m) {
-        if (m == null) return 0xFF1DB954;                     // Spotify green
-        Bitmap art = artOf(m);
-        if (art != null && art.getWidth() > 0 && art.getHeight() > 0) {
-            Bitmap small = Bitmap.createScaledBitmap(art, 12, 12, true);
-            int c = AppAdapter.vividColor(small);
-            if (small != art) small.recycle();
-            return c;
-        }
-        // No artwork offered: still change colour from song to song.
-        String id = String.valueOf(m.getString(MediaMetadata.METADATA_KEY_TITLE))
-                + m.getString(MediaMetadata.METADATA_KEY_ARTIST);
-        float[] hsv = {Math.abs(id.hashCode()) % 360, 0.75f, 0.85f};
-        return Color.HSVToColor(hsv);
+        if (changed && heroShown) animateAmbient(ambientFor(lastFocused), 1800);   // slow, soft fade
     }
 
     private void open(Intent i) {

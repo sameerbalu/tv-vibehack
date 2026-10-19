@@ -22,6 +22,10 @@
     <!-- The TV's Live TV / tuner app, offered at the end of the Inputs menu. Leave empty to omit. -->
     <string name="live_tv_package" translatable="false">com.mediatek.wwtv.tvcenter</string>
 
+    <!-- Optional: a free TMDB API key (themoviedb.org > Settings > API). With it the "What to watch" row shows
+         today's real TMDB trending list (the list Nuvio itself uses). Without it the row uses Cinemeta's popular list. -->
+    <string name="tmdb_api_key" translatable="false"></string>
+
     <!-- Tiles per row in the grid; the dock always has this many slots. -->
     <integer name="columns">4</integer>
 </resources>

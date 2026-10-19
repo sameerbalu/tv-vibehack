@@ -1,54 +1,34 @@
 package com.gathin.tvhome;
 
 import android.app.Activity;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.net.Uri;
 import android.os.Bundle;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
-import android.view.View;
 import android.view.WindowManager;
-import android.widget.ImageView;
 
-/** Screen saver preview: just the wallpaper with a large clock. Any key press or touch returns Home. */
+/** Screen saver preview (Settings > Screen saver): the same aurora and clock as the real screensaver. Any key returns Home. */
 public class ScreensaverActivity extends Activity {
+
+    private SaverController controller;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        setContentView(R.layout.screensaver);
-
-        ImageView wallpaper = findViewById(R.id.saverWallpaper);
-        try {
-            if (WallpaperStore.exists(this)) wallpaper.setImageBitmap(decode(WallpaperStore.uri(this)));
-        } catch (Exception ignored) {
-            // No readable wallpaper: the clock simply shows on black.
-        }
-        View clock = findViewById(R.id.saverClock);
-        clock.setAlpha(0f);
-        clock.animate().alpha(1f).setDuration(1200).start();
+        setContentView(R.layout.dream_clock);
+        controller = new SaverController(this, findViewById(android.R.id.content));
     }
 
-    private Bitmap decode(Uri uri) throws Exception {
-        int targetW = Math.max(1, getResources().getDisplayMetrics().widthPixels);
-        int targetH = Math.max(1, getResources().getDisplayMetrics().heightPixels);
-        BitmapFactory.Options bounds = new BitmapFactory.Options();
-        bounds.inJustDecodeBounds = true;
-        try (java.io.InputStream in = getContentResolver().openInputStream(uri)) {
-            BitmapFactory.decodeStream(in, null, bounds);
-        }
-        int sample = 1;
-        while (bounds.outWidth / sample > targetW * 2 || bounds.outHeight / sample > targetH * 2) sample *= 2;
-        BitmapFactory.Options options = new BitmapFactory.Options();
-        options.inSampleSize = sample;
-        options.inPreferredConfig = Bitmap.Config.RGB_565;
-        try (java.io.InputStream in = getContentResolver().openInputStream(uri)) {
-            Bitmap bitmap = BitmapFactory.decodeStream(in, null, options);
-            if (bitmap == null) throw new IllegalArgumentException("Unable to decode wallpaper");
-            return bitmap;
-        }
+    @Override
+    protected void onResume() {
+        super.onResume();
+        controller.start();
+    }
+
+    @Override
+    protected void onPause() {
+        controller.stop();
+        super.onPause();
     }
 
     @Override

@@ -71,6 +71,17 @@
     <string name="widget_storage">Storage</string>
     <string name="widget_memory">Memory</string>
     <string name="widget_network">Network</string>
+    <string name="widget_volume">Volume</string>
+    <string name="widget_day">Today</string>
+    <string name="widget_uptime">Uptime</string>
+    <string name="all_apps">All apps</string>
+    <string name="nuvio_missing">Nuvio is not installed on this TV</string>
+    <string name="spotify_missing">Spotify is not installed on this TV</string>
+    <string name="bt_off">Bluetooth is off</string>
+    <string name="bt_none">No paired devices</string>
+    <string name="bt_paired">Paired</string>
+    <string name="bt_settings">Bluetooth settings</string>
+    <string name="refresh_discover">Refresh trending</string>
     <string name="widget_on">On</string>
     <string name="widget_off">Off</string>
 </resources>

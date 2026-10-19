@@ -13,6 +13,7 @@ import android.graphics.Color;
 import android.graphics.Outline;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.provider.Settings;
 import android.view.KeyEvent;
@@ -263,6 +264,16 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         h.card.setScaleX(focused ? FOCUS_SCALE : 1f);
         h.card.setScaleY(focused ? FOCUS_SCALE : 1f);
         applyVisual(h.banner, h.icon, h.label, e);
+        if (e.packIcon == null && e.banner == null) {
+            // Icon-only tile: a gradient in the app's own colour instead of flat grey.
+            int c = ambientColorAt(position);
+            GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                    new int[]{mixBlack(c, 0.55f), mixBlack(c, 0.82f)});
+            g.setCornerRadius(16f * ctx.getResources().getDisplayMetrics().density);
+            h.card.setBackground(g);
+        } else {
+            h.card.setBackground(h.defaultBg);
+        }
         h.card.setOnClickListener(v -> {
             int p = h.getBindingAdapterPosition();
             if (p == RecyclerView.NO_POSITION || p >= items.size()) return;
@@ -374,6 +385,21 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         return e.ambient;
     }
 
+    /** The colour darkened towards black by this share (0 = unchanged, 1 = black). */
+    static int mixBlack(int color, float share) {
+        float k = 1f - share;
+        return Color.rgb((int) (Color.red(color) * k), (int) (Color.green(color) * k), (int) (Color.blue(color) * k));
+    }
+
+    /** A light, readable version of an app colour for text on dark backgrounds. */
+    static int textTint(int color) {
+        float[] hsv = new float[3];
+        Color.colorToHSV(color, hsv);
+        hsv[1] = Math.min(hsv[1], 0.55f);
+        hsv[2] = 1f;
+        return Color.HSVToColor(hsv);
+    }
+
     private static int vividColor(Drawable live) {
         if (live == null) return 0xFF444444;
         Drawable d = live.getConstantState() != null ? live.getConstantState().newDrawable().mutate() : live;
@@ -427,6 +453,7 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         final ImageView icon;
         final TextView label;
         final TextView name;
+        final Drawable defaultBg;
 
         Holder(View v, TileListener listener) {
             super(v);
@@ -435,6 +462,7 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
             icon = v.findViewById(R.id.icon);
             label = v.findViewById(R.id.label);
             name = v.findViewById(R.id.name);
+            defaultBg = card.getBackground();
             final float density = v.getResources().getDisplayMetrics().density;
             final float radius = density * 16f;
             card.setOutlineProvider(new ViewOutlineProvider() {
