@@ -291,3 +291,9 @@ MIT, see [`LICENSE`](LICENSE). The Outfit typeface is under the SIL Open Font Li
 - Dock/app names take the colour of the focused app.
 - All apps: "All apps" caption, coloured icon tiles and a Discover row (what to watch -> Nuvio, trending songs -> Spotify).
   Optional: put a free TMDB API key in `res/values/config.xml` (`tmdb_api_key`) for real TMDB trending.
+
+## v9 notes
+
+- Removed the "What to watch" / "Trending songs" row and the "All apps" caption; Settings > Refresh trending is gone too.
+- Widgets are plain dark glass again; only their titles carry colour.
+- Screensaver: your wallpaper is the background (the aurora if none is set); the clock is red and white and stays in the top-left corner.

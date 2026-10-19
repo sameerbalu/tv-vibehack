@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Screensaver (ClockDream and the preview): aurora background, a clock block that drifts around,
-     day progress and the Spotify song that is playing. -->
+<!-- Screensaver (ClockDream and the preview): your wallpaper as the background (the aurora if none is set),
+     a red and white clock fixed in the top-left corner, day progress and the Spotify song that is playing. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -11,10 +11,27 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <ImageView
+        android:id="@+id/saverWallpaper"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:visibility="gone"
+        android:contentDescription="@null" />
+
+    <View
+        android:id="@+id/saverScrim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/saver_scrim" />
+
     <LinearLayout
         android:id="@+id/saverContent"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_marginStart="52dp"
+        android:layout_marginTop="36dp"
         android:orientation="vertical"
         android:padding="12dp">
 
@@ -23,7 +40,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="6dp"
-            android:textColor="#99FFFFFF"
+            android:textColor="#FFFF3B3B"
             android:textSize="14sp"
             android:fontFamily="@font/outfit"
             android:fontVariationSettings="'wght' 500"
@@ -39,12 +56,24 @@
             <TextClock
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:format12Hour="h:mm"
-                android:format24Hour="HH:mm"
-                android:textColor="#F2FFFFFF"
-                android:textSize="128sp"
+                android:format12Hour="h:"
+                android:format24Hour="HH:"
+                android:textColor="#FFFFFFFF"
+                android:textSize="120sp"
                 android:fontFamily="@font/outfit"
-                android:fontVariationSettings="'wght' 200"
+                android:fontVariationSettings="'wght' 300"
+                android:letterSpacing="-0.04"
+                android:includeFontPadding="false" />
+
+            <TextClock
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:format12Hour="mm"
+                android:format24Hour="mm"
+                android:textColor="#FFFF3B3B"
+                android:textSize="120sp"
+                android:fontFamily="@font/outfit"
+                android:fontVariationSettings="'wght' 300"
                 android:letterSpacing="-0.04"
                 android:includeFontPadding="false" />
 
@@ -54,10 +83,10 @@
                 android:layout_marginStart="10dp"
                 android:format12Hour="a"
                 android:format24Hour=""
-                android:textColor="#B3FFFFFF"
+                android:textColor="#FFFF3B3B"
                 android:textSize="24sp"
                 android:fontFamily="@font/outfit"
-                android:fontVariationSettings="'wght' 500"
+                android:fontVariationSettings="'wght' 600"
                 android:letterSpacing="0.08"
                 android:textAllCaps="true" />
         </LinearLayout>
@@ -69,7 +98,7 @@
             android:layout_marginTop="2dp"
             android:format12Hour="EEEE  d MMMM"
             android:format24Hour="EEEE  d MMMM"
-            android:textColor="#CCFFFFFF"
+            android:textColor="#FFFFFFFF"
             android:textSize="20sp"
             android:fontFamily="@font/outfit"
             android:fontVariationSettings="'wght' 400"
@@ -128,7 +157,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Now playing on Spotify"
-                    android:textColor="#FF1DB954"
+                    android:textColor="#FFFF3B3B"
                     android:textSize="10sp"
                     android:fontFamily="@font/outfit"
                     android:letterSpacing="0.18"

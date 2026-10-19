@@ -77,20 +77,16 @@ import java.util.Map;
  *   <li>Arrange: every app, dock included, can be moved to any position.</li>
  * </ul>
  */
-public class MainActivity extends Activity implements AppAdapter.TileListener, DiscoverStrip.Listener {
+public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     /** Tiles per row and dock slots (res/values/config.xml, columns). Set in onCreate. */
     static int COLUMNS = 4;
     private static final long MINUTE_MS = 60_000L;
     /** Where the glass panel starts (dp from the top) when the app list opens. Keeps the dock row off screen. */
     private static final int PANEL_TOP_DP = 28;
-    /** Panel start when the Discover row sits above it. */
-    private static final int PANEL_TOP_DISCOVER_DP = 168;
-    /** Room at the top of the panel for the "All apps" caption; tiles are clipped below it. */
-    private static final int PANEL_HEAD_DP = 30;
     private static final long MUSIC_CYCLE_MS = 6500L;
     private static final int PANEL_BOTTOM_DP = 24;
-    private static final int ROW_INSET_DP = 38;          // first row of apps sits this far inside the panel
+    private static final int ROW_INSET_DP = 14;          // first row of apps sits this far inside the panel
     /** Top padding of the grid while arranging, so the dock row and the rows below are all visible. */
     private static final int ARRANGE_TOP_DP = 36;
     private String liveTvPkg;
@@ -123,10 +119,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, D
     private int[] musicPalette;
     private int musicIndex;
     private String musicSongId = "";
-    private DiscoverStrip discover;
-    private TextView allAppsTitle;
-    private boolean discoverOn;
-    private int lastDockPos;
     private MediaSessionManager sessionManager;
     private final List<MediaController> watched = new ArrayList<>();
     private static boolean btPermissionAsked;
@@ -209,7 +201,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, D
                 grid.setClipBounds(null);
             } else if (allUiApplied) {
                 // All apps: tiles scroll inside the glass panel.
-                grid.setClipBounds(new Rect(0, panelTopPx() + (int) (PANEL_HEAD_DP * density), w, h - (int) (PANEL_BOTTOM_DP * density)));
+                grid.setClipBounds(new Rect(0, panelTopPx(), w, h - (int) (PANEL_BOTTOM_DP * density)));
             } else if (overlayApplied) {
                 grid.setClipBounds(null);
             } else {
@@ -244,10 +236,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, D
                 ambientGlow.setGradientRadius((r - l) * 0.62f));
         greeting = findViewById(R.id.greeting);
         btnBluetooth = findViewById(R.id.btnBluetooth);
-        allAppsTitle = findViewById(R.id.allAppsTitle);
-        discover = findViewById(R.id.discover);
-        discover.setListener(this);
-        discover.setOnContentChanged(this::syncDiscover);
 
         grid = findViewById(R.id.grid);
         grid.setLayoutManager(new GridLayoutManager(this, COLUMNS) {
@@ -340,13 +328,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, D
         // Hide the glass when focus leaves the tiles.
         getWindow().getDecorView().getViewTreeObserver().addOnGlobalFocusChangeListener((oldF, newF) -> {
             boolean onTile = newF != null && newF.getId() == R.id.card;
-            if (DiscoverStrip.isCard(newF)) {
-                // Discover row: part of the all-apps screen. Coming from the dock this opens it.
-                hideGlass();
-                hideHero();
-                if (!allAppsMode && !arranging) enterAllApps();
-                return;
-            }
             if (!onTile) {
                 hideGlass();
                 if (allAppsMode) {
@@ -388,21 +369,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, D
         grid.animate().cancel();
         grid.setAlpha(1f);
         grid.setTranslationY(0f);
-        discover.animate().cancel();
-        discover.setAlpha(0f);
-        discover.setVisibility(View.INVISIBLE);
-        allAppsTitle.animate().cancel();
-        allAppsTitle.setAlpha(0f);
-        allAppsTitle.setVisibility(View.INVISIBLE);
-        discover.load(false);
-        syncDiscover();
         updateGridPadding();
         clipRunnable.run();
         // Read these before reload(): rebinding can move focus to the first tile and overwrite them.
         final String returnKey = lastFocusedKey;
         final int returnSlot = lastFocused;
         adapter.reload();
-        allAppsTitle.setText(getString(R.string.all_apps) + "  \u00B7  " + Math.max(0, adapter.getItemCount() - COLUMNS));
         grid.scheduleLayoutAnimation();
         updateGreeting();
         updateBluetoothLabel();
@@ -533,37 +505,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, D
     private void setAllUiShown(boolean show) {
         allAppsPanel.animate().cancel();
         allAppsPanel.animate().alpha(show ? 1f : 0f).setDuration(show ? 350 : 200).start();
-        fadeExtra(allAppsTitle, show);
-        if (discoverOn && discover.hasItems()) fadeExtra(discover, show);
-    }
-
-    /** Fades a view of the all-apps screen in or out; hidden views also drop out of focus. */
-    private void fadeExtra(final View v, boolean show) {
-        v.animate().cancel();
-        if (show) {
-            v.setVisibility(View.VISIBLE);
-            v.animate().alpha(1f).setDuration(350).start();
-        } else {
-            v.animate().alpha(0f).setDuration(200).withEndAction(() -> {
-                if (!allUiApplied) v.setVisibility(View.INVISIBLE);
-            }).start();
-        }
-    }
-
-    /** Leaves room for the Discover row only while it has something to show (checked when the home screen is idle). */
-    private void syncDiscover() {
-        if (overlayApplied || arranging || discover == null) return;
-        boolean now = discover.hasItems();
-        if (now != discoverOn) {
-            discoverOn = now;
-            applyAllLayout();
-        }
     }
 
     // ---- all apps: glass panel ---------------------------------------------------------------------
 
     private int panelTopPx() {
-        return (int) ((discoverOn ? PANEL_TOP_DISCOVER_DP : PANEL_TOP_DP) * density);
+        return (int) (PANEL_TOP_DP * density);
     }
 
     /** Where the first row of apps sits when the list opens: just inside the glass panel. */
@@ -578,12 +525,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, D
         if (lp.topMargin != top) {
             lp.topMargin = top;
             allAppsPanel.setLayoutParams(lp);
-        }
-        ViewGroup.MarginLayoutParams tl = (ViewGroup.MarginLayoutParams) allAppsTitle.getLayoutParams();
-        int titleTop = top + (int) (10 * density);
-        if (tl.topMargin != titleTop) {
-            tl.topMargin = titleTop;
-            allAppsTitle.setLayoutParams(tl);
         }
         updateGridPadding();
         if (overlayApplied) clipRunnable.run();
@@ -683,7 +624,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, D
             topLimit = (int) (12 * density);
             bottomLimit = grid.getHeight() - (int) (16 * density);
         } else {
-            topLimit = panelTopPx() + (int) ((PANEL_HEAD_DP + 4) * density);
+            topLimit = panelTopPx() + (int) (10 * density);
             bottomLimit = grid.getHeight() - (int) ((PANEL_BOTTOM_DP + 8) * density);
         }
         int dy = 0;
@@ -738,7 +679,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, D
         glass.setColor(adapter.ambientColorAt(position), glassWasShown);   // cursor takes the app's colour
         Rect r = moveGlassTo(card, !leavingAll);      // leaving the list: snapToDock moves the glass itself
         View item = (View) card.getParent();
-        if (position < COLUMNS) lastDockPos = position;
         View nameView = item.findViewById(R.id.name);
         if (nameView instanceof TextView) {
             ((TextView) nameView).setTextColor(AppAdapter.textTint(adapter.ambientColorAt(position)));
@@ -770,61 +710,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, D
                 ensureVisible(item);
             }
         }
-    }
-
-    // ---- Discover row ------------------------------------------------------------------------------
-
-    @Override
-    public void onUp() {
-        focusTile(Math.min(lastDockPos, COLUMNS - 1));
-    }
-
-    @Override
-    public void onDown() {
-        if (adapter.getItemCount() > COLUMNS) focusTile(COLUMNS);
-    }
-
-    @Override
-    public void onOpen(DiscoverStrip.Item item) {
-        if (item.song) openSpotifySong(item);
-        else openNuvio();
-    }
-
-    private void openNuvio() {
-        PackageManager pm = getPackageManager();
-        Intent probe = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
-        for (ResolveInfo ri : pm.queryIntentActivities(probe, 0)) {
-            if (ri.activityInfo == null) continue;
-            String pkg = ri.activityInfo.packageName.toLowerCase();
-            String label = String.valueOf(ri.loadLabel(pm)).toLowerCase();
-            if (pkg.contains("nuvio") || label.contains("nuvio")) {
-                open(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER)
-                        .setComponent(new ComponentName(ri.activityInfo.packageName, ri.activityInfo.name)));
-                return;
-            }
-        }
-        Toast.makeText(this, R.string.nuvio_missing, Toast.LENGTH_SHORT).show();
-    }
-
-    private void openSpotifySong(DiscoverStrip.Item item) {
-        Intent search = new Intent(Intent.ACTION_VIEW,
-                Uri.parse("spotify:search:" + Uri.encode(item.title + " " + item.sub)));
-        search.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        try {
-            startActivity(search);
-            return;
-        } catch (Exception ignored) {
-        }
-        PackageManager pm = getPackageManager();
-        Intent probe = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
-        for (ResolveInfo ri : pm.queryIntentActivities(probe, 0)) {
-            if (ri.activityInfo != null && ri.activityInfo.packageName.startsWith("com.spotify")) {
-                open(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER)
-                        .setComponent(new ComponentName(ri.activityInfo.packageName, ri.activityInfo.name)));
-                return;
-            }
-        }
-        Toast.makeText(this, R.string.spotify_missing, Toast.LENGTH_SHORT).show();
     }
 
     // ---- top shelf -------------------------------------------------------------------------------
@@ -928,17 +813,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, D
         int target;
         if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
             if (position < COLUMNS) return false;          // dock row: let focus move to the top bar
-            if (position < 2 * COLUMNS && discoverOn && discover.hasItems()) {
-                discover.focusRemembered();                // first row of apps: up into the Discover row
-                return true;
-            }
             target = position - COLUMNS;
         } else {
-            if (position < COLUMNS && discoverOn && discover.hasItems() && count > COLUMNS) {
-                enterAllApps();                            // dock: down into the Discover row
-                discover.post(() -> discover.focusRemembered());
-                return true;
-            }
             int lastRowStart = ((count - 1) / COLUMNS) * COLUMNS;
             if (position >= lastRowStart) return true;     // already on the last row: stay put
             target = Math.min(position + COLUMNS, count - 1);
@@ -1037,8 +913,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, D
                 () -> beginArrange(lastFocused));
         addInputRow(rows, popup, R.drawable.ic_hide, getString(R.string.hide_apps), -1, this::showHideApps);
         addInputRow(rows, popup, R.drawable.ic_widgets, getString(R.string.widgets), -1, this::showWidgets);
-        addInputRow(rows, popup, R.drawable.ic_reset, getString(R.string.refresh_discover), -1,
-                () -> discover.load(true));
         if (!hasListenerAccess()) {
             addInputRow(rows, popup, R.drawable.ic_saver, getString(R.string.music_access), -1, this::openMusicAccess);
         }

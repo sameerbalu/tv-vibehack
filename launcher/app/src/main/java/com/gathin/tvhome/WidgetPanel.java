@@ -207,7 +207,6 @@ public class WidgetPanel extends LinearLayout {
         } catch (Exception ignored) {
         }
         netValue.setText(type);
-        netValue.setTextColor(online ? 0xFF4ADE80 : 0xFFF87171);
         netSub.setText(sub);
 
         Calendar cal = Calendar.getInstance();
@@ -303,14 +302,14 @@ public class WidgetPanel extends LinearLayout {
         return card(horizontal, 0xFF6B7280);
     }
 
-    /** Glass card with a faint wash of the widget's own colour on the left. */
+    /** Plain dark glass card; each widget's colour only appears in its title. */
     private LinearLayout card(boolean horizontal, int tint) {
         LinearLayout l = new LinearLayout(getContext());
         l.setOrientation(horizontal ? HORIZONTAL : VERTICAL);
         l.setGravity(Gravity.CENTER_VERTICAL);
         l.setPadding((int) (12 * d), (int) (6 * d), (int) (12 * d), (int) (6 * d));
-        GradientDrawable bg = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[]{0x4D000000 | (tint & 0x00FFFFFF), 0x99101216, 0x99101216});
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0x99101216);
         bg.setCornerRadius(16 * d);
         bg.setStroke(Math.max(1, (int) d), 0x2EFFFFFF);
         l.setBackground(bg);
@@ -372,7 +371,7 @@ public class WidgetPanel extends LinearLayout {
 
     private void buildCalendar() {
         LinearLayout c = card(true, 0xFFFF6B5E);
-        calDay = text(34, 0xFFFF7A6B, false);
+        calDay = text(34, Color.WHITE, false);
         calDay.setSingleLine(true);
         LayoutParams dl = new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         dl.setMarginEnd((int) (14 * d));

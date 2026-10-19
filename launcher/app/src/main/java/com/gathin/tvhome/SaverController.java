@@ -3,6 +3,7 @@ package com.gathin.tvhome;
 import android.content.ComponentName;
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Outline;
 import android.media.MediaMetadata;
 import android.media.session.MediaController;
@@ -15,26 +16,25 @@ import android.view.ViewOutlineProvider;
 import android.widget.ImageView;
 import android.widget.TextView;
 
+import java.io.InputStream;
 import java.util.Calendar;
 import java.util.List;
 import java.util.Locale;
-import java.util.Random;
 
 /**
  * Drives the screensaver layout (dream_clock.xml) for both the real screensaver and the preview:
- * the aurora background, the clock block that drifts to a new spot every minute (no burn-in),
- * a greeting, how much of the day has passed, and the Spotify song that is playing (its colours
- * then flow through the aurora).
+ * the user's wallpaper as background (the aurora when none is set), the clock fixed in the top-left
+ * corner, a greeting, how much of the day has passed, and the Spotify song that is playing.
  */
 final class SaverController {
 
-    private static final long DRIFT_MS = 60_000L;
     private static final long INFO_MS = 4_000L;
 
     private final Context ctx;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private final Random random = new Random();
     private final AuroraView aurora;
+    private final ImageView wallpaper;
+    private Bitmap wallpaperBitmap;
     private final View content;
     private final TextView greeting, dayLabel, nowTitle, nowArtist;
     private final ColorBar dayBar;
@@ -42,17 +42,6 @@ final class SaverController {
     private final ImageView nowArt;
     private String songId = "";
     private boolean running;
-
-    private final Runnable drift = new Runnable() {
-        @Override
-        public void run() {
-            content.animate().alpha(0f).setDuration(900).withEndAction(() -> {
-                place();
-                content.animate().alpha(1f).setDuration(1400).start();
-            }).start();
-            handler.postDelayed(this, DRIFT_MS);
-        }
-    };
 
     private final Runnable info = new Runnable() {
         @Override
@@ -65,6 +54,7 @@ final class SaverController {
     SaverController(Context ctx, View root) {
         this.ctx = ctx;
         aurora = root.findViewById(R.id.saverAurora);
+        wallpaper = root.findViewById(R.id.saverWallpaper);
         content = root.findViewById(R.id.saverContent);
         greeting = root.findViewById(R.id.saverGreeting);
         dayLabel = root.findViewById(R.id.saverDayLabel);
@@ -85,14 +75,10 @@ final class SaverController {
 
     void start() {
         running = true;
+        loadBackground();
         content.setAlpha(0f);
-        content.post(() -> {
-            if (!running) return;
-            place();
-            content.animate().alpha(1f).setDuration(1500).start();
-        });
+        content.animate().alpha(1f).setDuration(1500).start();
         updateInfo();
-        handler.postDelayed(drift, DRIFT_MS);
         handler.postDelayed(info, INFO_MS);
     }
 
@@ -100,15 +86,44 @@ final class SaverController {
         running = false;
         handler.removeCallbacksAndMessages(null);
         content.animate().cancel();
+        wallpaper.setImageDrawable(null);          // give the picture's memory back
+        if (wallpaperBitmap != null) {
+            wallpaperBitmap.recycle();
+            wallpaperBitmap = null;
+        }
     }
 
-    /** A random spot that keeps the whole block on screen. */
-    private void place() {
-        View parent = (View) content.getParent();
-        int maxX = Math.max(0, parent.getWidth() - content.getWidth());
-        int maxY = Math.max(0, parent.getHeight() - content.getHeight());
-        content.setX(maxX * (0.08f + 0.84f * random.nextFloat()));
-        content.setY(maxY * (0.08f + 0.84f * random.nextFloat()));
+    /** Shows the wallpaper chosen in Settings; without one the aurora is the background. */
+    private void loadBackground() {
+        Bitmap bmp = null;
+        try {
+            if (WallpaperStore.exists(ctx)) bmp = decodeWallpaper();
+        } catch (Exception | OutOfMemoryError ignored) {
+        }
+        if (bmp != null) {
+            wallpaperBitmap = bmp;
+            wallpaper.setImageBitmap(bmp);
+            wallpaper.setVisibility(View.VISIBLE);
+            aurora.setVisibility(View.GONE);
+        } else {
+            wallpaper.setVisibility(View.GONE);
+            aurora.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private Bitmap decodeWallpaper() throws java.io.IOException {
+        BitmapFactory.Options o = new BitmapFactory.Options();
+        o.inJustDecodeBounds = true;
+        try (InputStream in = ctx.getContentResolver().openInputStream(WallpaperStore.uri(ctx))) {
+            BitmapFactory.decodeStream(in, null, o);
+        }
+        int sample = 1;
+        while (Math.max(o.outWidth, o.outHeight) / (sample * 2) >= 1920) sample *= 2;
+        o.inJustDecodeBounds = false;
+        o.inSampleSize = sample;
+        try (InputStream in = ctx.getContentResolver().openInputStream(WallpaperStore.uri(ctx))) {
+            return BitmapFactory.decodeStream(in, null, o);
+        }
     }
 
     private void updateInfo() {
@@ -123,7 +138,7 @@ final class SaverController {
         greeting.setText(res);
 
         float frac = (hour * 60 + c.get(Calendar.MINUTE)) / 1440f;
-        dayBar.set(frac, 0xFF38BDF8, 0xFFF472B6);
+        dayBar.set(frac, 0xFFFF3B3B, 0xFFFFFFFF);
         dayLabel.setText(String.format(Locale.US, "%d%% of today", Math.round(frac * 100)));
 
         updateMusic();
