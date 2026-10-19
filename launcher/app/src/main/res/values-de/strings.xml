@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">Home</string>
     <string name="inputs">Quellen</string>
-    <string name="wifi">WLAN</string>
+    <string name="bluetooth">Bluetooth</string>
     <string name="settings">Einstellungen</string>
     <string name="choose_input">Quellen</string>
     <string name="connected">Verbunden</string>
@@ -32,7 +32,6 @@
     <string name="app_hidden">Ausgeblendet</string>
     <string name="screen_saver">Bildschirmschoner</string>
     <string name="icon_pack">Icon-Paket</string>
-    <string name="icon_shape">Icon-Form</string>
     <string name="icon_pack_default">Standard-Icons</string>
     <string name="no_icon_packs">Auf diesem TV gefundene Icon-Pakete</string>
     <string name="none_icon_packs">Kein Icon-Paket installiert. Installiere eines (ADW, Nova oder Go), um es hier zu nutzen.</string>
@@ -51,4 +50,6 @@
     <string name="ctx_weekend">Wochenende</string>
     <string name="ctx_headphones">Kopfhörer verbunden</string>
     <string name="ctx_soundbar">Soundbar verbunden</string>
+    <string name="music_access">Musik-Glow-Zugriff</string>
+    <string name="music_access_help">Enable Notification access for Home in Settings, or run: adb shell cmd notification allow_listener com.gathin.tvhome/com.gathin.tvhome.MediaListener</string>
 </resources>

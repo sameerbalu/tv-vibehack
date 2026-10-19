@@ -100,7 +100,6 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
     private String iconPackPkg = "";
     private int iconShape = IconShapes.AUTO;
     private IconPack pack;
-    private final SmartSuggestions smart;
 
     AppAdapter(Context ctx, TileListener listener, int dockSize) {
         this.ctx = ctx;
@@ -114,8 +113,6 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
             for (String key : savedAll.split(";")) if (!key.trim().isEmpty()) order.add(key.trim());
         }
         iconPackPkg = prefs.getString(ICON_PACK, "");
-        iconShape = prefs.getInt(ICON_SHAPE, IconShapes.AUTO);
-        smart = new SmartSuggestions(ctx);
         String hiddenSaved = prefs.getString(HIDDEN_APPS, null);
         if (hiddenSaved != null) {
             for (String pkg : hiddenSaved.split(";")) if (!pkg.trim().isEmpty()) userHidden.add(pkg.trim());
@@ -311,18 +308,7 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         }
     }
 
-    // ---- suggestions, icon packs, icon shape ----------------------------------------------------
-
-    /** Suggested apps for right now, never including the dock apps. */
-    List<SmartSuggestions.Pick> suggestions(int max) {
-        List<Entry> candidates = new ArrayList<>();
-        for (int i = dockSize; i < items.size(); i++) candidates.add(items.get(i));
-        return smart.suggest(candidates, max);
-    }
-
-    String suggestionContext() {
-        return smart.describe();
-    }
+    // ---- icon packs ----------------------------------------------------
 
     List<IconPack.Info> iconPacks() {
         return IconPack.installed(ctx.getPackageManager());
@@ -339,22 +325,11 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(ICON_PACK, iconPackPkg).apply();
     }
 
-    int iconShape() {
-        return iconShape;
-    }
-
-    /** One of IconShapes.*. Call reload() afterwards. */
-    void setIconShape(int shape) {
-        iconShape = shape;
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(ICON_SHAPE, shape).apply();
-    }
-
     void launchEntry(Entry e) {
         launch(e);
     }
 
     private void launch(Entry e) {
-        smart.recordLaunch(e.pkg);
         Intent i = new Intent(Intent.ACTION_MAIN)
                 .addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER)
                 .setComponent(e.component)
@@ -409,6 +384,12 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         d.setBounds(0, 0, n, n);
         d.draw(c);
         d.setBounds(saved);
+        return vividColor(bmp);
+    }
+
+    /** The most vivid colour of a small bitmap (recycles it). Also used for the Spotify album colour. */
+    static int vividColor(Bitmap bmp) {
+        int n = bmp.getWidth();
         float[] hsv = new float[3];
         int best = 0xFF444444;
         float bestScore = -1f;

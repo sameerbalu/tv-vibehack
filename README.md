@@ -265,3 +265,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the format and the testing we ask for
 
 MIT, see [`LICENSE`](LICENSE). The Outfit typeface is under the SIL Open Font License, see
 `launcher/FONT-LICENSE-OFL.txt`.
+
+## v6 notes
+
+- Cursor glows in the focused app's colour; the dock wraps around (Right on the last app goes to the first).
+- Top bar shows the connected Bluetooth device; click opens Remotes & Accessories.
+- Spotify glow: while a song plays, the glow behind the dock follows the album colour. One-time setup:
+  `adb shell cmd notification allow_listener com.gathin.tvhome/com.gathin.tvhome.MediaListener`
+  (or Settings > Notification access > Home). Settings > "Music glow access" shows until it is enabled.

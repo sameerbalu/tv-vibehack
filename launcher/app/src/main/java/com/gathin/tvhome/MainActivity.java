@@ -1,6 +1,22 @@
 package com.gathin.tvhome;
 
+import android.Manifest;
+import android.animation.ArgbEvaluator;
+import android.animation.ValueAnimator;
 import android.app.Activity;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothManager;
+import android.bluetooth.BluetoothProfile;
+import android.content.BroadcastReceiver;
+import android.content.ComponentName;
+import android.content.IntentFilter;
+import android.content.pm.PackageManager;
+import android.media.MediaMetadata;
+import android.media.session.MediaController;
+import android.media.session.MediaSessionManager;
+import android.media.session.PlaybackState;
+import android.os.Build;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
@@ -8,7 +24,6 @@ import android.content.pm.ApplicationInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
-import android.graphics.Outline;
 import android.graphics.Rect;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.ColorDrawable;
@@ -16,12 +31,7 @@ import android.graphics.drawable.Drawable;
 import android.media.tv.TvContract;
 import android.media.tv.TvInputInfo;
 import android.media.tv.TvInputManager;
-import android.net.ConnectivityManager;
-import android.net.Network;
-import android.net.NetworkCapabilities;
 import android.net.Uri;
-import android.net.wifi.WifiInfo;
-import android.net.wifi.WifiManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -30,11 +40,9 @@ import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.ViewOutlineProvider;
 import android.view.animation.AnimationUtils;
 import android.view.animation.DecelerateInterpolator;
 import android.view.animation.LayoutAnimationController;
-import android.view.animation.OvershootInterpolator;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -68,15 +76,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     /** Tiles per row and dock slots (res/values/config.xml, columns). Set in onCreate. */
     static int COLUMNS = 4;
     private static final long MINUTE_MS = 60_000L;
-    /** Where the first row of the app list sits (dp from the top) when it opens. Keeps the dock row off screen. */
-    private static final int PANEL_TOP_STRIP_DP = 208;   // glass panel top when the Suggested row is shown
-    private static final int PANEL_TOP_PLAIN_DP = 28;    // ... and when there is nothing to suggest
+    /** Where the glass panel starts (dp from the top) when the app list opens. Keeps the dock row off screen. */
+    private static final int PANEL_TOP_DP = 28;
     private static final int PANEL_BOTTOM_DP = 24;
     private static final int ROW_INSET_DP = 14;          // first row of apps sits this far inside the panel
     /** Top padding of the grid while arranging, so the dock row and the rows below are all visible. */
     private static final int ARRANGE_TOP_DP = 36;
     private String liveTvPkg;
     private static final int REQUEST_WALLPAPER = 71;
+    private static final int REQUEST_BT = 72;
     private static final String PREFS = "launcher_preferences";
     private static final String WALLPAPER_URI = "wallpaper_uri";
 
@@ -89,17 +97,21 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private ImageView wallpaperBlurView;
     private View allAppsScrim;
     private GlassPanelView allAppsPanel;
-    private View suggestStrip;
-    private LinearLayout suggestRow;
-    private TextView suggestContext;
     private GlassView glass;
     private TextView heroName;
     private View ambient;
     private GradientDrawable ambientGlow;
-    private int ambientColor;
+    private int ambientColor;        // colour currently drawn
+    private int ambientTarget;       // colour it is fading to
+    private ValueAnimator ambientAnim;
+    // Spotify: album colour while a song plays (0 = nothing playing)
+    private int musicColor;
+    private MediaSessionManager sessionManager;
+    private final List<MediaController> watched = new ArrayList<>();
+    private static boolean btPermissionAsked;
     private boolean heroShown;
     private TextView greeting;
-    private TextView btnWifi;
+    private TextView btnBluetooth;
     private SpringAnimation springX, springY;
     private float glassTargetX, glassTargetY;
     private boolean glassShown;
@@ -109,11 +121,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private boolean arranging;
     /** What the blur / header state on screen currently reflects (see refreshChrome). */
     private boolean overlayApplied;
-    /** True while the all-apps extras (glass panel, Suggested row) are shown. */
+    /** True while the all-apps extras (the glass panel) is shown. */
     private boolean allUiApplied;
     /** True from the start of the "back to dock" animation until it ends. */
     private boolean snapActive;
-    private final List<String> suggestKeys = new ArrayList<>();
     /** Align the focused row to the top of the screen on the next focus, even if we were already in the app list. */
     private boolean alignNext;
     private List<String> arrangeBackup;
@@ -125,24 +136,31 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private float density;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
-    /** Refreshes the network pill when the connection changes: at boot Wi-Fi often connects after Home is shown. */
-    private final ConnectivityManager.NetworkCallback networkCallback = new ConnectivityManager.NetworkCallback() {
+    /** Refreshes the Bluetooth pill when a device connects or disconnects. */
+    private final BroadcastReceiver btReceiver = new BroadcastReceiver() {
         @Override
-        public void onAvailable(@NonNull Network network) {
-            handler.post(MainActivity.this::updateWifiLabel);
+        public void onReceive(Context context, Intent intent) {
+            updateBluetoothLabel();
+            handler.postDelayed(MainActivity.this::updateBluetoothLabel, 1500);   // profiles settle a moment later
+        }
+    };
+    private final MediaSessionManager.OnActiveSessionsChangedListener sessionsListener = this::watchSessions;
+    private final MediaController.Callback mediaCallback = new MediaController.Callback() {
+        @Override
+        public void onPlaybackStateChanged(PlaybackState state) {
+            updateMusicGlow();
         }
 
         @Override
-        public void onLost(@NonNull Network network) {
-            handler.post(MainActivity.this::updateWifiLabel);
+        public void onMetadataChanged(MediaMetadata metadata) {
+            updateMusicGlow();
         }
     };
     private final Runnable minuteTick = new Runnable() {
         @Override
         public void run() {
             updateGreeting();
-            updateWifiLabel();
-            updateSuggestions();
+            updateBluetoothLabel();
             handler.postDelayed(this, MINUTE_MS);
         }
     };
@@ -179,9 +197,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         wallpaperBlurView = findViewById(R.id.wallpaperBlur);
         allAppsScrim = findViewById(R.id.allAppsScrim);
         allAppsPanel = findViewById(R.id.allAppsPanel);
-        suggestStrip = findViewById(R.id.suggestStrip);
-        suggestRow = findViewById(R.id.suggestRow);
-        suggestContext = findViewById(R.id.suggestContext);
         glass = findViewById(R.id.glass);
         heroName = findViewById(R.id.heroName);
         ambient = findViewById(R.id.ambient);
@@ -192,7 +207,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         ambient.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) ->
                 ambientGlow.setGradientRadius((r - l) * 0.62f));
         greeting = findViewById(R.id.greeting);
-        btnWifi = findViewById(R.id.btnWifi);
+        btnBluetooth = findViewById(R.id.btnBluetooth);
 
         grid = findViewById(R.id.grid);
         grid.setLayoutManager(new GridLayoutManager(this, COLUMNS) {
@@ -236,6 +251,17 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         // Keep the glass glued to its tile while the grid scrolls.
         grid.addOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
+            public void onScrollStateChanged(@NonNull RecyclerView rv, int newState) {
+                // Safety net: once a scroll settles, make sure the cursor sits on the focused tile.
+                if (newState != RecyclerView.SCROLL_STATE_IDLE || !glassShown || snapActive) return;
+                View f = getCurrentFocus();
+                if (f != null && f.getId() == R.id.card && f.getParent() instanceof View
+                        && ((View) f.getParent()).getParent() == grid) {
+                    moveGlassTo(f, true);
+                }
+            }
+
+            @Override
             public void onScrolled(@NonNull RecyclerView rv, int dx, int dy) {
                 if (!glassShown) return;
                 glassTargetY -= dy;
@@ -254,7 +280,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         View btnInputs = findViewById(R.id.btnInputs);
         View btnSettings = findViewById(R.id.btnSettings);
         btnInputs.setOnClickListener(v -> showInputs());
-        btnWifi.setOnClickListener(v -> open(new Intent(Settings.ACTION_WIFI_SETTINGS)));
+        btnBluetooth.setOnClickListener(v -> openRemotesAndAccessories());
         btnSettings.setOnClickListener(v -> showLauncherSettings());
 
         // Keep focus on the top bar at its ends and at the top: Android's focus finder would otherwise
@@ -266,7 +292,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             return keyCode == KeyEvent.KEYCODE_DPAD_RIGHT && v.getId() == R.id.btnSettings;
         };
         btnInputs.setOnKeyListener(pillKeys);
-        btnWifi.setOnKeyListener(pillKeys);
+        btnBluetooth.setOnKeyListener(pillKeys);
         btnSettings.setOnKeyListener(pillKeys);
 
         // Hide the glass when focus leaves the tiles.
@@ -281,9 +307,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             }
         });
 
-        ConnectivityManager cm = getSystemService(ConnectivityManager.class);
-        if (cm != null) cm.registerDefaultNetworkCallback(networkCallback);
-
         applyAllLayout();
         restoreWallpaper();   // after the grid exists: the dock band uses the blurred wallpaper too
     }
@@ -296,6 +319,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         heroShown = false;
         heroName.setAlpha(0f);
         ambient.animate().cancel();
+        if (ambientAnim != null) ambientAnim.cancel();
         ambient.setAlpha(0f);
         // Start in the dock state; focusing a tile in the app list switches to the blurred state again.
         allAppsMode = false;
@@ -304,10 +328,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         allUiApplied = false;
         snapActive = false;
         allAppsPanel.animate().cancel();
-        suggestStrip.animate().cancel();
         allAppsPanel.setAlpha(0f);
-        suggestStrip.setAlpha(0f);
-        suggestStrip.setVisibility(View.INVISIBLE);
         wallpaperBlurView.animate().cancel();
         allAppsScrim.animate().cancel();
         header.animate().cancel();
@@ -324,12 +345,22 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         final String returnKey = lastFocusedKey;
         final int returnSlot = lastFocused;
         adapter.reload();
-        suggestKeys.clear();
-        updateSuggestions();
         grid.scheduleLayoutAnimation();
         updateGreeting();
-        updateWifiLabel();
+        updateBluetoothLabel();
         handler.postDelayed(minuteTick, MINUTE_MS);
+        IntentFilter bt = new IntentFilter();
+        bt.addAction(BluetoothAdapter.ACTION_STATE_CHANGED);
+        bt.addAction(BluetoothAdapter.ACTION_CONNECTION_STATE_CHANGED);
+        bt.addAction(BluetoothDevice.ACTION_ACL_CONNECTED);
+        bt.addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED);
+        registerReceiver(btReceiver, bt);
+        if (Build.VERSION.SDK_INT >= 31 && !btPermissionAsked
+                && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            btPermissionAsked = true;
+            requestPermissions(new String[]{Manifest.permission.BLUETOOTH_CONNECT}, REQUEST_BT);
+        }
+        startMusicWatch();
 
         // Return to the app we left from, or the same slot if that app is gone. Always refocus: after
         // reload() the view that holds focus may no longer show the app it had.
@@ -343,7 +374,18 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     protected void onPause() {
         super.onPause();
         handler.removeCallbacks(minuteTick);
+        try {
+            unregisterReceiver(btReceiver);
+        } catch (IllegalArgumentException ignored) {
+        }
+        stopMusicWatch();
         if (arranging) finishArrange(false);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_BT) updateBluetoothLabel();
     }
 
     @Override
@@ -369,8 +411,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     protected void onDestroy() {
         super.onDestroy();
         handler.removeCallbacks(clipRunnable);
-        ConnectivityManager cm = getSystemService(ConnectivityManager.class);
-        if (cm != null) cm.unregisterNetworkCallback(networkCallback);
     }
 
     @Override
@@ -407,7 +447,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     /**
      * Three looks: the dock state (clock, buttons, dock row), the all-apps state (background blurred and
-     * lighter, a glass panel with the app list, the Suggested row on top, everything else hidden) and the
+     * lighter, a glass panel with the app list, everything else hidden) and the
      * arrange state (blurred, everything visible). This brings the screen in line with allAppsMode/arranging.
      */
     private void refreshChrome() {
@@ -431,23 +471,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     private void setAllUiShown(boolean show) {
         allAppsPanel.animate().cancel();
-        suggestStrip.animate().cancel();
-        if (show) {
-            suggestStrip.setVisibility(suggestKeys.isEmpty() ? View.INVISIBLE : View.VISIBLE);
-            allAppsPanel.animate().alpha(1f).setDuration(350).start();
-            suggestStrip.animate().alpha(1f).setDuration(350).start();
-        } else {
-            allAppsPanel.animate().alpha(0f).setDuration(200).start();
-            suggestStrip.animate().alpha(0f).setDuration(200).withEndAction(() -> {
-                if (!allUiApplied) suggestStrip.setVisibility(View.INVISIBLE);
-            }).start();
-        }
+        allAppsPanel.animate().alpha(show ? 1f : 0f).setDuration(show ? 350 : 200).start();
     }
 
-    // ---- all apps: glass panel and the Suggested row ---------------------------------------------
+    // ---- all apps: glass panel ---------------------------------------------------------------------
 
     private int panelTopPx() {
-        return (int) ((suggestKeys.isEmpty() ? PANEL_TOP_PLAIN_DP : PANEL_TOP_STRIP_DP) * density);
+        return (int) (PANEL_TOP_DP * density);
     }
 
     /** Where the first row of apps sits when the list opens: just inside the glass panel. */
@@ -455,7 +485,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         return panelTopPx() + (int) (ROW_INSET_DP * density);
     }
 
-    /** Moves the glass panel (and the grid's scroll range) to match whether the Suggested row is shown. */
+    /** Applies the grid's scroll range / clip for the panel position. */
     private void applyAllLayout() {
         ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) allAppsPanel.getLayoutParams();
         int top = panelTopPx();
@@ -467,105 +497,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         if (overlayApplied) clipRunnable.run();
     }
 
-    private int suggestCount() {
-        return suggestKeys.size();
-    }
-
-    /** Recomputes what to suggest right now; rebuilds the row only when the picks changed. */
-    private void updateSuggestions() {
-        if (adapter == null || suggestRow == null) return;
-        List<SmartSuggestions.Pick> picks = adapter.suggestions(COLUMNS);
-        suggestContext.setText(adapter.suggestionContext());
-        List<String> keys = new ArrayList<>();
-        for (SmartSuggestions.Pick p : picks) keys.add(p.entry.key);
-        if (keys.equals(suggestKeys)) return;
-        if (suggestRow.hasFocus()) return;            // never pull a tile away from under the cursor
-        suggestKeys.clear();
-        suggestKeys.addAll(keys);
-        suggestRow.removeAllViews();
-        int index = 0;
-        for (SmartSuggestions.Pick p : picks) {
-            suggestRow.addView(buildSuggestTile(p.entry, index, picks.size()),
-                    new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-            index++;
-        }
-        for (; index < COLUMNS; index++) {            // keep the tiles on the same columns as the grid
-            suggestRow.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
-        }
-        if (allUiApplied) suggestStrip.setVisibility(keys.isEmpty() ? View.INVISIBLE : View.VISIBLE);
-        applyAllLayout();
-    }
-
-    private View buildSuggestTile(final AppAdapter.Entry entry, final int index, final int count) {
-        View item = getLayoutInflater().inflate(R.layout.item_app, suggestRow, false);
-        final View card = item.findViewById(R.id.card);
-        final TextView name = item.findViewById(R.id.name);
-        ImageView banner = item.findViewById(R.id.banner);
-        ImageView icon = item.findViewById(R.id.icon);
-        TextView label = item.findViewById(R.id.label);
-        AppAdapter.applyVisual(banner, icon, label, entry);
-        name.setText(entry.label);
-        final float radius = 16f * density;
-        card.setOutlineProvider(new ViewOutlineProvider() {
-            @Override
-            public void getOutline(View view, Outline outline) {
-                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), radius);
-            }
-        });
-        card.setClipToOutline(true);
-        card.setOnClickListener(v -> adapter.launchEntry(entry));
-        card.setOnFocusChangeListener((v, focused) -> {
-            float sc = focused ? AppAdapter.FOCUS_SCALE : 1.0f;
-            v.animate().scaleX(sc).scaleY(sc)
-                    .setDuration(focused ? 260 : 180)
-                    .setInterpolator(new OvershootInterpolator(focused ? 1.6f : 0f))
-                    .start();
-            name.animate().alpha(focused ? 1f : 0f)
-                    .translationY(focused ? density * 4f : -density * 6f)
-                    .setDuration(220).start();
-            if (focused) onSuggestionFocused(v);
-        });
-        card.setOnKeyListener((v, keyCode, event) -> {
-            if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
-            int total = adapter.getItemCount();
-            if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
-                if (index > 0) focusSuggestion(index - 1);
-                return true;
-            }
-            if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                if (index < count - 1) focusSuggestion(index + 1);
-                return true;
-            }
-            if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-                focusTile(Math.min(index, Math.min(COLUMNS, total) - 1));      // back up to the dock
-                return true;
-            }
-            if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-                if (total > COLUMNS) focusTile(Math.min(COLUMNS + index, total - 1));
-                return true;
-            }
-            return false;
-        });
-        return item;
-    }
-
-    private void focusSuggestion(int index) {
-        if (index < 0 || index >= suggestRow.getChildCount()) return;
-        View card = suggestRow.getChildAt(index).findViewById(R.id.card);
-        if (card != null) card.requestFocus();
-    }
-
-    private void onSuggestionFocused(View card) {
-        if (snapActive) endSnap();
-        moveGlassTo(card, true);
-        hideHero();
-        if (!allAppsMode && !arranging) enterAllApps();
-    }
-
     /** Switches to the all-apps state with the first row of apps parked just inside the glass panel. */
     private void enterAllApps() {
         if (allAppsMode || arranging) return;
-        updateSuggestions();
         allAppsMode = true;
         refreshChrome();
         if (adapter.getItemCount() > COLUMNS) {
@@ -653,7 +587,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private Rect moveGlassTo(View card, boolean animate) {
         Rect r = new Rect(0, 0, card.getWidth(), card.getHeight());
         root.offsetDescendantRectToMyCoords(card, r);
-        float pad = 6f * density;        // matches GlassView's glow inset
+        float pad = GlassView.PAD_DP * density;        // matches GlassView's glow inset
         float w = card.getWidth() * AppAdapter.FOCUS_SCALE + 2 * pad;
         float h = card.getHeight() * AppAdapter.FOCUS_SCALE + 2 * pad;
         float x = r.exactCenterX() - w / 2f;
@@ -664,7 +598,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             lp.width = (int) w;
             lp.height = (int) h;
             glass.setLayoutParams(lp);
-            glass.setRadius(16f * density * AppAdapter.FOCUS_SCALE + pad);
+            glass.setRadius(16f * density * AppAdapter.FOCUS_SCALE);
         }
         glassTargetX = x;
         glassTargetY = y;
@@ -689,6 +623,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         lastFocused = position;
         lastFocusedKey = adapter.keyAt(position);
         boolean leavingAll = !arranging && allAppsMode && position < COLUMNS;
+        boolean glassWasShown = glassShown;
+        glass.setColor(adapter.ambientColorAt(position), glassWasShown);   // cursor takes the app's colour
         Rect r = moveGlassTo(card, !leavingAll);      // leaving the list: snapToDock moves the glass itself
         View item = (View) card.getParent();
 
@@ -700,7 +636,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
         boolean entering = alignNext || (!allAppsMode && position >= COLUMNS);
         alignNext = false;
-        if (entering) updateSuggestions();
         allAppsMode = position >= COLUMNS;
         refreshChrome();
         if (position < COLUMNS) {
@@ -733,7 +668,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             heroName.setY(y);
             heroName.setTranslationX(0f);
             heroName.animate().alpha(1f).setDuration(260).start();
-            setAmbient(adapter.ambientColorAt(position));
+            if (ambientAnim != null) ambientAnim.cancel();
+            applyAmbientColor(ambientFor(position));
             ambient.animate().alpha(1f).setDuration(600).start();
             heroShown = true;
         } else if (changed) {
@@ -743,23 +679,39 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 heroName.setTranslationX(12 * density);
                 heroName.animate().alpha(1f).translationX(0f).setDuration(200).start();
             }).start();
-            final int color = adapter.ambientColorAt(position);
-            if (color != ambientColor) {
-                ambient.animate().alpha(0.35f).setDuration(200).withEndAction(() -> {
-                    setAmbient(color);
-                    ambient.animate().alpha(1f).setDuration(500).start();
-                }).start();
-            }
+            animateAmbient(ambientFor(position), 600);   // cross-fade to the next app's colour
         } else {
             heroName.setY(y);
         }
+    }
+
+    /** While a Spotify song plays the glow follows the album colour; otherwise it follows the focused app. */
+    private int ambientFor(int position) {
+        return musicColor != 0 ? musicColor : adapter.ambientColorAt(position);
+    }
+
+    /** Fades the glow behind the dock from its current colour to another. */
+    private void animateAmbient(int target, long durationMs) {
+        if (target == ambientTarget) return;
+        ambientTarget = target;
+        if (ambientAnim != null) ambientAnim.cancel();
+        ambientAnim = ValueAnimator.ofObject(new ArgbEvaluator(), ambientColor, target);
+        ambientAnim.setDuration(durationMs);
+        ambientAnim.addUpdateListener(a -> setAmbient((Integer) a.getAnimatedValue()));
+        ambientAnim.start();
+    }
+
+    private void applyAmbientColor(int color) {
+        ambientTarget = color;
+        setAmbient(color);
     }
 
     /** Soft radial glow behind the dock, darker than the app's own colour so it stays easy on the eyes. */
     private void setAmbient(int color) {
         ambientColor = color;
         int c = darken(color) & 0x00FFFFFF;
-        ambientGlow.setColors(new int[]{0x48000000 | c, 0x1C000000 | c, 0x00000000 | c});
+        ambientGlow.setColors(new int[]{0x50000000 | c, 0x20000000 | c, 0x00000000 | c});
+        ambient.invalidate();
     }
 
     private static int darken(int color) {
@@ -799,20 +751,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         int target;
         if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
             if (position < COLUMNS) return false;          // dock row: let focus move to the top bar
-            if (position < 2 * COLUMNS && suggestCount() > 0) {
-                focusSuggestion(Math.min(position - COLUMNS, suggestCount() - 1));   // first row -> Suggested row
-                return true;
-            }
             target = position - COLUMNS;
         } else {
-            if (position < COLUMNS && count > COLUMNS) {
-                updateSuggestions();
-                if (suggestCount() > 0) {                  // dock -> Suggested row first
-                    enterAllApps();
-                    focusSuggestion(Math.min(position, suggestCount() - 1));
-                    return true;
-                }
-            }
             int lastRowStart = ((count - 1) / COLUMNS) * COLUMNS;
             if (position >= lastRowStart) return true;     // already on the last row: stay put
             target = Math.min(position + COLUMNS, count - 1);
@@ -823,7 +763,21 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     @Override
     public boolean onTileHorizontalKey(int position, int keyCode) {
-        if (!arranging) return false;
+        if (!arranging) {
+            // Endless dock: Right on the last dock app wraps to the first, Left on the first to the last.
+            int dockEnd = Math.min(COLUMNS, adapter.getItemCount()) - 1;
+            if (position <= dockEnd && dockEnd > 0) {
+                if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT && position == dockEnd) {
+                    focusTile(0);
+                    return true;
+                }
+                if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT && position == 0) {
+                    focusTile(dockEnd);
+                    return true;
+                }
+            }
+            return false;
+        }
         int target = position + (keyCode == KeyEvent.KEYCODE_DPAD_LEFT ? -1 : 1);
         if (target < 0 || target >= adapter.getItemCount()) return true;
         moveGrabbed(position, target);
@@ -897,7 +851,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 () -> beginArrange(lastFocused));
         addInputRow(rows, popup, R.drawable.ic_hide, getString(R.string.hide_apps), -1, this::showHideApps);
         addInputRow(rows, popup, R.drawable.ic_palette, getString(R.string.icon_pack), -1, this::showIconPacks);
-        addInputRow(rows, popup, R.drawable.ic_shape, getString(R.string.icon_shape), -1, this::showIconShapes);
+        if (!hasListenerAccess()) {
+            addInputRow(rows, popup, R.drawable.ic_saver, getString(R.string.music_access), -1, this::openMusicAccess);
+        }
         addInputRow(rows, popup, R.drawable.ic_saver, getString(R.string.screen_saver), -1,
                 () -> startActivity(new Intent(this, ScreensaverActivity.class)));
         addSeparator(rows);
@@ -937,37 +893,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         showDropdown(popup, panel, anchor, minWidth, true);
     }
 
-    private void showIconShapes() {
-        View anchor = findViewById(R.id.btnSettings);
-        View panel = getLayoutInflater().inflate(R.layout.popup_apps, root, false);
-        LinearLayout rows = panel.findViewById(R.id.rows);
-        int minWidth = (int) (300 * density);
-        final PopupWindow popup = newDropdown(panel, minWidth);
-        ((TextView) panel.findViewById(R.id.title)).setText(R.string.icon_shape_title);
-        int[] shapes = {IconShapes.AUTO, IconShapes.CIRCLE, IconShapes.SQUIRCLE, IconShapes.ROUNDED, IconShapes.SQUARE};
-        int[] names = {R.string.shape_auto, R.string.shape_circle, R.string.shape_squircle, R.string.shape_rounded,
-                R.string.shape_square};
-        Drawable sample = null;
-        try {
-            sample = getDrawable(R.mipmap.ic_launcher);
-        } catch (Exception ignored) {
-        }
-        for (int i = 0; i < shapes.length; i++) {
-            final int shape = shapes[i];
-            Drawable preview = shape == IconShapes.AUTO ? null : IconShapes.shape(this, sample, shape, 96);
-            addChoiceRow(rows, popup, preview, R.drawable.ic_shape, getString(names[i]), adapter.iconShape() == shape,
-                    () -> applyIconSettings(() -> adapter.setIconShape(shape)));
-        }
-        fitScroll(panel);
-        showDropdown(popup, panel, anchor, minWidth, true);
-    }
-
-    /** Applies an icon pack / shape change: rebuilds every tile and the Suggested row. */
+    /** Applies an icon pack change: rebuilds every tile. */
     private void applyIconSettings(Runnable change) {
         change.run();
         adapter.reload();
-        suggestKeys.clear();
-        updateSuggestions();
     }
 
     /** A menu row with a "Selected" marker, and either an app-style icon (drawable) or a vector (iconRes). */
@@ -1039,11 +968,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         slp.height = Math.min(rows.getMeasuredHeight(), (int) (root.getHeight() * 0.6f));
         scroll.setLayoutParams(slp);
         popup.setOnDismissListener(() -> {
-            if (changed[0]) {
-                adapter.reload();
-                suggestKeys.clear();
-                updateSuggestions();
-            }
+            if (changed[0]) adapter.reload();
         });
         showDropdown(popup, panel, anchor, minWidth, true);
     }
@@ -1165,29 +1090,170 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         greeting.setText(res);
     }
 
-    /** Shows the Wi-Fi network name on the button when we can read it, otherwise the connection type. */
-    private void updateWifiLabel() {
-        String text = getString(R.string.wifi);
-        try {
-            ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-            Network net = cm != null ? cm.getActiveNetwork() : null;
-            NetworkCapabilities caps = net != null ? cm.getNetworkCapabilities(net) : null;
-            if (caps == null) {
-                text = getString(R.string.offline);
-            } else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) {
-                text = getString(R.string.ethernet);
-            } else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-                WifiManager wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-                WifiInfo info = wm != null ? wm.getConnectionInfo() : null;
-                String ssid = info != null ? info.getSSID() : null;
-                if (ssid != null) {
-                    ssid = ssid.replace("\"", "").trim();
-                    if (!ssid.isEmpty() && !ssid.contains("unknown") && !ssid.equals("0x")) text = ssid;
+    private int btPending;
+    private boolean btFound;
+
+    /** Name of the connected Bluetooth device (the first one if several), or "Bluetooth" when none. */
+    private void updateBluetoothLabel() {
+        btnBluetooth.setMaxWidth((int) (260 * density));
+        btnBluetooth.setSingleLine(true);
+        btnBluetooth.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        if (btPending > 0) return;                       // a lookup is already running
+        final BluetoothAdapter ba = BluetoothAdapter.getDefaultAdapter();
+        boolean allowed = Build.VERSION.SDK_INT < 31
+                || checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
+        if (ba == null || !allowed || !ba.isEnabled()) {
+            btnBluetooth.setText(R.string.bluetooth);
+            return;
+        }
+        // Ask per profile: A2DP, headset, HID (remotes, keyboards, gamepads) and GATT (BLE remotes).
+        final int[] profiles = {BluetoothProfile.A2DP, BluetoothProfile.HEADSET, 4 /* HID host */, BluetoothProfile.GATT};
+        final BluetoothProfile.ServiceListener listener = new BluetoothProfile.ServiceListener() {
+            @Override
+            public void onServiceConnected(int profile, BluetoothProfile proxy) {
+                String found = null;
+                try {
+                    List<BluetoothDevice> devices = proxy.getConnectedDevices();
+                    if (devices != null && !devices.isEmpty()) {
+                        String n = devices.get(0).getName();
+                        if (n != null && !n.trim().isEmpty()) found = n.trim();
+                    }
+                } catch (SecurityException | RuntimeException ignored) {
                 }
+                try {
+                    ba.closeProfileProxy(profile, proxy);
+                } catch (RuntimeException ignored) {
+                }
+                final String name = found;
+                handler.post(() -> btLookupDone(name));
             }
+
+            @Override
+            public void onServiceDisconnected(int profile) {
+            }
+        };
+        btFound = false;
+        btPending = profiles.length;
+        for (int profile : profiles) {
+            boolean asked = false;
+            try {
+                asked = ba.getProfileProxy(this, listener, profile);
+            } catch (RuntimeException ignored) {
+            }
+            if (!asked) btLookupDone(null);              // profile not supported: no callback will come
+        }
+    }
+
+    private void btLookupDone(String name) {
+        if (name != null && !btFound) {                  // first connected device wins
+            btFound = true;
+            btnBluetooth.setText(name);
+        }
+        if (btPending > 0 && --btPending == 0 && !btFound) btnBluetooth.setText(R.string.bluetooth);
+    }
+
+    /** Opens the TV's "Remotes & Accessories" page (the Bluetooth device list). */
+    private void openRemotesAndAccessories() {
+        Intent[] tries = {
+                new Intent("android.settings.BLUETOOTH_SETTINGS"),
+                new Intent().setComponent(new ComponentName("com.android.tv.settings",
+                        "com.android.tv.settings.accessories.AccessoriesActivity")),
+                new Intent().setComponent(new ComponentName("com.android.tv.settings",
+                        "com.android.tv.settings.accessories.AddAccessoryActivity")),
+                new Intent(Settings.ACTION_SETTINGS)
+        };
+        for (Intent i : tries) {
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            try {
+                startActivity(i);
+                return;
+            } catch (Exception ignored) {
+            }
+        }
+        Toast.makeText(this, R.string.not_available, Toast.LENGTH_SHORT).show();
+    }
+
+    // ---- Spotify: glow follows the album colour ----------------------------------------------------
+
+    private boolean hasListenerAccess() {
+        String enabled = Settings.Secure.getString(getContentResolver(), "enabled_notification_listeners");
+        return enabled != null && enabled.contains(getPackageName());
+    }
+
+    private void openMusicAccess() {
+        try {
+            open(new Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"));
         } catch (Exception ignored) {
         }
-        btnWifi.setText(text);
+        Toast.makeText(this, R.string.music_access_help, Toast.LENGTH_LONG).show();
+    }
+
+    private void startMusicWatch() {
+        if (!hasListenerAccess()) return;
+        try {
+            sessionManager = (MediaSessionManager) getSystemService(Context.MEDIA_SESSION_SERVICE);
+            ComponentName cn = new ComponentName(this, MediaListener.class);
+            sessionManager.addOnActiveSessionsChangedListener(sessionsListener, cn, handler);
+            watchSessions(sessionManager.getActiveSessions(cn));
+        } catch (SecurityException | RuntimeException ignored) {
+        }
+    }
+
+    private void stopMusicWatch() {
+        for (MediaController c : watched) c.unregisterCallback(mediaCallback);
+        watched.clear();
+        if (sessionManager != null) {
+            try {
+                sessionManager.removeOnActiveSessionsChangedListener(sessionsListener);
+            } catch (RuntimeException ignored) {
+            }
+        }
+    }
+
+    private void watchSessions(List<MediaController> controllers) {
+        for (MediaController c : watched) c.unregisterCallback(mediaCallback);
+        watched.clear();
+        if (controllers != null) {
+            for (MediaController c : controllers) {
+                if (c.getPackageName() != null && c.getPackageName().startsWith("com.spotify")) {
+                    c.registerCallback(mediaCallback, handler);
+                    watched.add(c);
+                }
+            }
+        }
+        updateMusicGlow();
+    }
+
+    /** Picks the colour of the song playing in Spotify (album art, else a colour from the title) or clears it. */
+    private void updateMusicGlow() {
+        int color = 0;
+        for (MediaController c : watched) {
+            PlaybackState st = c.getPlaybackState();
+            if (st == null || st.getState() != PlaybackState.STATE_PLAYING) continue;
+            color = songColor(c.getMetadata());
+            break;
+        }
+        if (color == musicColor) return;
+        musicColor = color;
+        if (heroShown) animateAmbient(ambientFor(lastFocused), 1800);   // slow, soft fade between songs
+    }
+
+    private static int songColor(MediaMetadata m) {
+        if (m == null) return 0xFF1DB954;                     // Spotify green
+        Bitmap art = m.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART);
+        if (art == null) art = m.getBitmap(MediaMetadata.METADATA_KEY_ART);
+        if (art == null) art = m.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON);
+        if (art != null && art.getWidth() > 0 && art.getHeight() > 0) {
+            Bitmap small = Bitmap.createScaledBitmap(art, 12, 12, true);
+            int c = AppAdapter.vividColor(small);
+            if (small != art) small.recycle();
+            return c;
+        }
+        // No artwork offered: still change colour from song to song.
+        String id = String.valueOf(m.getString(MediaMetadata.METADATA_KEY_TITLE))
+                + m.getString(MediaMetadata.METADATA_KEY_ARTIST);
+        float[] hsv = {Math.abs(id.hashCode()) % 360, 0.75f, 0.85f};
+        return Color.HSVToColor(hsv);
     }
 
     private void open(Intent i) {
