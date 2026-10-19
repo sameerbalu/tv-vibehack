@@ -1118,7 +1118,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                         String n = devices.get(0).getName();
                         if (n != null && !n.trim().isEmpty()) found = n.trim();
                     }
-                } catch (SecurityException | RuntimeException ignored) {
+                } catch (RuntimeException ignored) {
                 }
                 try {
                     ba.closeProfileProxy(profile, proxy);
@@ -1195,7 +1195,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             ComponentName cn = new ComponentName(this, MediaListener.class);
             sessionManager.addOnActiveSessionsChangedListener(sessionsListener, cn, handler);
             watchSessions(sessionManager.getActiveSessions(cn));
-        } catch (SecurityException | RuntimeException ignored) {
+        } catch (RuntimeException ignored) {
         }
     }
 
