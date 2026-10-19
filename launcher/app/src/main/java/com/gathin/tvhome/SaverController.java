@@ -138,7 +138,7 @@ final class SaverController {
         greeting.setText(res);
 
         float frac = (hour * 60 + c.get(Calendar.MINUTE)) / 1440f;
-        dayBar.set(frac, 0xFFFF3B3B, 0xFFFFFFFF);
+        dayBar.set(frac, WidgetPanel.DARK_RED_FROM, 0xFFFFFFFF);
         dayLabel.setText(String.format(Locale.US, "%d%% of today", Math.round(frac * 100)));
 
         updateMusic();

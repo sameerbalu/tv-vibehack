@@ -297,3 +297,9 @@ MIT, see [`LICENSE`](LICENSE). The Outfit typeface is under the SIL Open Font Li
 - Removed the "What to watch" / "Trending songs" row and the "All apps" caption; Settings > Refresh trending is gone too.
 - Widgets are plain dark glass again; only their titles carry colour.
 - Screensaver: your wallpaper is the background (the aurora if none is set); the clock is red and white and stays in the top-left corner.
+
+## v9.1 notes
+
+- Home returns to the same spot in All apps (the list is no longer pulled up to the first row); pressing Home several times quickly no longer stacks reloads/animations.
+- Memory widget bar and the screensaver red are dark red.
+- Spotify glow: slower colour changes (about 13 s apart, 9 s fades) and a gentle breathing swell.

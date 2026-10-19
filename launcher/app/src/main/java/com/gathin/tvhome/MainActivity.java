@@ -37,6 +37,7 @@ import android.media.tv.TvInputManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.SystemClock;
 import android.os.Looper;
 import android.provider.Settings;
 import android.view.Gravity;
@@ -45,6 +46,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.animation.AnimationUtils;
 import android.view.animation.DecelerateInterpolator;
+import android.view.animation.AccelerateDecelerateInterpolator;
 import android.view.animation.LayoutAnimationController;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
@@ -84,7 +86,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private static final long MINUTE_MS = 60_000L;
     /** Where the glass panel starts (dp from the top) when the app list opens. Keeps the dock row off screen. */
     private static final int PANEL_TOP_DP = 28;
-    private static final long MUSIC_CYCLE_MS = 6500L;
+    private static final long MUSIC_CYCLE_MS = 13000L;      // time between album colours
     private static final int PANEL_BOTTOM_DP = 24;
     private static final int ROW_INSET_DP = 14;          // first row of apps sits this far inside the panel
     /** Top padding of the grid while arranging, so the dock row and the rows below are all visible. */
@@ -113,6 +115,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private int ambientColor;        // colour currently drawn
     private int ambientTarget;       // colour it is fading to
     private ValueAnimator ambientAnim;
+    private ValueAnimator ambientPulse;     // slow "breathing" of the glow while a song plays
+    private float pulseV;                   // 0..1
+    private float ambientBaseRadius;
     // Spotify: album colour while a song plays (0 = nothing playing)
     private int musicColor;
     /** Colours of the song playing; the glow walks through them every few seconds. */
@@ -140,6 +145,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private boolean snapActive;
     /** Align the focused row to the top of the screen on the next focus, even if we were already in the app list. */
     private boolean alignNext;
+    // Coming back from an app opened in All apps: the list stays exactly where it was.
+    private static final int NO_TOP = Integer.MIN_VALUE;
+    private int resumeTileTop = NO_TOP;      // top of the tile (in the grid) when we left
+    private boolean keepScroll;
+    private boolean restorePending;          // true between onResume and the focus restore
+    private long lastResumeMs;
+    private final Runnable restoreFocus = this::restoreFocusNow;
     private List<String> arrangeBackup;
     // Static so they survive the activity being destroyed while another app is open (low-memory TVs,
     // or Developer options → "Don't keep activities"); they only reset when the process dies.
@@ -177,7 +189,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             if (musicPalette == null || musicPalette.length < 2) return;
             musicIndex = (musicIndex + 1) % musicPalette.length;
             musicColor = musicPalette[musicIndex];
-            if (heroShown) animateAmbient(ambientFor(lastFocused), 3200);
+            if (heroShown) animateAmbient(ambientFor(lastFocused), 9000);   // long, slow cross-fade
             handler.postDelayed(this, MUSIC_CYCLE_MS);
         }
     };
@@ -232,8 +244,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         ambientGlow.setGradientType(GradientDrawable.RADIAL_GRADIENT);
         ambientGlow.setGradientCenter(0.32f, 0.42f);
         ambient.setBackground(ambientGlow);
-        ambient.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) ->
-                ambientGlow.setGradientRadius((r - l) * 0.62f));
+        ambient.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            ambientBaseRadius = (r - l) * 0.62f;
+            ambientGlow.setGradientRadius(ambientBaseRadius);
+        });
         greeting = findViewById(R.id.greeting);
         btnBluetooth = findViewById(R.id.btnBluetooth);
 
@@ -344,9 +358,20 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     protected void onResume() {
         super.onResume();
+        long nowMs = SystemClock.uptimeMillis();
+        // Home pressed again right away: skip the slow reload and the enter animation, they only stack up.
+        final boolean quick = adapter.getItemCount() > 0 && nowMs - lastResumeMs < 2500;
+        lastResumeMs = nowMs;
+        restorePending = true;
+        handler.removeCallbacks(restoreFocus);
         glassShown = false;
+        glass.animate().cancel();
+        springX.cancel();
+        springY.cancel();
         glass.setAlpha(0f);
         heroShown = false;
+        heroName.animate().cancel();
+        heroName.setTranslationX(0f);
         heroName.setAlpha(0f);
         ambient.animate().cancel();
         if (ambientAnim != null) ambientAnim.cancel();
@@ -372,10 +397,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         updateGridPadding();
         clipRunnable.run();
         // Read these before reload(): rebinding can move focus to the first tile and overwrite them.
-        final String returnKey = lastFocusedKey;
-        final int returnSlot = lastFocused;
-        adapter.reload();
-        grid.scheduleLayoutAnimation();
+        returnKey = lastFocusedKey;
+        returnSlot = lastFocused;
+        if (quick) {
+            grid.clearAnimation();
+            for (int i = 0; i < grid.getChildCount(); i++) grid.getChildAt(i).clearAnimation();
+        } else {
+            adapter.reload();
+            grid.scheduleLayoutAnimation();
+        }
         updateGreeting();
         updateBluetoothLabel();
         handler.postDelayed(minuteTick, MINUTE_MS);
@@ -400,16 +430,51 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
         // Return to the app we left from, or the same slot if that app is gone. Always refocus: after
         // reload() the view that holds focus may no longer show the app it had.
-        grid.post(() -> {
-            int pos = adapter.positionOf(returnKey);
-            focusTile(pos >= 0 ? pos : returnSlot);
-        });
+        grid.post(restoreFocus);
+        handler.postDelayed(() -> restorePending = false, 1500);   // never leave focus handling blocked
+    }
+
+    private String returnKey;
+    private int returnSlot;
+
+    /** Puts focus back on the app we left from; for All apps also puts the list back where it was. */
+    private void restoreFocusNow() {
+        restorePending = false;
+        int count = adapter.getItemCount();
+        if (count == 0) return;
+        int pos = adapter.positionOf(returnKey);
+        if (pos < 0) pos = returnSlot;
+        pos = Math.max(0, Math.min(pos, count - 1));
+        if (resumeTileTop != NO_TOP && pos >= COLUMNS) {
+            final int target = pos;
+            // Same scroll position as before, so the row is not pulled up to the first row.
+            ((GridLayoutManager) grid.getLayoutManager())
+                    .scrollToPositionWithOffset(target, resumeTileTop - grid.getPaddingTop());
+            resumeTileTop = NO_TOP;
+            grid.post(() -> {
+                keepScroll = true;
+                focusTile(target);
+                keepScroll = false;
+            });
+            return;
+        }
+        resumeTileTop = NO_TOP;
+        focusTile(pos);
     }
 
     @Override
     protected void onPause() {
         super.onPause();
+        handler.removeCallbacks(restoreFocus);
         handler.removeCallbacks(minuteTick);
+        if (!restorePending) {
+            // Remember where the list was, so Home returns to the same spot.
+            resumeTileTop = NO_TOP;
+            if (allAppsMode && !arranging && lastFocused >= COLUMNS) {
+                RecyclerView.ViewHolder vh = grid.findViewHolderForAdapterPosition(lastFocused);
+                if (vh != null) resumeTileTop = vh.itemView.getTop();
+            }
+        }
         try {
             unregisterReceiver(btReceiver);
         } catch (IllegalArgumentException ignored) {
@@ -671,6 +736,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     @Override
     public void onTileFocused(int position, View card) {
+        if (restorePending) return;                    // focus jumps while the list rebinds; the restore sets the real one
         if (snapActive) endSnap();
         lastFocused = position;
         lastFocusedKey = adapter.keyAt(position);
@@ -704,8 +770,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         } else {
             hideHero();
             if (entering) {
-                // The list opens with its first row just inside the glass panel.
-                scrollGridBy(item.getTop() - allTopPx());
+                // The list opens with its first row just inside the glass panel (unless we are returning
+                // from an app and the list is already where it was).
+                if (!keepScroll) scrollGridBy(item.getTop() - allTopPx());
             } else {
                 ensureVisible(item);
             }
@@ -772,8 +839,35 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private void setAmbient(int color) {
         ambientColor = color;
         int c = darken(color) & 0x00FFFFFF;
-        ambientGlow.setColors(new int[]{0x50000000 | c, 0x20000000 | c, 0x00000000 | c});
+        // While music plays the glow gently swells and eases back, like it is breathing with the song.
+        boolean music = musicColor != 0;
+        float k = music ? 0.8f + 0.3f * pulseV : 1f;
+        ambientGlow.setColors(new int[]{((int) (0x50 * k) << 24) | c, ((int) (0x20 * k) << 24) | c, c});
+        if (music && ambientBaseRadius > 0) ambientGlow.setGradientRadius(ambientBaseRadius * (0.95f + 0.1f * pulseV));
         ambient.invalidate();
+    }
+
+    private void startAmbientPulse() {
+        if (ambientPulse != null) return;
+        ambientPulse = ValueAnimator.ofFloat(0f, 1f);
+        ambientPulse.setDuration(4800);
+        ambientPulse.setRepeatCount(ValueAnimator.INFINITE);
+        ambientPulse.setRepeatMode(ValueAnimator.REVERSE);
+        ambientPulse.setInterpolator(new AccelerateDecelerateInterpolator());
+        ambientPulse.addUpdateListener(a -> {
+            pulseV = (Float) a.getAnimatedValue();
+            if (heroShown) setAmbient(ambientColor);
+        });
+        ambientPulse.start();
+    }
+
+    private void stopAmbientPulse() {
+        if (ambientPulse != null) {
+            ambientPulse.cancel();
+            ambientPulse = null;
+        }
+        pulseV = 0f;
+        if (ambientBaseRadius > 0) ambientGlow.setGradientRadius(ambientBaseRadius);
     }
 
     private static int darken(int color) {
@@ -1458,6 +1552,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     private void stopMusicWatch() {
         handler.removeCallbacks(musicCycle);
+        stopAmbientPulse();
         musicSongId = "";
         musicPalette = null;
         musicColor = 0;
@@ -1515,6 +1610,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             if (artist == null && meta != null) artist = meta.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST);
             widgets.setNowPlaying(meta == null ? null : meta.getString(MediaMetadata.METADATA_KEY_TITLE),
                     artist, SongColors.artOf(meta), color);
+            startAmbientPulse();
             if (changed) {
                 handler.removeCallbacks(musicCycle);
                 handler.postDelayed(musicCycle, MUSIC_CYCLE_MS);
@@ -1525,10 +1621,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             musicColor = 0;
             musicSongId = "";
             handler.removeCallbacks(musicCycle);
+            stopAmbientPulse();
             widgets.clearNowPlaying();
         }
         positionWidgets();
-        if (changed && heroShown) animateAmbient(ambientFor(lastFocused), 1800);   // slow, soft fade
+        if (changed && heroShown) animateAmbient(ambientFor(lastFocused), 4500);   // slow, soft fade
     }
 
     private void open(Intent i) {

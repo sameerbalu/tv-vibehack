@@ -46,6 +46,8 @@ import java.util.Set;
 public class WidgetPanel extends LinearLayout {
 
     static final String[] IDS = {"now_playing", "calendar", "storage", "memory", "network", "volume", "day", "uptime"};
+    static final int DARK_RED_FROM = 0xFF7A0C12;
+    static final int DARK_RED_TO = 0xFFB3121B;
     static final int CARD_H_DP = 64;
     static final int GAP_DP = 8;
     static final int WIDTH_DP = 250;
@@ -184,8 +186,7 @@ public class WidgetPanel extends LinearLayout {
             memValue.setText(String.format(Locale.US, "%.1f of %.1f GB in use",
                     (mi.totalMem - mi.availMem) / 1e9, mi.totalMem / 1e9));
             float memUsed = mi.totalMem > 0 ? 1f - mi.availMem / (float) mi.totalMem : 0f;
-            int[] mc = levelColors(memUsed);
-            memBar.set(memUsed, mc[0], mc[1]);
+            memBar.set(memUsed, DARK_RED_FROM, DARK_RED_TO);      // memory use is always dark red
         } catch (Exception ignored) {
         }
 
