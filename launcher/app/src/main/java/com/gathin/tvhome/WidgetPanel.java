@@ -36,6 +36,7 @@ import java.util.Date;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.TimeZone;
 import java.util.Map;
 import java.util.Set;
 
@@ -45,7 +46,8 @@ import java.util.Set;
  */
 public class WidgetPanel extends LinearLayout {
 
-    static final String[] IDS = {"now_playing", "calendar", "storage", "memory", "network", "volume", "day", "uptime"};
+    static final String[] IDS = {"now_playing", "calendar", "storage", "memory", "network", "volume", "day", "uptime",
+            "moon", "world", "year", "quote"};
     static final int DARK_RED_FROM = 0xFF7A0C12;
     static final int DARK_RED_TO = 0xFFB3121B;
     static final int CARD_H_DP = 64;
@@ -67,7 +69,9 @@ public class WidgetPanel extends LinearLayout {
     private ImageView npArt;
     private TextView calDay, calWeek, calMonth;
     private TextView stValue, memValue, netValue, netSub, volValue, dayValue, upValue, upSub;
-    private ColorBar stBar, memBar, volBar, dayBar;
+    private ColorBar stBar, memBar, volBar, dayBar, yearBar;
+    private MoonView moonView;
+    private TextView moonName, moonLit, worldValue, yearValue, quoteText;
 
     public WidgetPanel(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -88,6 +92,10 @@ public class WidgetPanel extends LinearLayout {
         buildVolume();
         buildDay();
         buildUptime();
+        buildMoon();
+        buildWorld();
+        buildYear();
+        buildQuote();
         for (String id : IDS) {
             View c = cards.get(id);
             LayoutParams lp = new LayoutParams((int) (WIDTH_DP * d), (int) (CARD_H_DP * d));
@@ -108,6 +116,10 @@ public class WidgetPanel extends LinearLayout {
             case "volume": return R.string.widget_volume;
             case "day": return R.string.widget_day;
             case "uptime": return R.string.widget_uptime;
+            case "moon": return R.string.widget_moon;
+            case "world": return R.string.widget_world;
+            case "year": return R.string.widget_year;
+            case "quote": return R.string.widget_quote;
             default: return R.string.widget_network;
         }
     }
@@ -221,6 +233,30 @@ public class WidgetPanel extends LinearLayout {
         upValue.setText(days > 0 ? days + " d  " + hours + " h" : hours + " h  " + mins + " m");
         upSub.setText("Since the last restart");
         refreshVolume();
+
+        float phase = MoonView.phaseNow();
+        moonView.setPhase(phase);
+        moonName.setText(MoonView.phaseName(phase));
+        moonLit.setText(MoonView.litPercent(phase) + "% lit");
+
+        String[][] zones = {{"DXB", "Asia/Dubai"}, {"LON", "Europe/London"}, {"NYC", "America/New_York"}};
+        StringBuilder world = new StringBuilder();
+        for (int i = 0; i < zones.length; i++) {
+            SimpleDateFormat f = new SimpleDateFormat("HH:mm", Locale.US);
+            f.setTimeZone(TimeZone.getTimeZone(zones[i][1]));
+            world.append(zones[i][0]).append(' ').append(f.format(now));
+            if (i < zones.length - 1) world.append("   ");
+        }
+        worldValue.setText(world.toString());
+
+        int doy = cal.get(Calendar.DAY_OF_YEAR);
+        int daysInYear = cal.getActualMaximum(Calendar.DAY_OF_YEAR);
+        float yearFrac = doy / (float) daysInYear;
+        yearValue.setText(String.format(Locale.US, "%d%% of %d  \u00B7  day %d", Math.round(yearFrac * 100),
+                cal.get(Calendar.YEAR), doy));
+        yearBar.set(yearFrac, 0xFF2DD4BF, 0xFF60A5FA);
+
+        quoteText.setText(Quotes.forDay(doy));
         applyVisibility();
     }
 
@@ -442,6 +478,57 @@ public class WidgetPanel extends LinearLayout {
         bl.topMargin = (int) (6 * d);
         c.addView(dayBar, bl);
         cards.put("day", c);
+    }
+
+    private void buildMoon() {
+        LinearLayout c = card(true, 0xFFFDE68A);
+        moonView = new MoonView(getContext(), null);
+        LayoutParams ml = new LayoutParams((int) (40 * d), (int) (40 * d));
+        ml.setMarginEnd((int) (12 * d));
+        c.addView(moonView, ml);
+        LinearLayout col = column();
+        col.addView(label("Moon", 9, 0xFFFDE68A));
+        moonName = text(14, Color.WHITE, false);
+        col.addView(moonName);
+        moonLit = text(12, 0xB3FFFFFF, false);
+        col.addView(moonLit);
+        c.addView(col, new LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        cards.put("moon", c);
+    }
+
+    private void buildWorld() {
+        LinearLayout c = card(false, 0xFF67E8F9);
+        c.addView(label("World clock", 9, 0xFF67E8F9));
+        worldValue = text(11, Color.WHITE, false);
+        LayoutParams wl = new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        wl.topMargin = (int) (4 * d);
+        c.addView(worldValue, wl);
+        cards.put("world", c);
+    }
+
+    private void buildYear() {
+        LinearLayout c = card(false, 0xFF86EFAC);
+        c.addView(label("Year", 9, 0xFF86EFAC));
+        yearValue = text(14, Color.WHITE, false);
+        c.addView(yearValue);
+        yearBar = new ColorBar(getContext());
+        LayoutParams bl = new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (5 * d));
+        bl.topMargin = (int) (6 * d);
+        c.addView(yearBar, bl);
+        cards.put("year", c);
+    }
+
+    private void buildQuote() {
+        LinearLayout c = card(false, 0xFFFCA5A5);
+        c.addView(label("Quote of the day", 9, 0xFFFCA5A5));
+        quoteText = text(12, Color.WHITE, false);
+        quoteText.setSingleLine(false);
+        quoteText.setMaxLines(2);
+        quoteText.setEllipsize(TextUtils.TruncateAt.END);
+        LayoutParams ql = new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        ql.topMargin = (int) (3 * d);
+        c.addView(quoteText, ql);
+        cards.put("quote", c);
     }
 
     private void buildUptime() {

@@ -61,4 +61,21 @@
     <string name="widget_network">Network</string>
     <string name="widget_on">On</string>
     <string name="widget_off">Off</string>
+    <string name="widget_moon">Moon phase</string>
+    <string name="widget_world">World clock</string>
+    <string name="widget_year">Year progress</string>
+    <string name="widget_quote">Quote of the day</string>
+    <string name="fx_title">Glow &amp; effects</string>
+    <string name="fx_breathing">Breathing glow</string>
+    <string name="fx_strength">Glow strength</string>
+    <string name="fx_soft">Soft</string>
+    <string name="fx_normal">Normal</string>
+    <string name="fx_strong">Strong</string>
+    <string name="presets">Wallpaper presets</string>
+    <string name="preset_midnight">Midnight</string>
+    <string name="preset_sunset">Sunset</string>
+    <string name="preset_forest">Forest</string>
+    <string name="preset_ember">Ember</string>
+    <string name="preset_ocean">Ocean</string>
+    <string name="preset_graphite">Graphite</string>
 </resources>

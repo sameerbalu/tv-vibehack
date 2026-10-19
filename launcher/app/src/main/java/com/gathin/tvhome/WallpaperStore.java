@@ -1,6 +1,7 @@
 package com.gathin.tvhome;
 
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.net.Uri;
 
 import java.io.File;
@@ -44,6 +45,17 @@ final class WallpaperStore {
             byte[] buf = new byte[64 * 1024];
             int n;
             while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+        }
+        File dst = file(c);
+        dst.delete();
+        if (!tmp.renameTo(dst)) throw new IOException("Cannot save wallpaper");
+    }
+
+    /** Saves a painted wallpaper (a built-in preset) as the wallpaper. */
+    static void saveBitmap(Context c, Bitmap bmp) throws IOException {
+        File tmp = new File(c.getFilesDir(), "wallpaper.tmp");
+        try (OutputStream out = new FileOutputStream(tmp)) {
+            bmp.compress(Bitmap.CompressFormat.JPEG, 92, out);
         }
         File dst = file(c);
         dst.delete();

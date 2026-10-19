@@ -188,4 +188,47 @@
             </LinearLayout>
         </LinearLayout>
     </LinearLayout>
+
+    <!-- A short line at the bottom; changes every so often. -->
+    <TextView
+        android:id="@+id/saverQuote"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|start"
+        android:layout_marginStart="64dp"
+        android:layout_marginBottom="52dp"
+        android:maxWidth="640dp"
+        android:textColor="#CCFFFFFF"
+        android:textSize="18sp"
+        android:fontFamily="@font/outfit"
+        android:fontVariationSettings="'wght' 300"
+        android:letterSpacing="0.04" />
+
+    <!-- Tonight's moon, bottom right. -->
+    <LinearLayout
+        android:id="@+id/saverMoonRow"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="64dp"
+        android:layout_marginBottom="48dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <com.gathin.tvhome.MoonView
+            android:id="@+id/saverMoon"
+            android:layout_width="40dp"
+            android:layout_height="40dp" />
+
+        <TextView
+            android:id="@+id/saverMoonName"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:textColor="#B3FFFFFF"
+            android:textSize="13sp"
+            android:fontFamily="@font/outfit"
+            android:letterSpacing="0.1"
+            android:textAllCaps="true" />
+    </LinearLayout>
 </FrameLayout>

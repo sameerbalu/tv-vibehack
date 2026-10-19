@@ -22,6 +22,7 @@ import android.os.Build;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
@@ -117,6 +118,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private ValueAnimator ambientAnim;
     private ValueAnimator ambientPulse;     // slow "breathing" of the glow while a song plays
     private float pulseV;                   // 0..1
+    private boolean fxBreatheOn = true;     // Settings > Glow & effects
+    private int fxLevel = 1;                // 0 soft, 1 normal, 2 strong
     private float ambientBaseRadius;
     // Spotify: album colour while a song plays (0 = nothing playing)
     private int musicColor;
@@ -325,6 +328,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         btnInputs.setOnClickListener(v -> showInputs());
         btnBluetooth.setOnClickListener(v -> showBluetooth());
         btnSettings.setOnFocusChangeListener((v, f) -> v.animate().rotation(f ? 60f : 0f).setDuration(300).start());
+        // Inputs: the plug slides in. Bluetooth: the icon pulses. (Settings: the gear turns, above.)
+        inputsIcon = wrapStartIcon((TextView) btnInputs);
+        bluetoothIcon = wrapStartIcon(btnBluetooth);
+        btnInputs.setOnFocusChangeListener((v, f) -> {
+            if (inputsIcon != null) inputsIcon.plugIn(f, 9 * density);
+        });
+        btnBluetooth.setOnFocusChangeListener((v, f) -> {
+            if (bluetoothIcon != null) bluetoothIcon.pulse(f);
+        });
         btnSettings.setOnClickListener(v -> showLauncherSettings());
 
         // Keep focus on the top bar at its ends and at the top: Android's focus finder would otherwise
@@ -427,6 +439,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             requestPermissions(new String[]{Manifest.permission.BLUETOOTH_CONNECT}, REQUEST_BT);
         }
         startMusicWatch();
+        SharedPreferences fx = getSharedPreferences(PREFS, MODE_PRIVATE);
+        fxBreatheOn = fx.getBoolean("fx_breathe", true);
+        fxLevel = Math.max(0, Math.min(2, fx.getInt("fx_level", 1)));
+        syncPulse();
 
         // Return to the app we left from, or the same slot if that app is gone. Always refocus: after
         // reload() the view that holds focus may no longer show the app it had.
@@ -467,6 +483,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         super.onPause();
         handler.removeCallbacks(restoreFocus);
         handler.removeCallbacks(minuteTick);
+        if (inputsIcon != null) inputsIcon.rest();
+        if (bluetoothIcon != null) bluetoothIcon.rest();
         if (!restorePending) {
             // Remember where the list was, so Home returns to the same spot.
             resumeTileTop = NO_TOP;
@@ -781,6 +799,17 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     // ---- top shelf -------------------------------------------------------------------------------
 
+    private IconAnim inputsIcon, bluetoothIcon;
+
+    /** Replaces a pill's start icon with an animatable copy of it. */
+    private IconAnim wrapStartIcon(TextView pill) {
+        Drawable start = pill.getCompoundDrawablesRelative()[0];
+        if (start == null) return null;
+        IconAnim wrapped = new IconAnim(start.mutate());
+        pill.setCompoundDrawablesRelativeWithIntrinsicBounds(wrapped, null, null, null);
+        return wrapped;
+    }
+
     private void showHero(int position, float dockTopInRoot) {
         lastDockTop = dockTopInRoot;
         positionWidgets();
@@ -839,12 +868,26 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private void setAmbient(int color) {
         ambientColor = color;
         int c = darken(color) & 0x00FFFFFF;
-        // While music plays the glow gently swells and eases back, like it is breathing with the song.
+        // The glow gently swells and eases back, like it is breathing (stronger while a song plays).
         boolean music = musicColor != 0;
-        float k = music ? 0.8f + 0.3f * pulseV : 1f;
-        ambientGlow.setColors(new int[]{((int) (0x50 * k) << 24) | c, ((int) (0x20 * k) << 24) | c, c});
-        if (music && ambientBaseRadius > 0) ambientGlow.setGradientRadius(ambientBaseRadius * (0.95f + 0.1f * pulseV));
+        boolean breathing = ambientPulse != null;
+        float k = breathing ? (music ? 0.8f + 0.3f * pulseV : 0.88f + 0.2f * pulseV) : 1f;
+        k *= fxLevel == 0 ? 0.6f : fxLevel == 2 ? 1.4f : 1f;
+        int a1 = Math.min(255, (int) (0x50 * k));
+        int a2 = Math.min(255, (int) (0x20 * k));
+        ambientGlow.setColors(new int[]{(a1 << 24) | c, (a2 << 24) | c, c});
+        if (breathing && ambientBaseRadius > 0) {
+            float swing = music ? 0.95f + 0.1f * pulseV : 0.97f + 0.06f * pulseV;
+            ambientGlow.setGradientRadius(ambientBaseRadius * swing);
+        }
         ambient.invalidate();
+    }
+
+    /** Starts or stops the breathing to match the setting. */
+    private void syncPulse() {
+        if (fxBreatheOn) startAmbientPulse();
+        else stopAmbientPulse();
+        if (ambientBaseRadius > 0) setAmbient(ambientColor);
     }
 
     private void startAmbientPulse() {
@@ -1002,11 +1045,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         int minWidth = (int) (230 * density);
         final PopupWindow popup = newDropdown(panel, minWidth);
         addInputRow(rows, popup, R.drawable.ic_wallpaper, getString(R.string.choose_wallpaper), -1, this::chooseWallpaper);
-        addInputRow(rows, popup, R.drawable.ic_reset, getString(R.string.reset_wallpaper), -1, this::resetWallpaper);
-        addInputRow(rows, popup, R.drawable.ic_arrange, getString(R.string.arrange_apps), -1,
-                () -> beginArrange(lastFocused));
+        addInputRow(rows, popup, R.drawable.ic_wallpaper, getString(R.string.presets), -1, this::showPresets);
         addInputRow(rows, popup, R.drawable.ic_hide, getString(R.string.hide_apps), -1, this::showHideApps);
         addInputRow(rows, popup, R.drawable.ic_widgets, getString(R.string.widgets), -1, this::showWidgets);
+        addInputRow(rows, popup, R.drawable.ic_palette, getString(R.string.fx_title), -1, this::showEffects);
         if (!hasListenerAccess()) {
             addInputRow(rows, popup, R.drawable.ic_saver, getString(R.string.music_access), -1, this::openMusicAccess);
         }
@@ -1052,6 +1094,87 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         }
         fitScroll(panel);
         showDropdown(popup, panel, anchor, minWidth, true);
+    }
+
+    /** Glow & effects: breathing on/off and how strong the background glow is. */
+    private void showEffects() {
+        View anchor = findViewById(R.id.btnSettings);
+        View panel = getLayoutInflater().inflate(R.layout.popup_apps, root, false);
+        panel.findViewById(R.id.title).setVisibility(View.GONE);
+        LinearLayout rows = panel.findViewById(R.id.rows);
+        int minWidth = (int) (300 * density);
+        final PopupWindow popup = newDropdown(panel, minWidth);
+
+        final View breathe = getLayoutInflater().inflate(R.layout.item_input, rows, false);
+        ((ImageView) breathe.findViewById(R.id.icon)).setImageResource(R.drawable.ic_palette);
+        ((TextView) breathe.findViewById(R.id.title)).setText(R.string.fx_breathing);
+        updateWidgetRow(breathe, fxBreatheOn);
+        breathe.setOnClickListener(v -> {
+            fxBreatheOn = !fxBreatheOn;
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean("fx_breathe", fxBreatheOn).apply();
+            updateWidgetRow(breathe, fxBreatheOn);
+            syncPulse();
+        });
+        rows.addView(breathe);
+
+        final View strength = getLayoutInflater().inflate(R.layout.item_input, rows, false);
+        ((ImageView) strength.findViewById(R.id.icon)).setImageResource(R.drawable.ic_palette);
+        ((TextView) strength.findViewById(R.id.title)).setText(R.string.fx_strength);
+        updateStrengthRow(strength);
+        strength.setOnClickListener(v -> {
+            fxLevel = (fxLevel + 1) % 3;
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putInt("fx_level", fxLevel).apply();
+            updateStrengthRow(strength);
+            if (ambientBaseRadius > 0) setAmbient(ambientColor);
+        });
+        rows.addView(strength);
+
+        fitScroll(panel);
+        showDropdown(popup, panel, anchor, minWidth, true);
+    }
+
+    private void updateStrengthRow(View row) {
+        ((TextView) row.findViewById(R.id.status)).setText(
+                fxLevel == 0 ? R.string.fx_soft : fxLevel == 2 ? R.string.fx_strong : R.string.fx_normal);
+        row.findViewById(R.id.dot).setVisibility(View.VISIBLE);
+    }
+
+    /** Built-in wallpapers painted in code; picking one saves it like a chosen picture. */
+    private void showPresets() {
+        View anchor = findViewById(R.id.btnSettings);
+        View panel = getLayoutInflater().inflate(R.layout.popup_apps, root, false);
+        panel.findViewById(R.id.title).setVisibility(View.GONE);
+        LinearLayout rows = panel.findViewById(R.id.rows);
+        int minWidth = (int) (260 * density);
+        final PopupWindow popup = newDropdown(panel, minWidth);
+        for (int i = 0; i < WallpaperPresets.COUNT; i++) {
+            final int index = i;
+            View row = getLayoutInflater().inflate(R.layout.item_input, rows, false);
+            ((ImageView) row.findViewById(R.id.icon)).setImageResource(R.drawable.ic_wallpaper);
+            ((TextView) row.findViewById(R.id.title)).setText(WallpaperPresets.NAMES[i]);
+            row.findViewById(R.id.status).setVisibility(View.GONE);
+            row.findViewById(R.id.dot).setVisibility(View.GONE);
+            row.setOnClickListener(v -> {
+                popup.dismiss();
+                applyPreset(index);
+            });
+            rows.addView(row);
+        }
+        fitScroll(panel);
+        showDropdown(popup, panel, anchor, minWidth, true);
+    }
+
+    private void applyPreset(final int index) {
+        new Thread(() -> {
+            try {
+                Bitmap b = WallpaperPresets.render(index, 1920, 1080);
+                WallpaperStore.saveBitmap(this, b);
+                b.recycle();
+                runOnUiThread(() -> applyWallpaper(WallpaperStore.uri(this)));
+            } catch (Exception | OutOfMemoryError e) {
+                runOnUiThread(() -> Toast.makeText(this, R.string.wallpaper_failed, Toast.LENGTH_SHORT).show());
+            }
+        }).start();
     }
 
     private void updateWidgetRow(View row, boolean on) {
@@ -1610,7 +1733,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             if (artist == null && meta != null) artist = meta.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST);
             widgets.setNowPlaying(meta == null ? null : meta.getString(MediaMetadata.METADATA_KEY_TITLE),
                     artist, SongColors.artOf(meta), color);
-            startAmbientPulse();
             if (changed) {
                 handler.removeCallbacks(musicCycle);
                 handler.postDelayed(musicCycle, MUSIC_CYCLE_MS);
@@ -1621,7 +1743,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             musicColor = 0;
             musicSongId = "";
             handler.removeCallbacks(musicCycle);
-            stopAmbientPulse();
             widgets.clearNowPlaying();
         }
         positionWidgets();

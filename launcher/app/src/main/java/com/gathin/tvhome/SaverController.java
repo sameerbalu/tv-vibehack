@@ -40,6 +40,11 @@ final class SaverController {
     private final ColorBar dayBar;
     private final View nowRow;
     private final ImageView nowArt;
+    private final TextView quote, moonName;
+    private final MoonView moon;
+    private final View moonRow;
+    private int quoteIndex;
+    private int ticks;
     private String songId = "";
     private boolean running;
 
@@ -63,6 +68,10 @@ final class SaverController {
         nowArt = root.findViewById(R.id.saverNowArt);
         nowTitle = root.findViewById(R.id.saverNowTitle);
         nowArtist = root.findViewById(R.id.saverNowArtist);
+        quote = root.findViewById(R.id.saverQuote);
+        moon = root.findViewById(R.id.saverMoon);
+        moonName = root.findViewById(R.id.saverMoonName);
+        moonRow = root.findViewById(R.id.saverMoonRow);
         final float d = ctx.getResources().getDisplayMetrics().density;
         nowArt.setOutlineProvider(new ViewOutlineProvider() {
             @Override
@@ -78,6 +87,13 @@ final class SaverController {
         loadBackground();
         content.setAlpha(0f);
         content.animate().alpha(1f).setDuration(1500).start();
+        quoteIndex = Calendar.getInstance().get(Calendar.DAY_OF_YEAR);
+        quote.setText(Quotes.forDay(quoteIndex));
+        quote.setAlpha(0f);
+        quote.animate().alpha(1f).setDuration(2000).start();
+        moonRow.setAlpha(0f);
+        moonRow.animate().alpha(1f).setDuration(2000).start();
+        ticks = 0;
         updateInfo();
         handler.postDelayed(info, INFO_MS);
     }
@@ -86,6 +102,8 @@ final class SaverController {
         running = false;
         handler.removeCallbacksAndMessages(null);
         content.animate().cancel();
+        quote.animate().cancel();
+        moonRow.animate().cancel();
         wallpaper.setImageDrawable(null);          // give the picture's memory back
         if (wallpaperBitmap != null) {
             wallpaperBitmap.recycle();
@@ -141,6 +159,18 @@ final class SaverController {
         dayBar.set(frac, WidgetPanel.DARK_RED_FROM, 0xFFFFFFFF);
         dayLabel.setText(String.format(Locale.US, "%d%% of today", Math.round(frac * 100)));
 
+        float phase = MoonView.phaseNow();
+        moon.setPhase(phase);
+        moonName.setText(MoonView.phaseName(phase) + "  \u00B7  " + MoonView.litPercent(phase) + "%");
+
+        // A new line every ~24 seconds, faded in and out.
+        if (++ticks % 6 == 0) {
+            quoteIndex++;
+            quote.animate().alpha(0f).setDuration(700).withEndAction(() -> {
+                quote.setText(Quotes.forDay(quoteIndex));
+                quote.animate().alpha(1f).setDuration(1200).start();
+            }).start();
+        }
         updateMusic();
     }
 

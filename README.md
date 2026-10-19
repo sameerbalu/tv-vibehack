@@ -303,3 +303,15 @@ MIT, see [`LICENSE`](LICENSE). The Outfit typeface is under the SIL Open Font Li
 - Home returns to the same spot in All apps (the list is no longer pulled up to the first row); pressing Home several times quickly no longer stacks reloads/animations.
 - Memory widget bar and the screensaver red are dark red.
 - Spotify glow: slower colour changes (about 13 s apart, 9 s fades) and a gentle breathing swell.
+
+## v10 notes
+
+- The background glow breathes for app colours too (not only Spotify). Settings > Glow & effects: breathing on/off, glow strength (soft / normal / strong).
+- Four more widgets: Moon phase, World clock, Year progress, Quote of the day (all offline).
+- Settings > Wallpaper presets: six wallpapers painted in code (Midnight, Sunset, Forest, Ember, Ocean, Graphite).
+- Screensaver: tonight's moon (bottom right) and a quote that changes every ~24 s (bottom left).
+
+## v10.1 notes
+
+- Settings no longer lists "Reset wallpaper" or "Arrange apps" (the features remain in the code).
+- Inputs and Bluetooth pills animate their icons on focus (plug slides in / icon pulses), like the Settings gear turns.
