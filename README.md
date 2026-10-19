@@ -273,3 +273,10 @@ MIT, see [`LICENSE`](LICENSE). The Outfit typeface is under the SIL Open Font Li
 - Spotify glow: while a song plays, the glow behind the dock follows the album colour. One-time setup:
   `adb shell cmd notification allow_listener com.gathin.tvhome/com.gathin.tvhome.MediaListener`
   (or Settings > Notification access > Home). Settings > "Music glow access" shows until it is enabled.
+
+## v7 notes
+
+- Wallpaper is copied into the app, so it survives TV restarts. The Screen saver uses the same copy.
+- Settings > Widgets: Now playing (Spotify), Date, Storage, Memory, Network. Shown on the right above the dock; cards that do not fit are left out.
+- Bluetooth tab also reads the connected speaker from the audio outputs (no permission needed).
+- Icon packs were removed.

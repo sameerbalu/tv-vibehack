@@ -52,4 +52,13 @@
     <string name="ctx_soundbar">Soundbar verbunden</string>
     <string name="music_access">Musik-Glow-Zugriff</string>
     <string name="music_access_help">Enable Notification access for Home in Settings, or run: adb shell cmd notification allow_listener com.gathin.tvhome/com.gathin.tvhome.MediaListener</string>
+    <string name="widgets">Widgets</string>
+    <string name="widgets_hint">Tap a widget to turn it on or off</string>
+    <string name="widget_now_playing">Now playing (Spotify)</string>
+    <string name="widget_calendar">Date</string>
+    <string name="widget_storage">Storage</string>
+    <string name="widget_memory">Memory</string>
+    <string name="widget_network">Network</string>
+    <string name="widget_on">On</string>
+    <string name="widget_off">Off</string>
 </resources>

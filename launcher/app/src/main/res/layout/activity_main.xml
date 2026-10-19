@@ -86,6 +86,15 @@
         android:includeFontPadding="false"
         android:singleLine="true" />
 
+    <!-- Widget cards on the right; positioned above the dock in code. -->
+    <com.gathin.tvhome.WidgetPanel
+        android:id="@+id/widgets"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end|top"
+        android:layout_marginEnd="56dp"
+        android:importantForAccessibility="no" />
+
     <!-- Clock, date and top buttons. Fades out while the full app list (or arrange mode) is showing. -->
     <LinearLayout
         android:id="@+id/header"

@@ -12,6 +12,8 @@ import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.media.AudioDeviceInfo;
+import android.media.AudioManager;
 import android.media.MediaMetadata;
 import android.media.session.MediaController;
 import android.media.session.MediaSessionManager;
@@ -93,6 +95,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private DockDecoration dockDecoration;
     private FrameLayout root;
     private View header;
+    private WidgetPanel widgets;
+    private float lastDockTop = -1f;
     private ImageView wallpaperView;
     private ImageView wallpaperBlurView;
     private View allAppsScrim;
@@ -142,6 +146,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         public void onReceive(Context context, Intent intent) {
             updateBluetoothLabel();
             handler.postDelayed(MainActivity.this::updateBluetoothLabel, 1500);   // profiles settle a moment later
+            handler.postDelayed(MainActivity.this::updateBluetoothLabel, 4500);
         }
     };
     private final MediaSessionManager.OnActiveSessionsChangedListener sessionsListener = this::watchSessions;
@@ -161,6 +166,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         public void run() {
             updateGreeting();
             updateBluetoothLabel();
+            widgets.refresh();
+            positionWidgets();
             handler.postDelayed(this, MINUTE_MS);
         }
     };
@@ -193,6 +200,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
         root = findViewById(R.id.root);
         header = findViewById(R.id.header);
+        widgets = findViewById(R.id.widgets);
         wallpaperView = findViewById(R.id.wallpaper);
         wallpaperBlurView = findViewById(R.id.wallpaperBlur);
         allAppsScrim = findViewById(R.id.allAppsScrim);
@@ -240,6 +248,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         grid.setLayoutAnimation(new LayoutAnimationController(
                 AnimationUtils.loadAnimation(this, R.anim.tile_enter), 0.06f));
         adapter = new AppAdapter(this, this, COLUMNS);
+        if (!adapter.iconPackPackage().isEmpty()) adapter.setIconPack("");   // icon packs were removed in v6
         grid.setAdapter(adapter);
 
         // tvOS layout: the dock row sits at the bottom of the screen; the app list is below it, out of sight.
@@ -349,6 +358,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         updateGreeting();
         updateBluetoothLabel();
         handler.postDelayed(minuteTick, MINUTE_MS);
+        if (wallpaperView.getVisibility() != View.VISIBLE) restoreWallpaper();   // safety net after a restart
+        widgets.animate().cancel();
+        widgets.setAlpha(1f);
+        widgets.setVisibility(View.VISIBLE);
+        widgets.refresh();
+        positionWidgets();
         IntentFilter bt = new IntentFilter();
         bt.addAction(BluetoothAdapter.ACTION_STATE_CHANGED);
         bt.addAction(BluetoothAdapter.ACTION_CONNECTION_STATE_CHANGED);
@@ -395,13 +410,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         Uri uri = data.getData();
         if (uri == null) return;
         try {
-            try {
-                getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            } catch (SecurityException ignored) {
-                // Some TV document providers do not offer persistable grants; still use it this session.
-            }
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(WALLPAPER_URI, uri.toString()).apply();
-            applyWallpaper(uri);
+            // Keep a private copy: the picked link may stop working after a TV restart.
+            WallpaperStore.copyFrom(this, uri);
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(WALLPAPER_URI).apply();
+            applyWallpaper(WallpaperStore.uri(this));
         } catch (Exception e) {
             Toast.makeText(this, R.string.wallpaper_failed, Toast.LENGTH_SHORT).show();
         }
@@ -510,14 +522,32 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     private void setHeaderShown(boolean show) {
         header.animate().cancel();
+        widgets.animate().cancel();
         if (show) {
             header.setVisibility(View.VISIBLE);
             header.animate().alpha(1f).setDuration(300).start();
+            widgets.setVisibility(View.VISIBLE);
+            widgets.animate().alpha(1f).setDuration(300).start();
         } else {
             header.animate().alpha(0f).setDuration(180).withEndAction(() -> {
                 if (overlayApplied) header.setVisibility(View.INVISIBLE);
             }).start();
+            widgets.animate().alpha(0f).setDuration(180).withEndAction(() -> {
+                if (overlayApplied) widgets.setVisibility(View.INVISIBLE);
+            }).start();
         }
+    }
+
+    /** Puts the widget cards on the right, just above the dock, and drops the ones that do not fit. */
+    private void positionWidgets() {
+        if (widgets == null || root.getHeight() == 0) return;
+        float dockTop = lastDockTop > 0 ? lastDockTop : root.getHeight() * 0.62f;
+        float top = header.getBottom() + 4 * density;
+        float bottom = dockTop - 26 * density;
+        float step = (WidgetPanel.CARD_H_DP + WidgetPanel.GAP_DP) * density;
+        int fit = (int) Math.max(0, Math.floor((bottom - top + WidgetPanel.GAP_DP * density) / step));
+        widgets.setMaxCards(fit);
+        widgets.setY(bottom - widgets.contentHeight());
     }
 
     private void scrollGridBy(int dy) {
@@ -659,6 +689,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     // ---- top shelf -------------------------------------------------------------------------------
 
     private void showHero(int position, float dockTopInRoot) {
+        lastDockTop = dockTopInRoot;
+        positionWidgets();
         String label = adapter.labelAt(position);
         float y = dockTopInRoot - 14 * density - 26 * density - heroName.getHeight();
         boolean changed = !label.contentEquals(heroName.getText());
@@ -850,7 +882,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         addInputRow(rows, popup, R.drawable.ic_arrange, getString(R.string.arrange_apps), -1,
                 () -> beginArrange(lastFocused));
         addInputRow(rows, popup, R.drawable.ic_hide, getString(R.string.hide_apps), -1, this::showHideApps);
-        addInputRow(rows, popup, R.drawable.ic_palette, getString(R.string.icon_pack), -1, this::showIconPacks);
+        addInputRow(rows, popup, R.drawable.ic_widgets, getString(R.string.widgets), -1, this::showWidgets);
         if (!hasListenerAccess()) {
             addInputRow(rows, popup, R.drawable.ic_saver, getString(R.string.music_access), -1, this::openMusicAccess);
         }
@@ -873,30 +905,36 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         scroll.setLayoutParams(slp);
     }
 
-    private void showIconPacks() {
+    /** Switch the home-screen widgets on or off. */
+    private void showWidgets() {
         View anchor = findViewById(R.id.btnSettings);
         View panel = getLayoutInflater().inflate(R.layout.popup_apps, root, false);
+        ((TextView) panel.findViewById(R.id.title)).setText(R.string.widgets_hint);
         LinearLayout rows = panel.findViewById(R.id.rows);
-        int minWidth = (int) (300 * density);
+        int minWidth = (int) (320 * density);
         final PopupWindow popup = newDropdown(panel, minWidth);
-        List<IconPack.Info> packs = adapter.iconPacks();
-        ((TextView) panel.findViewById(R.id.title)).setText(packs.isEmpty() ? R.string.none_icon_packs : R.string.no_icon_packs);
-        String current = adapter.iconPackPackage();
-        addChoiceRow(rows, popup, null, R.drawable.ic_reset, getString(R.string.icon_pack_default), current.isEmpty(),
-                () -> applyIconSettings(() -> adapter.setIconPack("")));
-        for (IconPack.Info info : packs) {
-            final String pkg = info.pkg;
-            addChoiceRow(rows, popup, info.icon, 0, info.label, pkg.equals(current),
-                    () -> applyIconSettings(() -> adapter.setIconPack(pkg)));
+        for (final String id : WidgetPanel.IDS) {
+            final View row = getLayoutInflater().inflate(R.layout.item_input, rows, false);
+            ((ImageView) row.findViewById(R.id.icon)).setImageResource(R.drawable.ic_widgets);
+            ((TextView) row.findViewById(R.id.title)).setText(WidgetPanel.titleRes(id));
+            updateWidgetRow(row, widgets.isOn(id));
+            row.setOnClickListener(v -> {
+                boolean on = !widgets.isOn(id);
+                widgets.setOn(id, on);
+                updateWidgetRow(row, on);
+                positionWidgets();
+            });
+            rows.addView(row);
         }
         fitScroll(panel);
         showDropdown(popup, panel, anchor, minWidth, true);
     }
 
-    /** Applies an icon pack change: rebuilds every tile. */
-    private void applyIconSettings(Runnable change) {
-        change.run();
-        adapter.reload();
+    private void updateWidgetRow(View row, boolean on) {
+        ((TextView) row.findViewById(R.id.status)).setText(on ? R.string.widget_on : R.string.widget_off);
+        row.findViewById(R.id.dot).setVisibility(on ? View.VISIBLE : View.GONE);
+        row.findViewById(R.id.title).setAlpha(on ? 1f : 0.45f);
+        row.findViewById(R.id.icon).setAlpha(on ? 1f : 0.45f);
     }
 
     /** A menu row with a "Selected" marker, and either an app-style icon (drawable) or a vector (iconRes). */
@@ -995,6 +1033,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     private void resetWallpaper() {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(WALLPAPER_URI).apply();
+        WallpaperStore.delete(this);
         clearWallpaperViews();
     }
 
@@ -1009,13 +1048,18 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     }
 
     private void restoreWallpaper() {
-        String savedUri = getSharedPreferences(PREFS, MODE_PRIVATE).getString(WALLPAPER_URI, null);
-        if (savedUri == null) return;
-        try {
-            applyWallpaper(Uri.parse(savedUri));
-        } catch (Exception ignored) {
-            resetWallpaper();
+        if (!WallpaperStore.exists(this)) {
+            // Wallpaper chosen in an older version: move it into the app once, if its link still opens.
+            String legacy = getSharedPreferences(PREFS, MODE_PRIVATE).getString(WALLPAPER_URI, null);
+            if (legacy == null) return;
+            try {
+                WallpaperStore.copyFrom(this, Uri.parse(legacy));
+            } catch (Exception e) {
+                return;                       // keep the saved link so the next start can try again
+            }
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(WALLPAPER_URI).apply();
         }
+        applyWallpaper(WallpaperStore.uri(this));
     }
 
     private void applyWallpaper(Uri uri) {
@@ -1091,22 +1135,31 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     }
 
     private int btPending;
+    private int btGen;
     private boolean btFound;
 
-    /** Name of the connected Bluetooth device (the first one if several), or "Bluetooth" when none. */
+    /** Name of the connected Bluetooth device (speaker first, then remotes etc.), or "Bluetooth" when none. */
     private void updateBluetoothLabel() {
         btnBluetooth.setMaxWidth((int) (260 * density));
         btnBluetooth.setSingleLine(true);
         btnBluetooth.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        if (btPending > 0) return;                       // a lookup is already running
         final BluetoothAdapter ba = BluetoothAdapter.getDefaultAdapter();
-        boolean allowed = Build.VERSION.SDK_INT < 31
-                || checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
-        if (ba == null || !allowed || !ba.isEnabled()) {
+        if (ba == null || !ba.isEnabled()) {
             btnBluetooth.setText(R.string.bluetooth);
             return;
         }
-        // Ask per profile: A2DP, headset, HID (remotes, keyboards, gamepads) and GATT (BLE remotes).
+        // 1) Audio devices: lists a connected speaker / headphones by name and needs no permission.
+        String name = connectedAudioName();
+        // 2) Paired devices that report "connected" (remotes, keyboards, gamepads).
+        if (name == null) name = bondedConnectedName(ba);
+        if (name != null) {
+            btGen++;
+            btPending = 0;
+            btnBluetooth.setText(name);
+            return;
+        }
+        // 3) Ask each Bluetooth profile; answers arrive a moment later.
+        final int gen = ++btGen;
         final int[] profiles = {BluetoothProfile.A2DP, BluetoothProfile.HEADSET, 4 /* HID host */, BluetoothProfile.GATT};
         final BluetoothProfile.ServiceListener listener = new BluetoothProfile.ServiceListener() {
             @Override
@@ -1124,8 +1177,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                     ba.closeProfileProxy(profile, proxy);
                 } catch (RuntimeException ignored) {
                 }
-                final String name = found;
-                handler.post(() -> btLookupDone(name));
+                final String result = found;
+                handler.post(() -> btLookupDone(gen, result));
             }
 
             @Override
@@ -1140,16 +1193,57 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 asked = ba.getProfileProxy(this, listener, profile);
             } catch (RuntimeException ignored) {
             }
-            if (!asked) btLookupDone(null);              // profile not supported: no callback will come
+            if (!asked) btLookupDone(gen, null);         // unsupported profile: no callback will come
         }
+        // Some profiles never answer: do not wait for them forever.
+        handler.postDelayed(() -> {
+            if (gen == btGen && btPending > 0) {
+                btPending = 0;
+                if (!btFound) btnBluetooth.setText(R.string.bluetooth);
+            }
+        }, 3000);
     }
 
-    private void btLookupDone(String name) {
+    private void btLookupDone(int gen, String name) {
+        if (gen != btGen) return;                        // an older lookup
         if (name != null && !btFound) {                  // first connected device wins
             btFound = true;
             btnBluetooth.setText(name);
         }
         if (btPending > 0 && --btPending == 0 && !btFound) btnBluetooth.setText(R.string.bluetooth);
+    }
+
+    private String connectedAudioName() {
+        try {
+            AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            for (AudioDeviceInfo info : am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+                int t = info.getType();
+                // 7 = Bluetooth SCO, 8 = Bluetooth A2DP, 26 = BLE headset, 27 = BLE speaker
+                if (t == 7 || t == 8 || t == 26 || t == 27) {
+                    CharSequence n = info.getProductName();
+                    if (n != null && n.toString().trim().length() > 0) return n.toString().trim();
+                }
+            }
+        } catch (RuntimeException ignored) {
+        }
+        return null;
+    }
+
+    private String bondedConnectedName(BluetoothAdapter ba) {
+        try {
+            for (BluetoothDevice dev : ba.getBondedDevices()) {
+                try {
+                    Object connected = BluetoothDevice.class.getMethod("isConnected").invoke(dev);
+                    if (Boolean.TRUE.equals(connected)) {
+                        String n = dev.getName();
+                        if (n != null && n.trim().length() > 0) return n.trim();
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+        } catch (RuntimeException ignored) {
+        }
+        return null;
     }
 
     /** Opens the TV's "Remotes & Accessories" page (the Bluetooth device list). */
@@ -1227,22 +1321,39 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     /** Picks the colour of the song playing in Spotify (album art, else a colour from the title) or clears it. */
     private void updateMusicGlow() {
         int color = 0;
+        MediaMetadata meta = null;
         for (MediaController c : watched) {
             PlaybackState st = c.getPlaybackState();
             if (st == null || st.getState() != PlaybackState.STATE_PLAYING) continue;
-            color = songColor(c.getMetadata());
+            meta = c.getMetadata();
+            color = songColor(meta);
             break;
         }
+        if (color != 0) {
+            String artist = meta == null ? null : meta.getString(MediaMetadata.METADATA_KEY_ARTIST);
+            if (artist == null && meta != null) artist = meta.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST);
+            widgets.setNowPlaying(meta == null ? null : meta.getString(MediaMetadata.METADATA_KEY_TITLE),
+                    artist, artOf(meta), color);
+        } else {
+            widgets.clearNowPlaying();
+        }
+        positionWidgets();
         if (color == musicColor) return;
         musicColor = color;
         if (heroShown) animateAmbient(ambientFor(lastFocused), 1800);   // slow, soft fade between songs
     }
 
-    private static int songColor(MediaMetadata m) {
-        if (m == null) return 0xFF1DB954;                     // Spotify green
+    private static Bitmap artOf(MediaMetadata m) {
+        if (m == null) return null;
         Bitmap art = m.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART);
         if (art == null) art = m.getBitmap(MediaMetadata.METADATA_KEY_ART);
         if (art == null) art = m.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON);
+        return art;
+    }
+
+    private static int songColor(MediaMetadata m) {
+        if (m == null) return 0xFF1DB954;                     // Spotify green
+        Bitmap art = artOf(m);
         if (art != null && art.getWidth() > 0 && art.getHeight() > 0) {
             Bitmap small = Bitmap.createScaledBitmap(art, 12, 12, true);
             int c = AppAdapter.vividColor(small);

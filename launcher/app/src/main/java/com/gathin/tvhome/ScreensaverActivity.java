@@ -21,13 +21,10 @@ public class ScreensaverActivity extends Activity {
         setContentView(R.layout.screensaver);
 
         ImageView wallpaper = findViewById(R.id.saverWallpaper);
-        String saved = getSharedPreferences("launcher_preferences", MODE_PRIVATE).getString("wallpaper_uri", null);
-        if (saved != null) {
-            try {
-                wallpaper.setImageBitmap(decode(Uri.parse(saved)));
-            } catch (Exception ignored) {
-                // No readable wallpaper: the clock simply shows on black.
-            }
+        try {
+            if (WallpaperStore.exists(this)) wallpaper.setImageBitmap(decode(WallpaperStore.uri(this)));
+        } catch (Exception ignored) {
+            // No readable wallpaper: the clock simply shows on black.
         }
         View clock = findViewById(R.id.saverClock);
         clock.setAlpha(0f);
