@@ -42,4 +42,25 @@
     <string name="hide_apps_title">Tap an app to hide or show it</string>
     <string name="app_shown">Shown</string>
     <string name="app_hidden">Hidden</string>
+    <string name="screen_saver">Screen saver</string>
+    <string name="icon_pack">Icon pack</string>
+    <string name="icon_shape">Icon shape</string>
+    <string name="icon_pack_default">Default icons</string>
+    <string name="no_icon_packs">Icon packs found on this TV</string>
+    <string name="none_icon_packs">No icon packs installed. Install one (ADW, Nova or Go format) to use it here.</string>
+    <string name="icon_shape_title">Shape for app icons</string>
+    <string name="selected">Selected</string>
+    <string name="shape_auto">System default</string>
+    <string name="shape_circle">Circle</string>
+    <string name="shape_squircle">Squircle</string>
+    <string name="shape_rounded">Rounded square</string>
+    <string name="shape_square">Square</string>
+    <string name="suggested">Suggested for you</string>
+    <string name="ctx_morning">Morning</string>
+    <string name="ctx_afternoon">Afternoon</string>
+    <string name="ctx_evening">Evening</string>
+    <string name="ctx_night">Night</string>
+    <string name="ctx_weekend">Weekend</string>
+    <string name="ctx_headphones">Headphones connected</string>
+    <string name="ctx_soundbar">Soundbar connected</string>
 </resources>

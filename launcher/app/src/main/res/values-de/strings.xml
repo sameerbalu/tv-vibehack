@@ -30,4 +30,25 @@
     <string name="hide_apps_title">App antippen zum Aus- oder Einblenden</string>
     <string name="app_shown">Sichtbar</string>
     <string name="app_hidden">Ausgeblendet</string>
+    <string name="screen_saver">Bildschirmschoner</string>
+    <string name="icon_pack">Icon-Paket</string>
+    <string name="icon_shape">Icon-Form</string>
+    <string name="icon_pack_default">Standard-Icons</string>
+    <string name="no_icon_packs">Auf diesem TV gefundene Icon-Pakete</string>
+    <string name="none_icon_packs">Kein Icon-Paket installiert. Installiere eines (ADW, Nova oder Go), um es hier zu nutzen.</string>
+    <string name="icon_shape_title">Form für App-Icons</string>
+    <string name="selected">Ausgewählt</string>
+    <string name="shape_auto">Systemstandard</string>
+    <string name="shape_circle">Kreis</string>
+    <string name="shape_squircle">Squircle</string>
+    <string name="shape_rounded">Abgerundetes Quadrat</string>
+    <string name="shape_square">Quadrat</string>
+    <string name="suggested">Für dich vorgeschlagen</string>
+    <string name="ctx_morning">Morgen</string>
+    <string name="ctx_afternoon">Nachmittag</string>
+    <string name="ctx_evening">Abend</string>
+    <string name="ctx_night">Nacht</string>
+    <string name="ctx_weekend">Wochenende</string>
+    <string name="ctx_headphones">Kopfhörer verbunden</string>
+    <string name="ctx_soundbar">Soundbar verbunden</string>
 </resources>

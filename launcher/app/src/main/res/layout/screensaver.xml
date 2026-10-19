@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Screen saver preview: wallpaper and a large clock, nothing else. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#FF000000">
+
+    <ImageView
+        android:id="@+id/saverWallpaper"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:contentDescription="@null" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#26000000" />
+
+    <LinearLayout
+        android:id="@+id/saverClock"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|start"
+        android:layout_marginStart="72dp"
+        android:layout_marginBottom="64dp"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:baselineAligned="true">
+
+            <TextClock
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:format12Hour="h:mm"
+                android:format24Hour="HH:mm"
+                android:textColor="#F2FFFFFF"
+                android:textSize="110sp"
+                android:fontFamily="@font/outfit"
+                android:fontVariationSettings="'wght' 200"
+                android:letterSpacing="-0.04"
+                android:includeFontPadding="false" />
+
+            <TextClock
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:format12Hour="a"
+                android:format24Hour=""
+                android:textColor="#B3FFFFFF"
+                android:textSize="22sp"
+                android:fontFamily="@font/outfit"
+                android:fontVariationSettings="'wght' 500"
+                android:letterSpacing="0.08"
+                android:textAllCaps="true" />
+        </LinearLayout>
+
+        <TextClock
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:layout_marginTop="4dp"
+            android:format12Hour="EEEE  d MMMM"
+            android:format24Hour="EEEE  d MMMM"
+            android:textColor="#B3FFFFFF"
+            android:textSize="18sp"
+            android:fontFamily="@font/outfit"
+            android:fontVariationSettings="'wght' 400"
+            android:letterSpacing="0.14"
+            android:textAllCaps="true" />
+    </LinearLayout>
+</FrameLayout>

@@ -8,9 +8,11 @@ import android.content.pm.ApplicationInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.graphics.Outline;
 import android.graphics.Rect;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
 import android.media.tv.TvContract;
 import android.media.tv.TvInputInfo;
 import android.media.tv.TvInputManager;
@@ -28,9 +30,11 @@ import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewOutlineProvider;
 import android.view.animation.AnimationUtils;
 import android.view.animation.DecelerateInterpolator;
 import android.view.animation.LayoutAnimationController;
+import android.view.animation.OvershootInterpolator;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -65,7 +69,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     static int COLUMNS = 4;
     private static final long MINUTE_MS = 60_000L;
     /** Where the first row of the app list sits (dp from the top) when it opens. Keeps the dock row off screen. */
-    private static final int ALL_TOP_DP = 30;
+    private static final int PANEL_TOP_STRIP_DP = 208;   // glass panel top when the Suggested row is shown
+    private static final int PANEL_TOP_PLAIN_DP = 28;    // ... and when there is nothing to suggest
+    private static final int PANEL_BOTTOM_DP = 24;
+    private static final int ROW_INSET_DP = 14;          // first row of apps sits this far inside the panel
     /** Top padding of the grid while arranging, so the dock row and the rows below are all visible. */
     private static final int ARRANGE_TOP_DP = 36;
     private String liveTvPkg;
@@ -81,6 +88,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private ImageView wallpaperView;
     private ImageView wallpaperBlurView;
     private View allAppsScrim;
+    private GlassPanelView allAppsPanel;
+    private View suggestStrip;
+    private LinearLayout suggestRow;
+    private TextView suggestContext;
     private GlassView glass;
     private TextView heroName;
     private View ambient;
@@ -98,6 +109,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private boolean arranging;
     /** What the blur / header state on screen currently reflects (see refreshChrome). */
     private boolean overlayApplied;
+    /** True while the all-apps extras (glass panel, Suggested row) are shown. */
+    private boolean allUiApplied;
+    /** True from the start of the "back to dock" animation until it ends. */
+    private boolean snapActive;
+    private final List<String> suggestKeys = new ArrayList<>();
     /** Align the focused row to the top of the screen on the next focus, even if we were already in the app list. */
     private boolean alignNext;
     private List<String> arrangeBackup;
@@ -126,6 +142,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         public void run() {
             updateGreeting();
             updateWifiLabel();
+            updateSuggestions();
             handler.postDelayed(this, MINUTE_MS);
         }
     };
@@ -134,7 +151,17 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         @Override
         public void run() {
             if (grid == null || grid.getHeight() == 0) return;
-            grid.setClipBounds(new Rect(0, 0, grid.getWidth(), grid.getHeight() - (int) (40 * density)));
+            int w = grid.getWidth(), h = grid.getHeight();
+            if (arranging) {
+                grid.setClipBounds(null);
+            } else if (allUiApplied) {
+                // All apps: tiles scroll inside the glass panel.
+                grid.setClipBounds(new Rect(0, panelTopPx(), w, h - (int) (PANEL_BOTTOM_DP * density)));
+            } else if (overlayApplied) {
+                grid.setClipBounds(null);
+            } else {
+                grid.setClipBounds(new Rect(0, 0, w, h - (int) (40 * density)));   // dock: hide the rows below it
+            }
         }
     };
 
@@ -151,6 +178,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         wallpaperView = findViewById(R.id.wallpaper);
         wallpaperBlurView = findViewById(R.id.wallpaperBlur);
         allAppsScrim = findViewById(R.id.allAppsScrim);
+        allAppsPanel = findViewById(R.id.allAppsPanel);
+        suggestStrip = findViewById(R.id.suggestStrip);
+        suggestRow = findViewById(R.id.suggestRow);
+        suggestContext = findViewById(R.id.suggestContext);
         glass = findViewById(R.id.glass);
         heroName = findViewById(R.id.heroName);
         ambient = findViewById(R.id.ambient);
@@ -253,6 +284,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         ConnectivityManager cm = getSystemService(ConnectivityManager.class);
         if (cm != null) cm.registerDefaultNetworkCallback(networkCallback);
 
+        applyAllLayout();
         restoreWallpaper();   // after the grid exists: the dock band uses the blurred wallpaper too
     }
 
@@ -269,6 +301,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         allAppsMode = false;
         arranging = false;
         overlayApplied = false;
+        allUiApplied = false;
+        snapActive = false;
+        allAppsPanel.animate().cancel();
+        suggestStrip.animate().cancel();
+        allAppsPanel.setAlpha(0f);
+        suggestStrip.setAlpha(0f);
+        suggestStrip.setVisibility(View.INVISIBLE);
         wallpaperBlurView.animate().cancel();
         allAppsScrim.animate().cancel();
         header.animate().cancel();
@@ -278,12 +317,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         header.setVisibility(View.VISIBLE);
         grid.animate().cancel();
         grid.setAlpha(1f);
+        grid.setTranslationY(0f);
         updateGridPadding();
         clipRunnable.run();
         // Read these before reload(): rebinding can move focus to the first tile and overwrite them.
         final String returnKey = lastFocusedKey;
         final int returnSlot = lastFocused;
         adapter.reload();
+        suggestKeys.clear();
+        updateSuggestions();
         grid.scheduleLayoutAnimation();
         updateGreeting();
         updateWifiLabel();
@@ -356,7 +398,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         } else {
             int dockRow = (int) ((145 + 6 + 12) * density);   // item height plus DockDecoration offsets
             top = Math.max(0, h - dockRow - (int) (30 * density));
-            bottom = Math.max((int) (40 * density), h - (int) ((145 + ALL_TOP_DP) * density));
+            bottom = Math.max((int) (40 * density), h - (int) (145 * density) - allTopPx());
         }
         if (grid.getPaddingTop() != top || grid.getPaddingBottom() != bottom) {
             grid.setPadding(grid.getPaddingLeft(), top, grid.getPaddingRight(), bottom);
@@ -364,21 +406,171 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     }
 
     /**
-     * The "overlay" state (app list or arrange mode) blurs and dims the background and hides the clock,
-     * date, top buttons and (by scrolling) the dock. The dock state shows them and hides the app list.
+     * Three looks: the dock state (clock, buttons, dock row), the all-apps state (background blurred and
+     * lighter, a glass panel with the app list, the Suggested row on top, everything else hidden) and the
+     * arrange state (blurred, everything visible). This brings the screen in line with allAppsMode/arranging.
      */
     private void refreshChrome() {
         boolean overlay = allAppsMode || arranging;
-        if (overlay == overlayApplied) return;
+        boolean allUi = allAppsMode && !arranging;
+        boolean overlayChanged = overlay != overlayApplied;
+        boolean allUiChanged = allUi != allUiApplied;
+        if (!overlayChanged && !allUiChanged) return;
         overlayApplied = overlay;
-        wallpaperBlurView.animate().alpha(overlay ? 0.82f : 0f).setDuration(350).start();
-        allAppsScrim.animate().alpha(overlay ? 1f : 0f).setDuration(350).start();
-        setHeaderShown(!overlay);
+        allUiApplied = allUi;
+        if (overlayChanged) {
+            wallpaperBlurView.animate().alpha(overlay ? 1f : 0f).setDuration(350).start();
+            allAppsScrim.animate().alpha(overlay ? 1f : 0f).setDuration(350).start();
+            setHeaderShown(!overlay);
+        }
+        if (allUiChanged) setAllUiShown(allUi);
         handler.removeCallbacks(clipRunnable);
-        if (overlay) {
-            grid.setClipBounds(null);
+        if (overlay) clipRunnable.run();
+        else handler.postDelayed(clipRunnable, 380);   // after the app list has slid away
+    }
+
+    private void setAllUiShown(boolean show) {
+        allAppsPanel.animate().cancel();
+        suggestStrip.animate().cancel();
+        if (show) {
+            suggestStrip.setVisibility(suggestKeys.isEmpty() ? View.INVISIBLE : View.VISIBLE);
+            allAppsPanel.animate().alpha(1f).setDuration(350).start();
+            suggestStrip.animate().alpha(1f).setDuration(350).start();
         } else {
-            handler.postDelayed(clipRunnable, 380);   // after the app list has slid away
+            allAppsPanel.animate().alpha(0f).setDuration(200).start();
+            suggestStrip.animate().alpha(0f).setDuration(200).withEndAction(() -> {
+                if (!allUiApplied) suggestStrip.setVisibility(View.INVISIBLE);
+            }).start();
+        }
+    }
+
+    // ---- all apps: glass panel and the Suggested row ---------------------------------------------
+
+    private int panelTopPx() {
+        return (int) ((suggestKeys.isEmpty() ? PANEL_TOP_PLAIN_DP : PANEL_TOP_STRIP_DP) * density);
+    }
+
+    /** Where the first row of apps sits when the list opens: just inside the glass panel. */
+    private int allTopPx() {
+        return panelTopPx() + (int) (ROW_INSET_DP * density);
+    }
+
+    /** Moves the glass panel (and the grid's scroll range) to match whether the Suggested row is shown. */
+    private void applyAllLayout() {
+        ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) allAppsPanel.getLayoutParams();
+        int top = panelTopPx();
+        if (lp.topMargin != top) {
+            lp.topMargin = top;
+            allAppsPanel.setLayoutParams(lp);
+        }
+        updateGridPadding();
+        if (overlayApplied) clipRunnable.run();
+    }
+
+    private int suggestCount() {
+        return suggestKeys.size();
+    }
+
+    /** Recomputes what to suggest right now; rebuilds the row only when the picks changed. */
+    private void updateSuggestions() {
+        if (adapter == null || suggestRow == null) return;
+        List<SmartSuggestions.Pick> picks = adapter.suggestions(COLUMNS);
+        suggestContext.setText(adapter.suggestionContext());
+        List<String> keys = new ArrayList<>();
+        for (SmartSuggestions.Pick p : picks) keys.add(p.entry.key);
+        if (keys.equals(suggestKeys)) return;
+        if (suggestRow.hasFocus()) return;            // never pull a tile away from under the cursor
+        suggestKeys.clear();
+        suggestKeys.addAll(keys);
+        suggestRow.removeAllViews();
+        int index = 0;
+        for (SmartSuggestions.Pick p : picks) {
+            suggestRow.addView(buildSuggestTile(p.entry, index, picks.size()),
+                    new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            index++;
+        }
+        for (; index < COLUMNS; index++) {            // keep the tiles on the same columns as the grid
+            suggestRow.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
+        }
+        if (allUiApplied) suggestStrip.setVisibility(keys.isEmpty() ? View.INVISIBLE : View.VISIBLE);
+        applyAllLayout();
+    }
+
+    private View buildSuggestTile(final AppAdapter.Entry entry, final int index, final int count) {
+        View item = getLayoutInflater().inflate(R.layout.item_app, suggestRow, false);
+        final View card = item.findViewById(R.id.card);
+        final TextView name = item.findViewById(R.id.name);
+        ImageView banner = item.findViewById(R.id.banner);
+        ImageView icon = item.findViewById(R.id.icon);
+        TextView label = item.findViewById(R.id.label);
+        AppAdapter.applyVisual(banner, icon, label, entry);
+        name.setText(entry.label);
+        final float radius = 16f * density;
+        card.setOutlineProvider(new ViewOutlineProvider() {
+            @Override
+            public void getOutline(View view, Outline outline) {
+                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), radius);
+            }
+        });
+        card.setClipToOutline(true);
+        card.setOnClickListener(v -> adapter.launchEntry(entry));
+        card.setOnFocusChangeListener((v, focused) -> {
+            float sc = focused ? AppAdapter.FOCUS_SCALE : 1.0f;
+            v.animate().scaleX(sc).scaleY(sc)
+                    .setDuration(focused ? 260 : 180)
+                    .setInterpolator(new OvershootInterpolator(focused ? 1.6f : 0f))
+                    .start();
+            name.animate().alpha(focused ? 1f : 0f)
+                    .translationY(focused ? density * 4f : -density * 6f)
+                    .setDuration(220).start();
+            if (focused) onSuggestionFocused(v);
+        });
+        card.setOnKeyListener((v, keyCode, event) -> {
+            if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
+            int total = adapter.getItemCount();
+            if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                if (index > 0) focusSuggestion(index - 1);
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                if (index < count - 1) focusSuggestion(index + 1);
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                focusTile(Math.min(index, Math.min(COLUMNS, total) - 1));      // back up to the dock
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                if (total > COLUMNS) focusTile(Math.min(COLUMNS + index, total - 1));
+                return true;
+            }
+            return false;
+        });
+        return item;
+    }
+
+    private void focusSuggestion(int index) {
+        if (index < 0 || index >= suggestRow.getChildCount()) return;
+        View card = suggestRow.getChildAt(index).findViewById(R.id.card);
+        if (card != null) card.requestFocus();
+    }
+
+    private void onSuggestionFocused(View card) {
+        if (snapActive) endSnap();
+        moveGlassTo(card, true);
+        hideHero();
+        if (!allAppsMode && !arranging) enterAllApps();
+    }
+
+    /** Switches to the all-apps state with the first row of apps parked just inside the glass panel. */
+    private void enterAllApps() {
+        if (allAppsMode || arranging) return;
+        updateSuggestions();
+        allAppsMode = true;
+        refreshChrome();
+        if (adapter.getItemCount() > COLUMNS) {
+            RecyclerView.ViewHolder vh = grid.findViewHolderForAdapterPosition(COLUMNS);
+            if (vh != null) scrollGridBy(vh.itemView.getTop() - allTopPx());
         }
     }
 
@@ -401,30 +593,54 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     }
 
     /**
-     * Coming back to the dock from the app list: jump instead of sliding, so the first row of apps never
-     * crosses the screen. The tiles fade in at their final place and the glass follows without a sweep.
+     * Coming back to the dock from the app list. The list and the glass fade out, the grid jumps to the dock
+     * position while invisible, then the dock rises into place with the glass. The first row of apps never
+     * crosses the screen.
      */
-    private void snapToDock(int dy) {
+    private void snapToDock(final int dy) {
+        snapActive = true;
         grid.stopScroll();
         grid.animate().cancel();
-        grid.setAlpha(0f);
-        grid.scrollBy(0, dy);
+        glass.animate().cancel();
         springX.cancel();
         springY.cancel();
-        glass.setTranslationX(glassTargetX);
-        glass.setTranslationY(glassTargetY);
-        glass.animate().cancel();
-        glass.setAlpha(0f);
-        glass.animate().alpha(1f).setDuration(220).start();
-        grid.animate().alpha(1f).setDuration(220).start();
-        handler.removeCallbacks(clipRunnable);
-        clipRunnable.run();     // hide the rows below the dock right away
+        glass.animate().alpha(0f).setDuration(110).start();
+        grid.animate().alpha(0f).setDuration(110).withEndAction(() -> {
+            if (!snapActive) return;
+            final float lift = 56 * density;
+            grid.scrollBy(0, dy);                     // the scroll listener also moves glassTargetY
+            handler.removeCallbacks(clipRunnable);
+            clipRunnable.run();                       // hide the rows below the dock right away
+            grid.setTranslationY(lift);
+            glass.setTranslationX(glassTargetX);
+            glass.setTranslationY(glassTargetY + lift);
+            DecelerateInterpolator rise = new DecelerateInterpolator(1.8f);
+            grid.animate().alpha(1f).translationY(0f).setDuration(340).setInterpolator(rise)
+                    .withEndAction(() -> snapActive = false).start();
+            glass.animate().alpha(1f).translationY(glassTargetY).setDuration(340).setInterpolator(rise).start();
+        }).start();
     }
 
-    /** Scrolls just enough so the whole tile, with its glass and name, is on screen. */
-    private void ensureVisible(View item, int topMarginDp) {
-        int topLimit = (int) (topMarginDp * density);
-        int bottomLimit = grid.getHeight() - (int) (16 * density);
+    /** Stops the back-to-dock animation early (another key arrived) and puts everything back in place. */
+    private void endSnap() {
+        snapActive = false;
+        grid.animate().cancel();
+        glass.animate().cancel();
+        grid.setAlpha(1f);
+        grid.setTranslationY(0f);
+        glass.setAlpha(1f);
+    }
+
+    /** Scrolls just enough so the whole tile, with its glass and name, is on screen (inside the panel). */
+    private void ensureVisible(View item) {
+        int topLimit, bottomLimit;
+        if (arranging) {
+            topLimit = (int) (12 * density);
+            bottomLimit = grid.getHeight() - (int) (16 * density);
+        } else {
+            topLimit = panelTopPx() + (int) (10 * density);
+            bottomLimit = grid.getHeight() - (int) ((PANEL_BOTTOM_DP + 8) * density);
+        }
         int dy = 0;
         if (item.getTop() < topLimit) dy = item.getTop() - topLimit;
         else if (item.getBottom() > bottomLimit) dy = item.getBottom() - bottomLimit;
@@ -433,11 +649,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     // ---- glass highlight -------------------------------------------------------------------------
 
-    @Override
-    public void onTileFocused(int position, View card) {
-        lastFocused = position;
-        lastFocusedKey = adapter.keyAt(position);
-        // Tile rect in root coordinates, using layout positions (ignores the scale animation).
+    /** Puts the glass over a tile. Returns the tile's rect in root coordinates (layout position, no scale). */
+    private Rect moveGlassTo(View card, boolean animate) {
         Rect r = new Rect(0, 0, card.getWidth(), card.getHeight());
         root.offsetDescendantRectToMyCoords(card, r);
         float pad = 6f * density;        // matches GlassView's glow inset
@@ -455,6 +668,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         }
         glassTargetX = x;
         glassTargetY = y;
+        if (!animate) return r;
         if (!glassShown) {
             springX.cancel();
             springY.cancel();
@@ -466,17 +680,27 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             springX.animateToFinalPosition(x);
             springY.animateToFinalPosition(y);
         }
+        return r;
+    }
+
+    @Override
+    public void onTileFocused(int position, View card) {
+        if (snapActive) endSnap();
+        lastFocused = position;
+        lastFocusedKey = adapter.keyAt(position);
+        boolean leavingAll = !arranging && allAppsMode && position < COLUMNS;
+        Rect r = moveGlassTo(card, !leavingAll);      // leaving the list: snapToDock moves the glass itself
         View item = (View) card.getParent();
 
         if (arranging) {
             hideHero();
-            ensureVisible(item, 12);
+            ensureVisible(item);
             return;
         }
 
         boolean entering = alignNext || (!allAppsMode && position >= COLUMNS);
-        boolean leavingAll = allAppsMode && position < COLUMNS;
         alignNext = false;
+        if (entering) updateSuggestions();
         allAppsMode = position >= COLUMNS;
         refreshChrome();
         if (position < COLUMNS) {
@@ -489,10 +713,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         } else {
             hideHero();
             if (entering) {
-                // The list opens with its first row at the top of the screen, dock out of sight above it.
-                scrollGridBy(item.getTop() - (int) (ALL_TOP_DP * density));
+                // The list opens with its first row just inside the glass panel.
+                scrollGridBy(item.getTop() - allTopPx());
             } else {
-                ensureVisible(item, 14);
+                ensureVisible(item);
             }
         }
     }
@@ -575,8 +799,20 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         int target;
         if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
             if (position < COLUMNS) return false;          // dock row: let focus move to the top bar
+            if (position < 2 * COLUMNS && suggestCount() > 0) {
+                focusSuggestion(Math.min(position - COLUMNS, suggestCount() - 1));   // first row -> Suggested row
+                return true;
+            }
             target = position - COLUMNS;
         } else {
+            if (position < COLUMNS && count > COLUMNS) {
+                updateSuggestions();
+                if (suggestCount() > 0) {                  // dock -> Suggested row first
+                    enterAllApps();
+                    focusSuggestion(Math.min(position, suggestCount() - 1));
+                    return true;
+                }
+            }
             int lastRowStart = ((count - 1) / COLUMNS) * COLUMNS;
             if (position >= lastRowStart) return true;     // already on the last row: stay put
             target = Math.min(position + COLUMNS, count - 1);
@@ -650,19 +886,119 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     private void showLauncherSettings() {
         View anchor = findViewById(R.id.btnSettings);
-        View panel = getLayoutInflater().inflate(R.layout.popup_inputs, root, false);
+        View panel = getLayoutInflater().inflate(R.layout.popup_apps, root, false);
+        panel.findViewById(R.id.title).setVisibility(View.GONE);
         LinearLayout rows = panel.findViewById(R.id.rows);
-        int minWidth = (int) (220 * density);
+        int minWidth = (int) (230 * density);
         final PopupWindow popup = newDropdown(panel, minWidth);
         addInputRow(rows, popup, R.drawable.ic_wallpaper, getString(R.string.choose_wallpaper), -1, this::chooseWallpaper);
         addInputRow(rows, popup, R.drawable.ic_reset, getString(R.string.reset_wallpaper), -1, this::resetWallpaper);
         addInputRow(rows, popup, R.drawable.ic_arrange, getString(R.string.arrange_apps), -1,
                 () -> beginArrange(lastFocused));
         addInputRow(rows, popup, R.drawable.ic_hide, getString(R.string.hide_apps), -1, this::showHideApps);
+        addInputRow(rows, popup, R.drawable.ic_palette, getString(R.string.icon_pack), -1, this::showIconPacks);
+        addInputRow(rows, popup, R.drawable.ic_shape, getString(R.string.icon_shape), -1, this::showIconShapes);
+        addInputRow(rows, popup, R.drawable.ic_saver, getString(R.string.screen_saver), -1,
+                () -> startActivity(new Intent(this, ScreensaverActivity.class)));
         addSeparator(rows);
         addInputRow(rows, popup, R.drawable.ic_settings, getString(R.string.system_settings), -1,
                 () -> open(new Intent(Settings.ACTION_SETTINGS)));
+        fitScroll(panel);
         showDropdown(popup, panel, anchor, minWidth, true);
+    }
+
+    /** Tall menus scroll inside the popup instead of running off the screen. */
+    private void fitScroll(View panel) {
+        LinearLayout rows = panel.findViewById(R.id.rows);
+        View scroll = panel.findViewById(R.id.scroll);
+        rows.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
+        ViewGroup.LayoutParams slp = scroll.getLayoutParams();
+        slp.height = Math.min(rows.getMeasuredHeight(), (int) (root.getHeight() * 0.6f));
+        scroll.setLayoutParams(slp);
+    }
+
+    private void showIconPacks() {
+        View anchor = findViewById(R.id.btnSettings);
+        View panel = getLayoutInflater().inflate(R.layout.popup_apps, root, false);
+        LinearLayout rows = panel.findViewById(R.id.rows);
+        int minWidth = (int) (300 * density);
+        final PopupWindow popup = newDropdown(panel, minWidth);
+        List<IconPack.Info> packs = adapter.iconPacks();
+        ((TextView) panel.findViewById(R.id.title)).setText(packs.isEmpty() ? R.string.none_icon_packs : R.string.no_icon_packs);
+        String current = adapter.iconPackPackage();
+        addChoiceRow(rows, popup, null, R.drawable.ic_reset, getString(R.string.icon_pack_default), current.isEmpty(),
+                () -> applyIconSettings(() -> adapter.setIconPack("")));
+        for (IconPack.Info info : packs) {
+            final String pkg = info.pkg;
+            addChoiceRow(rows, popup, info.icon, 0, info.label, pkg.equals(current),
+                    () -> applyIconSettings(() -> adapter.setIconPack(pkg)));
+        }
+        fitScroll(panel);
+        showDropdown(popup, panel, anchor, minWidth, true);
+    }
+
+    private void showIconShapes() {
+        View anchor = findViewById(R.id.btnSettings);
+        View panel = getLayoutInflater().inflate(R.layout.popup_apps, root, false);
+        LinearLayout rows = panel.findViewById(R.id.rows);
+        int minWidth = (int) (300 * density);
+        final PopupWindow popup = newDropdown(panel, minWidth);
+        ((TextView) panel.findViewById(R.id.title)).setText(R.string.icon_shape_title);
+        int[] shapes = {IconShapes.AUTO, IconShapes.CIRCLE, IconShapes.SQUIRCLE, IconShapes.ROUNDED, IconShapes.SQUARE};
+        int[] names = {R.string.shape_auto, R.string.shape_circle, R.string.shape_squircle, R.string.shape_rounded,
+                R.string.shape_square};
+        Drawable sample = null;
+        try {
+            sample = getDrawable(R.mipmap.ic_launcher);
+        } catch (Exception ignored) {
+        }
+        for (int i = 0; i < shapes.length; i++) {
+            final int shape = shapes[i];
+            Drawable preview = shape == IconShapes.AUTO ? null : IconShapes.shape(this, sample, shape, 96);
+            addChoiceRow(rows, popup, preview, R.drawable.ic_shape, getString(names[i]), adapter.iconShape() == shape,
+                    () -> applyIconSettings(() -> adapter.setIconShape(shape)));
+        }
+        fitScroll(panel);
+        showDropdown(popup, panel, anchor, minWidth, true);
+    }
+
+    /** Applies an icon pack / shape change: rebuilds every tile and the Suggested row. */
+    private void applyIconSettings(Runnable change) {
+        change.run();
+        adapter.reload();
+        suggestKeys.clear();
+        updateSuggestions();
+    }
+
+    /** A menu row with a "Selected" marker, and either an app-style icon (drawable) or a vector (iconRes). */
+    private void addChoiceRow(LinearLayout rows, PopupWindow popup, Drawable iconDrawable, int iconRes, String title,
+                              boolean selected, Runnable action) {
+        View row = getLayoutInflater().inflate(R.layout.item_input, rows, false);
+        ImageView icon = row.findViewById(R.id.icon);
+        if (iconDrawable != null) {
+            icon.setImageTintList(null);                       // keep the icon's own colours
+            icon.setImageDrawable(iconDrawable);
+            ViewGroup.LayoutParams ilp = icon.getLayoutParams();
+            ilp.width = (int) (26 * density);
+            ilp.height = (int) (26 * density);
+        } else {
+            icon.setImageResource(iconRes);
+        }
+        ((TextView) row.findViewById(R.id.title)).setText(title);
+        TextView status = row.findViewById(R.id.status);
+        View dot = row.findViewById(R.id.dot);
+        if (selected) {
+            status.setText(R.string.selected);
+            dot.setVisibility(View.VISIBLE);
+        } else {
+            status.setVisibility(View.GONE);
+            dot.setVisibility(View.GONE);
+        }
+        row.setOnClickListener(v -> {
+            popup.dismiss();
+            action.run();
+        });
+        rows.addView(row);
     }
 
     /** Scrollable list of every app; click one to hide it from (or show it on) the home screen. */
@@ -703,7 +1039,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         slp.height = Math.min(rows.getMeasuredHeight(), (int) (root.getHeight() * 0.6f));
         scroll.setLayoutParams(slp);
         popup.setOnDismissListener(() -> {
-            if (changed[0]) adapter.reload();
+            if (changed[0]) {
+                adapter.reload();
+                suggestKeys.clear();
+                updateSuggestions();
+            }
         });
         showDropdown(popup, panel, anchor, minWidth, true);
     }
@@ -739,6 +1079,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         wallpaperBlurView.setImageDrawable(null);
         wallpaperBlurView.setVisibility(View.GONE);
         if (dockDecoration != null) dockDecoration.setBackdrop(null);
+        if (allAppsPanel != null) allAppsPanel.setBackdrop(null);
         if (grid != null) grid.invalidate();
     }
 
@@ -778,6 +1119,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             wallpaperBlurView.setImageBitmap(blurred);
             wallpaperBlurView.setVisibility(View.VISIBLE);
             if (dockDecoration != null) dockDecoration.setBackdrop(blurred);
+            if (allAppsPanel != null) allAppsPanel.setBackdrop(blurred);
             if (grid != null) grid.invalidate();
         } catch (Exception e) {
             clearWallpaperViews();

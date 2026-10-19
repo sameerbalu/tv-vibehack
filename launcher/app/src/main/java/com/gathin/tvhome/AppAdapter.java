@@ -66,6 +66,8 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         final String key;
         final Drawable banner;
         final Drawable icon;
+        /** Icon from the selected icon pack, or null when the pack has none for this app. */
+        Drawable packIcon;
         int ambient;
 
         Entry(String label, ComponentName component, Drawable banner, Drawable icon) {
@@ -82,6 +84,8 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
     private static final String PREFS = "launcher_preferences";
     private static final String DOCK_ORDER = "dock_order";      // old: dock packages only
     private static final String HIDDEN_APPS = "hidden_apps";    // packages the person chose to hide
+    private static final String ICON_PACK = "icon_pack";        // package of the chosen icon pack, or empty
+    private static final String ICON_SHAPE = "icon_shape";      // IconShapes.*
     private static final String APP_ORDER = "app_order";        // new: every app, in order; the first dockSize are the dock
 
     private final Context ctx;
@@ -93,6 +97,10 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
     private final Set<String> userHidden = new HashSet<>();
     /** Saved order of all apps (component keys), or null while the default order is in use. */
     private List<String> order;
+    private String iconPackPkg = "";
+    private int iconShape = IconShapes.AUTO;
+    private IconPack pack;
+    private final SmartSuggestions smart;
 
     AppAdapter(Context ctx, TileListener listener, int dockSize) {
         this.ctx = ctx;
@@ -105,6 +113,9 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
             order = new ArrayList<>();
             for (String key : savedAll.split(";")) if (!key.trim().isEmpty()) order.add(key.trim());
         }
+        iconPackPkg = prefs.getString(ICON_PACK, "");
+        iconShape = prefs.getInt(ICON_SHAPE, IconShapes.AUTO);
+        smart = new SmartSuggestions(ctx);
         String hiddenSaved = prefs.getString(HIDDEN_APPS, null);
         if (hiddenSaved != null) {
             for (String pkg : hiddenSaved.split(";")) if (!pkg.trim().isEmpty()) userHidden.add(pkg.trim());
@@ -125,15 +136,25 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         Intent probe = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
         List<ResolveInfo> found = pm.queryIntentActivities(probe, 0);
         List<Entry> fresh = new ArrayList<>();
+        if (iconPackPkg.isEmpty()) pack = null;
+        else if (pack == null || !pack.pkg.equals(iconPackPkg)) pack = IconPack.load(ctx, iconPackPkg);
+        final float density = ctx.getResources().getDisplayMetrics().density;
+        final int iconPx = Math.max(64, (int) (64 * density));
         for (ResolveInfo ri : found) {
             if (ri.activityInfo == null) continue;
             String pkg = ri.activityInfo.packageName;
             if (pkg.equals(ctx.getPackageName()) || hidden.contains(pkg) || userHidden.contains(pkg)) continue;
             Drawable banner = ri.activityInfo.loadBanner(pm);
             if (banner == null) banner = ri.activityInfo.applicationInfo.loadBanner(pm);
-            Drawable icon = ri.loadIcon(pm);
+            Drawable icon = IconShapes.shape(ctx, ri.loadIcon(pm), iconShape, iconPx);
             String label = String.valueOf(ri.loadLabel(pm));
-            fresh.add(new Entry(label, new ComponentName(pkg, ri.activityInfo.name), banner, icon));
+            ComponentName component = new ComponentName(pkg, ri.activityInfo.name);
+            Entry entry = new Entry(label, component, banner, icon);
+            if (pack != null) {
+                Drawable packed = pack.iconFor(component);
+                if (packed != null) entry.packIcon = IconShapes.shape(ctx, packed, iconShape, iconPx);
+            }
+            fresh.add(entry);
         }
         final List<String> ord = order;
         Collections.sort(fresh, (a, b) -> {
@@ -244,19 +265,7 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         h.name.setAlpha(focused ? 1f : 0f);
         h.card.setScaleX(focused ? FOCUS_SCALE : 1f);
         h.card.setScaleY(focused ? FOCUS_SCALE : 1f);
-        if (e.banner != null) {
-            h.banner.setImageDrawable(e.banner);
-            h.banner.setVisibility(View.VISIBLE);
-            h.icon.setVisibility(View.GONE);
-            h.label.setVisibility(View.GONE);
-        } else {
-            h.banner.setImageDrawable(null);
-            h.banner.setVisibility(View.GONE);
-            h.icon.setImageDrawable(e.icon);
-            h.icon.setVisibility(View.VISIBLE);
-            h.label.setText(e.label);
-            h.label.setVisibility(View.VISIBLE);
-        }
+        applyVisual(h.banner, h.icon, h.label, e);
         h.card.setOnClickListener(v -> {
             int p = h.getBindingAdapterPosition();
             if (p == RecyclerView.NO_POSITION || p >= items.size()) return;
@@ -270,7 +279,82 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         });
     }
 
+    /** Shows the tile content: the icon-pack icon if there is one, else the banner, else the (shaped) app icon. */
+    static void applyVisual(ImageView banner, ImageView icon, TextView label, Entry e) {
+        float d = banner.getResources().getDisplayMetrics().density;
+        ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) icon.getLayoutParams();
+        if (e.packIcon != null) {
+            banner.setImageDrawable(null);
+            banner.setVisibility(View.GONE);
+            lp.width = lp.height = (int) (60 * d);
+            lp.bottomMargin = (int) (14 * d);
+            icon.setLayoutParams(lp);
+            icon.setImageDrawable(e.packIcon);
+            icon.setVisibility(View.VISIBLE);
+            label.setText(e.label);
+            label.setVisibility(View.VISIBLE);
+        } else if (e.banner != null) {
+            banner.setImageDrawable(e.banner);
+            banner.setVisibility(View.VISIBLE);
+            icon.setVisibility(View.GONE);
+            label.setVisibility(View.GONE);
+        } else {
+            banner.setImageDrawable(null);
+            banner.setVisibility(View.GONE);
+            lp.width = lp.height = (int) (48 * d);
+            lp.bottomMargin = (int) (14 * d);
+            icon.setLayoutParams(lp);
+            icon.setImageDrawable(e.icon);
+            icon.setVisibility(View.VISIBLE);
+            label.setText(e.label);
+            label.setVisibility(View.VISIBLE);
+        }
+    }
+
+    // ---- suggestions, icon packs, icon shape ----------------------------------------------------
+
+    /** Suggested apps for right now, never including the dock apps. */
+    List<SmartSuggestions.Pick> suggestions(int max) {
+        List<Entry> candidates = new ArrayList<>();
+        for (int i = dockSize; i < items.size(); i++) candidates.add(items.get(i));
+        return smart.suggest(candidates, max);
+    }
+
+    String suggestionContext() {
+        return smart.describe();
+    }
+
+    List<IconPack.Info> iconPacks() {
+        return IconPack.installed(ctx.getPackageManager());
+    }
+
+    String iconPackPackage() {
+        return iconPackPkg;
+    }
+
+    /** Pass an empty string for the default icons. Call reload() afterwards. */
+    void setIconPack(String pkg) {
+        iconPackPkg = pkg == null ? "" : pkg;
+        pack = null;
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(ICON_PACK, iconPackPkg).apply();
+    }
+
+    int iconShape() {
+        return iconShape;
+    }
+
+    /** One of IconShapes.*. Call reload() afterwards. */
+    void setIconShape(int shape) {
+        iconShape = shape;
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(ICON_SHAPE, shape).apply();
+    }
+
+    void launchEntry(Entry e) {
+        launch(e);
+    }
+
     private void launch(Entry e) {
+        smart.recordLaunch(e.pkg);
         Intent i = new Intent(Intent.ACTION_MAIN)
                 .addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER)
                 .setComponent(e.component)
@@ -311,7 +395,7 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
     int ambientColorAt(int position) {
         if (position < 0 || position >= items.size()) return 0xFF444444;
         Entry e = items.get(position);
-        if (e.ambient == 0) e.ambient = vividColor(e.banner != null ? e.banner : e.icon);
+        if (e.ambient == 0) e.ambient = vividColor(e.packIcon != null ? e.packIcon : (e.banner != null ? e.banner : e.icon));
         return e.ambient;
     }
 

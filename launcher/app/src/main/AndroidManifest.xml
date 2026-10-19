@@ -32,6 +32,13 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".ScreensaverActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.TvHome" />
+
         <!-- Screensaver: pick it in Settings, or `settings put secure screensaver_components
              com.gathin.tvhome/.ClockDream` over adb. -->
         <service
