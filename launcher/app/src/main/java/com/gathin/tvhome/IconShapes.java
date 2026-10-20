@@ -37,7 +37,7 @@ final class IconShapes {
                 drawLayer(ai.getBackground(), c, -q, -q, size + q, size + q);
                 drawLayer(ai.getForeground(), c, -q, -q, size + q, size + q);
             } else {
-                c.drawColor(0xFF0E0E10);
+                c.drawColor(0xFF26262B);
                 int inset = (int) (size * 0.18f);
                 drawLayer(icon, c, inset, inset, size - inset, size - inset);
             }

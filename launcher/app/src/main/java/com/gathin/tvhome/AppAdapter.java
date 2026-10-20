@@ -82,11 +82,11 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
     }
 
     static final float FOCUS_SCALE = 1.10f;
-    /** Apps shown as Apple TV-style AMOLED icon tiles (pure black tile, centred app icon) instead of a wide banner. */
+    /** Apps shown as Apple TV-style AMOLED icon tiles (black tile, centred icon) instead of a wide banner. */
     private static final Set<String> AMOLED_ICON_APPS = new HashSet<>(Arrays.asList(
             "io.gh.reisxd.tizentube.cobalt", "com.spotify.tv.android", "com.tcl.browser", "com.nuvio.tv",
             "in.startv.hotstar", "com.kick.mobile", "org.clipbox.player", "org.videolan.vlc",
-            "flar2.homebutton", "com.gathin.tvhome"));
+            "flar2.homebutton"));
     private static final String PREFS = "launcher_preferences";
     private static final String DOCK_ORDER = "dock_order";      // old: dock packages only
     private static final String HIDDEN_APPS = "hidden_apps";    // packages the person chose to hide
@@ -113,10 +113,6 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         this.dockSize = dockSize;
         List<String> defaults = new ArrayList<>(Arrays.asList(ctx.getResources().getStringArray(R.array.dock_apps)));
         SharedPreferences prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        if (!prefs.getBoolean("dock_v12", false)) {
-            // v12: new default dock (Nuvio, Kick, Spotify, YouTube). Applied once; arrange it freely afterwards.
-            prefs.edit().remove(APP_ORDER).remove(DOCK_ORDER).putBoolean("dock_v12", true).apply();
-        }
         String savedAll = prefs.getString(APP_ORDER, null);
         if (savedAll != null && !savedAll.trim().isEmpty()) {
             order = new ArrayList<>();
@@ -138,15 +134,41 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         setHasStableIds(true);
     }
 
+    private String lastSignature = "";
+
+    private String signatureOf(List<ResolveInfo> found) {
+        StringBuilder sig = new StringBuilder();
+        for (ResolveInfo ri : found) {
+            if (ri.activityInfo == null) continue;
+            sig.append(ri.activityInfo.packageName).append('/').append(ri.activityInfo.name);
+            try {
+                sig.append(':').append(new java.io.File(ri.activityInfo.applicationInfo.sourceDir).lastModified());
+            } catch (RuntimeException ignored) {
+            }
+            sig.append(';');
+        }
+        return sig.toString();
+    }
+
+    /** Reloads only when apps were installed, removed or updated. Returns true if it reloaded. */
+    boolean reloadIfChanged() {
+        Intent probe = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
+        String now = signatureOf(ctx.getPackageManager().queryIntentActivities(probe, 0));
+        if (now.equals(lastSignature) && !items.isEmpty()) return false;
+        reload();
+        return true;
+    }
+
     void reload() {
         PackageManager pm = ctx.getPackageManager();
         Intent probe = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
         List<ResolveInfo> found = pm.queryIntentActivities(probe, 0);
+        lastSignature = signatureOf(found);
         List<Entry> fresh = new ArrayList<>();
         if (iconPackPkg.isEmpty()) pack = null;
         else if (pack == null || !pack.pkg.equals(iconPackPkg)) pack = IconPack.load(ctx, iconPackPkg);
         final float density = ctx.getResources().getDisplayMetrics().density;
-        final int iconPx = Math.max(96, (int) (96 * density));
+        final int iconPx = Math.max(64, (int) (64 * density));
         for (ResolveInfo ri : found) {
             if (ri.activityInfo == null) continue;
             String pkg = ri.activityInfo.packageName;
@@ -154,8 +176,7 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
             Drawable banner = ri.activityInfo.loadBanner(pm);
             if (banner == null) banner = ri.activityInfo.applicationInfo.loadBanner(pm);
             if (AMOLED_ICON_APPS.contains(pkg)) banner = null;
-            Drawable icon = IconShapes.shape(ctx, ri.loadIcon(pm),
-                    iconShape == IconShapes.AUTO ? IconShapes.ROUNDED : iconShape, iconPx);
+            Drawable icon = IconShapes.shape(ctx, ri.loadIcon(pm), iconShape, iconPx);
             String label = String.valueOf(ri.loadLabel(pm));
             ComponentName component = new ComponentName(pkg, ri.activityInfo.name);
             Entry entry = new Entry(label, component, banner, icon);
@@ -176,7 +197,7 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
                 }
                 return a.label.compareToIgnoreCase(b.label);
             }
-            int fa = favouriteIndex(a), fb = favouriteIndex(b);
+            int fa = favourites.indexOf(a.pkg), fb = favourites.indexOf(b.pkg);
             if (fa >= 0 || fb >= 0) {
                 if (fa < 0) return 1;
                 if (fb < 0) return -1;
@@ -187,20 +208,6 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         items.clear();
         items.addAll(fresh);
         notifyDataSetChanged();
-    }
-
-    /** Position in the default dock list. An item is a package name, or "label:name" to match an app name prefix. */
-    private int favouriteIndex(Entry e) {
-        String label = e.label == null ? "" : e.label.trim().toLowerCase();
-        for (int i = 0; i < favourites.size(); i++) {
-            String f = favourites.get(i);
-            if (f.startsWith("label:")) {
-                if (label.startsWith(f.substring(6).toLowerCase())) return i;
-            } else if (f.equals(e.pkg)) {
-                return i;
-            }
-        }
-        return -1;
     }
 
     /** Every launchable app, hidden or not (except the ones config.xml always hides), sorted by name. */
@@ -334,12 +341,13 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         } else {
             banner.setImageDrawable(null);
             banner.setVisibility(View.GONE);
-            lp.width = lp.height = (int) (62 * d);
-            lp.bottomMargin = 0;
+            lp.width = lp.height = (int) (48 * d);
+            lp.bottomMargin = (int) (14 * d);
             icon.setLayoutParams(lp);
             icon.setImageDrawable(e.icon);
             icon.setVisibility(View.VISIBLE);
-            label.setVisibility(View.GONE);      // the name shows under the tile when focused
+            label.setText(e.label);
+            label.setVisibility(View.VISIBLE);
         }
     }
 

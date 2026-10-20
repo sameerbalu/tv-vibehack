@@ -24,6 +24,8 @@ final class GlassStyle {
     private final Matrix matrix = new Matrix();
     private final int veilTop;
     private final int veilBottom;
+    private Shader sheenShader;
+    private float sheenTop, sheenBottom;
     private Bitmap backdrop;
     private BitmapShader backdropShader;
 
@@ -66,7 +68,12 @@ final class GlassStyle {
             c.drawRoundRect(rect, radius, radius, image);
             c.drawRoundRect(rect, radius, radius, dim);
         }
-        sheen.setShader(new LinearGradient(0, rect.top, 0, rect.bottom, veilTop, veilBottom, Shader.TileMode.CLAMP));
+        if (sheenShader == null || sheenTop != rect.top || sheenBottom != rect.bottom) {
+            sheenTop = rect.top;
+            sheenBottom = rect.bottom;
+            sheenShader = new LinearGradient(0, rect.top, 0, rect.bottom, veilTop, veilBottom, Shader.TileMode.CLAMP);
+            sheen.setShader(sheenShader);
+        }
         c.drawRoundRect(rect, radius, radius, sheen);
         c.drawRoundRect(rect, radius, radius, edge);
     }

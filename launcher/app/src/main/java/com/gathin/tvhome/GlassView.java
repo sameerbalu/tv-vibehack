@@ -20,10 +20,10 @@ import android.view.View;
 public class GlassView extends View {
 
     /** Room around the tile for the glow, in dp. MainActivity uses the same value. */
-    static final float PAD_DP = 14f;
-    /** Empty space between the tile edge and the cursor border, in dp. */
-    private static final float GAP_DP = 2f;
-    private static final int GLOW_LAYERS = 3;
+    static final float PAD_DP = 16f;
+    /** Small empty space between the tile edge and the cursor border, in dp. */
+    private static final float GAP_DP = 3f;
+    private static final int GLOW_LAYERS = 4;
 
     private final Paint rim = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint glow = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -39,9 +39,9 @@ public class GlassView extends View {
         density = getResources().getDisplayMetrics().density;
         radius = 16f * density;
         rim.setStyle(Paint.Style.STROKE);
-        rim.setStrokeWidth(1.5f * density);
+        rim.setStrokeWidth(1.8f * density);
         glow.setStyle(Paint.Style.STROKE);
-        glow.setStrokeWidth(1.6f * density);
+        glow.setStrokeWidth(1.7f * density);
     }
 
     void setRadius(float px) {
@@ -79,10 +79,10 @@ public class GlassView extends View {
         if (Build.VERSION.SDK_INT >= 26) canvas.clipOutPath(inner);
         else canvas.clipPath(inner, Region.Op.DIFFERENCE);
         float gap = GAP_DP * density;
-        float step = 1.4f * density;
+        float step = 1.5f * density;
         for (int i = 0; i < GLOW_LAYERS; i++) {
             float t = 1f - i / (float) GLOW_LAYERS;
-            int a = (int) (0x2A * t * t);
+            int a = (int) (0x40 * t * t);
             glow.setColor((a << 24) | rgb);
             float o = gap + rim.getStrokeWidth() + (i + 0.5f) * step;
             canvas.drawRoundRect(rect.left - o, rect.top - o, rect.right + o, rect.bottom + o,
@@ -91,7 +91,7 @@ public class GlassView extends View {
         canvas.restore();
 
         // Border in the app colour, just outside the icon edge.
-        rim.setColor(0xC8000000 | rgb);
+        rim.setColor(0xF2000000 | rgb);
         float h = gap + rim.getStrokeWidth() / 2f;
         canvas.drawRoundRect(rect.left - h, rect.top - h, rect.right + h, rect.bottom + h,
                 radius + h, radius + h, rim);

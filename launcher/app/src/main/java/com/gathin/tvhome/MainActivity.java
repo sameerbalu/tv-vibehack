@@ -122,6 +122,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private int ambientTarget;       // colour it is fading to
     private ValueAnimator ambientAnim;
     private ValueAnimator ambientPulse;     // slow "breathing" of the glow while a song plays
+    private long lastPulseDraw;
     private float pulseT;                   // 0..1, position in the current glow style's cycle
     private final float[] hsvTmp = new float[3];
     private boolean fxGlowOn = true;        // Settings > Glow & effects
@@ -386,7 +387,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     protected void onResume() {
         super.onResume();
-        chainResumed = true;
         long nowMs = SystemClock.uptimeMillis();
         // Home pressed again right away: skip the slow reload and the enter animation, they only stack up.
         final boolean quick = adapter.getItemCount() > 0 && nowMs - lastResumeMs < 2500;
@@ -434,8 +434,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             grid.clearAnimation();
             for (int i = 0; i < grid.getChildCount(); i++) grid.getChildAt(i).clearAnimation();
         } else {
-            adapter.reload();
-            grid.scheduleLayoutAnimation();
+            if (adapter.reloadIfChanged()) grid.scheduleLayoutAnimation();
         }
         updateGreeting();
         updateBluetoothLabel();
@@ -501,7 +500,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     protected void onPause() {
         super.onPause();
-        chainPaused = true;
         handler.removeCallbacks(restoreFocus);
         handler.removeCallbacks(minuteTick);
         if (inputsIcon != null) inputsIcon.rest();
@@ -951,8 +949,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         }
         k *= fxLevel == 0 ? 0.6f : fxLevel == 2 ? 1.4f : 1f;
         int c = darken(shown) & 0x00FFFFFF;
-        int a1 = Math.min(255, (int) (0x7C * k));
-        int a2 = Math.min(255, (int) (0x3A * k));
+        int a1 = Math.min(255, (int) (0x50 * k));
+        int a2 = Math.min(255, (int) (0x20 * k));
         ambientGlow.setColors(new int[]{(a1 << 24) | c, (a2 << 24) | c, c});
         ambientGlow.setGradientCenter(cx, 0.42f);
         if (ambientBaseRadius > 0) ambientGlow.setGradientRadius(ambientBaseRadius * swing);
@@ -976,6 +974,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         ambientPulse.setInterpolator(new android.view.animation.LinearInterpolator());
         ambientPulse.addUpdateListener(a -> {
             pulseT = (Float) a.getAnimatedValue();
+            long now = android.os.SystemClock.uptimeMillis();
+            if (now - lastPulseDraw < 66) return;      // ~15 fps is plenty for a slow glow
+            lastPulseDraw = now;
             if (heroShown) setAmbient(ambientColor);
         });
         ambientPulse.start();
@@ -994,8 +995,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     }
 
     private static int darken(int color) {
-        return Color.rgb((int) (Color.red(color) * 0.92f), (int) (Color.green(color) * 0.92f),
-                (int) (Color.blue(color) * 0.92f));
+        return Color.rgb((int) (Color.red(color) * 0.8f), (int) (Color.green(color) * 0.8f),
+                (int) (Color.blue(color) * 0.8f));
     }
 
     private void hideHero() {
@@ -1124,7 +1125,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         LinearLayout rows = panel.findViewById(R.id.rows);
         int minWidth = (int) (230 * density);
         final PopupWindow popup = newDropdown(panel, minWidth);
-        addInputRow(rows, popup, R.drawable.ic_wallpaper, getString(R.string.wallpaper_tab), -1, this::showWallpaperMenu);
+        addInputRow(rows, popup, R.drawable.ic_wallpaper, getString(R.string.choose_wallpaper), -1, this::chooseWallpaper);
+        addInputRow(rows, popup, R.drawable.ic_wallpaper, getString(R.string.depth_front), -1, this::chooseFront);
+        if (WallpaperStore.hasFront(this)) {
+            addInputRow(rows, popup, R.drawable.ic_reset, getString(R.string.depth_remove), -1, this::removeFront);
+        }
         addInputRow(rows, popup, R.drawable.ic_hide, getString(R.string.hide_apps), -1, this::showHideApps);
         addInputRow(rows, popup, R.drawable.ic_widgets, getString(R.string.widgets), -1, this::showWidgets);
         addInputRow(rows, popup, R.drawable.ic_palette, getString(R.string.fx_title), -1, this::showEffects);
@@ -1136,20 +1141,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         addSeparator(rows);
         addInputRow(rows, popup, R.drawable.ic_settings, getString(R.string.system_settings), -1,
                 () -> open(new Intent(Settings.ACTION_SETTINGS)));
-        fitScroll(panel);
-        showDropdown(popup, panel, anchor, minWidth, true);
-    }
-
-    /** The Wallpaper tab: the picture behind everything and the transparent depth PNG in front of it. */
-    private void showWallpaperMenu() {
-        View anchor = findViewById(R.id.btnSettings);
-        View panel = getLayoutInflater().inflate(R.layout.popup_apps, root, false);
-        panel.findViewById(R.id.title).setVisibility(View.GONE);
-        LinearLayout rows = panel.findViewById(R.id.rows);
-        int minWidth = (int) (260 * density);
-        final PopupWindow popup = newDropdown(panel, minWidth);
-        addInputRow(rows, popup, R.drawable.ic_wallpaper, getString(R.string.choose_wallpaper), -1, this::chooseWallpaper);
-        addInputRow(rows, popup, R.drawable.ic_wallpaper, getString(R.string.depth_front), -1, this::chooseFront);
         fitScroll(panel);
         showDropdown(popup, panel, anchor, minWidth, true);
     }
@@ -1379,6 +1370,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         } catch (ActivityNotFoundException e) {
             Toast.makeText(this, R.string.not_available, Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private void removeFront() {
+        WallpaperStore.deleteFront(this);
+        wallpaperFront.setImageDrawable(null);
+        wallpaperFront.setVisibility(View.GONE);
     }
 
     /** Shows the transparent depth PNG over the glow (and over the picture), under the apps. */
@@ -1719,7 +1716,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         row.findViewById(R.id.icon).setAlpha(alpha);
         row.setOnClickListener(v -> {
             popup.dismiss();
-            handler.postDelayed(this::openRemotesAndAccessories, 120);   // let the popup close first
+            openRemotesAndAccessories();
         });
         rows.addView(row);
         return row;
@@ -1749,18 +1746,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         return names;
     }
 
-    /** Opens the TV's "Remotes & Accessories" page (the Bluetooth device list), never the pairing/search screens. */
+    /** Opens the TV's "Remotes & Accessories" page (the Bluetooth device list). */
     private void openRemotesAndAccessories() {
         PackageManager pm = getPackageManager();
         List<Intent> tries = new ArrayList<>();
-        // 1) Settings entries named like the device list. Skip "Add accessory" (that one starts a search) and pairing screens.
+        // 1) The TV's own settings entries whose name mentions remotes / accessories / Bluetooth.
         try {
             Intent q = new Intent(Intent.ACTION_MAIN).addCategory("android.intent.category.LEANBACK_SETTINGS");
             for (ResolveInfo ri : pm.queryIntentActivities(q, 0)) {
                 String label = String.valueOf(ri.loadLabel(pm)).toLowerCase(Locale.ROOT);
-                String cls = ri.activityInfo.name.toLowerCase(Locale.ROOT);
-                if (cls.contains("addaccessory") || cls.contains("pair") || cls.contains("picker")
-                        || cls.contains("dialog") || cls.contains("request")) continue;
                 if (label.contains("accessor") || label.contains("remote") || label.contains("bluetooth")) {
                     tries.add(new Intent().setComponent(
                             new ComponentName(ri.activityInfo.packageName, ri.activityInfo.name)));
@@ -1768,43 +1762,40 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             }
         } catch (RuntimeException ignored) {
         }
-        // 2) The settings home page of this TV (Remotes & Accessories is right there), stock and Haier builds.
+        // 2) Settings screens named like the device list (not the pairing / searching ones).
+        for (String pkg : new String[]{"com.android.tv.settings", "com.google.android.tvsettings"}) {
+            try {
+                PackageInfo pi = pm.getPackageInfo(pkg, PackageManager.GET_ACTIVITIES);
+                if (pi.activities == null) continue;
+                for (ActivityInfo ai : pi.activities) {
+                    String n = ai.name.toLowerCase(Locale.ROOT);
+                    if (ai.exported && n.contains("accessories") && !n.contains("pair") && !n.contains("picker")
+                            && !n.contains("dialog") && !n.contains("request")) {
+                        tries.add(new Intent().setComponent(new ComponentName(ai.packageName, ai.name)));
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        // 3) The standard Bluetooth screen, unless on this TV it is the "searching for accessories" one.
+        Intent bt = new Intent(Settings.ACTION_BLUETOOTH_SETTINGS);
+        boolean searching = false;
+        try {
+            ResolveInfo r = pm.resolveActivity(bt, 0);
+            searching = r != null && r.activityInfo != null
+                    && r.activityInfo.name.toLowerCase(Locale.ROOT).contains("addaccessory");
+        } catch (RuntimeException ignored) {
+        }
+        if (!searching) tries.add(bt);
+        // 4) The settings home page: Remotes & Accessories is one click away from there.
         tries.add(new Intent().setComponent(new ComponentName("com.android.tv.settings",
                 "com.android.tv.settings.MainSettings")));
-        tries.add(new Intent().setComponent(new ComponentName("com.haier.tv.settings",
-                "com.haier.tv.settings.MainSettings")));
-        tries.add(new Intent().setComponent(new ComponentName("com.google.android.tvsettings",
-                "com.android.tv.settings.MainSettings")));
         tries.add(new Intent(Settings.ACTION_SETTINGS));
-        // 3) Last resort: the standard Bluetooth screen (on some TVs this is the search screen).
-        tries.add(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS));
-        Toast.makeText(this, R.string.bt_opening, Toast.LENGTH_SHORT).show();
-        launchChain(tries, 0);
-    }
-
-    private boolean chainPaused, chainResumed;
-    private int chainToken;
-
-    /**
-     * Tries each intent in turn. A screen that starts without error but never shows (or shuts at once and
-     * drops back to the launcher) counts as a miss, and the next intent is tried.
-     */
-    private void launchChain(final List<Intent> tries, final int index) {
-        for (int n = index; n < tries.size(); n++) {
-            Intent i = tries.get(n);
+        if (searching) tries.add(bt);
+        for (Intent i : tries) {
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             try {
-                chainPaused = false;
-                chainResumed = false;
-                final int token = ++chainToken;
-                final int next = n + 1;
                 startActivity(i);
-                handler.postDelayed(() -> {
-                    if (token != chainToken) return;
-                    boolean shown = chainPaused && !chainResumed;
-                    if (!shown && next < tries.size()) launchChain(tries, next);
-                    else if (!shown) Toast.makeText(this, R.string.not_available, Toast.LENGTH_SHORT).show();
-                }, 1300);
                 return;
             } catch (Exception ignored) {
             }
