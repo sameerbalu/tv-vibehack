@@ -79,5 +79,6 @@
     <string name="fx_shimmer">Shimmer</string>
     <string name="fx_rainbow">Rainbow</string>
     <string name="depth_front">Depth foreground (PNG)</string>
-    <string name="depth_remove">Remove depth foreground</string>
+    <string name="wallpaper_tab">Hintergrund</string>
+    <string name="bt_opening">Bluetooth-Einstellungen werden geöffnet…</string>
 </resources>

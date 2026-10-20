@@ -386,6 +386,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     protected void onResume() {
         super.onResume();
+        chainResumed = true;
         long nowMs = SystemClock.uptimeMillis();
         // Home pressed again right away: skip the slow reload and the enter animation, they only stack up.
         final boolean quick = adapter.getItemCount() > 0 && nowMs - lastResumeMs < 2500;
@@ -500,6 +501,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     protected void onPause() {
         super.onPause();
+        chainPaused = true;
         handler.removeCallbacks(restoreFocus);
         handler.removeCallbacks(minuteTick);
         if (inputsIcon != null) inputsIcon.rest();
@@ -949,8 +951,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         }
         k *= fxLevel == 0 ? 0.6f : fxLevel == 2 ? 1.4f : 1f;
         int c = darken(shown) & 0x00FFFFFF;
-        int a1 = Math.min(255, (int) (0x50 * k));
-        int a2 = Math.min(255, (int) (0x20 * k));
+        int a1 = Math.min(255, (int) (0x7C * k));
+        int a2 = Math.min(255, (int) (0x3A * k));
         ambientGlow.setColors(new int[]{(a1 << 24) | c, (a2 << 24) | c, c});
         ambientGlow.setGradientCenter(cx, 0.42f);
         if (ambientBaseRadius > 0) ambientGlow.setGradientRadius(ambientBaseRadius * swing);
@@ -992,8 +994,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     }
 
     private static int darken(int color) {
-        return Color.rgb((int) (Color.red(color) * 0.8f), (int) (Color.green(color) * 0.8f),
-                (int) (Color.blue(color) * 0.8f));
+        return Color.rgb((int) (Color.red(color) * 0.92f), (int) (Color.green(color) * 0.92f),
+                (int) (Color.blue(color) * 0.92f));
     }
 
     private void hideHero() {
@@ -1122,11 +1124,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         LinearLayout rows = panel.findViewById(R.id.rows);
         int minWidth = (int) (230 * density);
         final PopupWindow popup = newDropdown(panel, minWidth);
-        addInputRow(rows, popup, R.drawable.ic_wallpaper, getString(R.string.choose_wallpaper), -1, this::chooseWallpaper);
-        addInputRow(rows, popup, R.drawable.ic_wallpaper, getString(R.string.depth_front), -1, this::chooseFront);
-        if (WallpaperStore.hasFront(this)) {
-            addInputRow(rows, popup, R.drawable.ic_reset, getString(R.string.depth_remove), -1, this::removeFront);
-        }
+        addInputRow(rows, popup, R.drawable.ic_wallpaper, getString(R.string.wallpaper_tab), -1, this::showWallpaperMenu);
         addInputRow(rows, popup, R.drawable.ic_hide, getString(R.string.hide_apps), -1, this::showHideApps);
         addInputRow(rows, popup, R.drawable.ic_widgets, getString(R.string.widgets), -1, this::showWidgets);
         addInputRow(rows, popup, R.drawable.ic_palette, getString(R.string.fx_title), -1, this::showEffects);
@@ -1138,6 +1136,20 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         addSeparator(rows);
         addInputRow(rows, popup, R.drawable.ic_settings, getString(R.string.system_settings), -1,
                 () -> open(new Intent(Settings.ACTION_SETTINGS)));
+        fitScroll(panel);
+        showDropdown(popup, panel, anchor, minWidth, true);
+    }
+
+    /** The Wallpaper tab: the picture behind everything and the transparent depth PNG in front of it. */
+    private void showWallpaperMenu() {
+        View anchor = findViewById(R.id.btnSettings);
+        View panel = getLayoutInflater().inflate(R.layout.popup_apps, root, false);
+        panel.findViewById(R.id.title).setVisibility(View.GONE);
+        LinearLayout rows = panel.findViewById(R.id.rows);
+        int minWidth = (int) (260 * density);
+        final PopupWindow popup = newDropdown(panel, minWidth);
+        addInputRow(rows, popup, R.drawable.ic_wallpaper, getString(R.string.choose_wallpaper), -1, this::chooseWallpaper);
+        addInputRow(rows, popup, R.drawable.ic_wallpaper, getString(R.string.depth_front), -1, this::chooseFront);
         fitScroll(panel);
         showDropdown(popup, panel, anchor, minWidth, true);
     }
@@ -1367,12 +1379,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         } catch (ActivityNotFoundException e) {
             Toast.makeText(this, R.string.not_available, Toast.LENGTH_SHORT).show();
         }
-    }
-
-    private void removeFront() {
-        WallpaperStore.deleteFront(this);
-        wallpaperFront.setImageDrawable(null);
-        wallpaperFront.setVisibility(View.GONE);
     }
 
     /** Shows the transparent depth PNG over the glow (and over the picture), under the apps. */
@@ -1713,7 +1719,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         row.findViewById(R.id.icon).setAlpha(alpha);
         row.setOnClickListener(v -> {
             popup.dismiss();
-            openRemotesAndAccessories();
+            handler.postDelayed(this::openRemotesAndAccessories, 120);   // let the popup close first
         });
         rows.addView(row);
         return row;
@@ -1789,10 +1795,33 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 "com.android.tv.settings.MainSettings")));
         tries.add(new Intent(Settings.ACTION_SETTINGS));
         if (searching) tries.add(bt);
-        for (Intent i : tries) {
+        Toast.makeText(this, R.string.bt_opening, Toast.LENGTH_SHORT).show();
+        launchChain(tries, 0);
+    }
+
+    private boolean chainPaused, chainResumed;
+    private int chainToken;
+
+    /**
+     * Tries each intent in turn. A screen that starts without error but never shows (or shuts at once and
+     * drops back to the launcher) counts as a miss, and the next intent is tried.
+     */
+    private void launchChain(final List<Intent> tries, final int index) {
+        for (int n = index; n < tries.size(); n++) {
+            Intent i = tries.get(n);
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             try {
+                chainPaused = false;
+                chainResumed = false;
+                final int token = ++chainToken;
+                final int next = n + 1;
                 startActivity(i);
+                handler.postDelayed(() -> {
+                    if (token != chainToken) return;
+                    boolean shown = chainPaused && !chainResumed;
+                    if (!shown && next < tries.size()) launchChain(tries, next);
+                    else if (!shown) Toast.makeText(this, R.string.not_available, Toast.LENGTH_SHORT).show();
+                }, 1300);
                 return;
             } catch (Exception ignored) {
             }
