@@ -82,11 +82,6 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
     }
 
     static final float FOCUS_SCALE = 1.10f;
-    /** Apps shown as Apple TV-style AMOLED icon tiles (black tile, centred icon) instead of a wide banner. */
-    private static final Set<String> AMOLED_ICON_APPS = new HashSet<>(Arrays.asList(
-            "io.gh.reisxd.tizentube.cobalt", "com.spotify.tv.android", "com.tcl.browser", "com.nuvio.tv",
-            "in.startv.hotstar", "com.kick.mobile", "org.clipbox.player", "org.videolan.vlc",
-            "flar2.homebutton"));
     private static final String PREFS = "launcher_preferences";
     private static final String DOCK_ORDER = "dock_order";      // old: dock packages only
     private static final String HIDDEN_APPS = "hidden_apps";    // packages the person chose to hide
@@ -175,7 +170,6 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
             if (pkg.equals(ctx.getPackageName()) || hidden.contains(pkg) || userHidden.contains(pkg)) continue;
             Drawable banner = ri.activityInfo.loadBanner(pm);
             if (banner == null) banner = ri.activityInfo.applicationInfo.loadBanner(pm);
-            if (AMOLED_ICON_APPS.contains(pkg)) banner = null;
             Drawable icon = IconShapes.shape(ctx, ri.loadIcon(pm), iconShape, iconPx);
             String label = String.valueOf(ri.loadLabel(pm));
             ComponentName component = new ComponentName(pkg, ri.activityInfo.name);
@@ -297,10 +291,10 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         h.card.setScaleY(focused ? FOCUS_SCALE : 1f);
         applyVisual(h.banner, h.icon, h.label, e);
         if (e.packIcon == null && e.banner == null) {
-            // Icon-only tile: pure AMOLED black with just a hint of the app's own colour in one corner.
+            // Icon-only tile: a gradient in the app's own colour instead of flat grey.
             int c = ambientColorAt(position);
             GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                    new int[]{mixBlack(c, 0.86f), 0xFF000000, 0xFF000000});
+                    new int[]{mixBlack(c, 0.55f), mixBlack(c, 0.82f)});
             g.setCornerRadius(16f * ctx.getResources().getDisplayMetrics().density);
             h.card.setBackground(g);
         } else {

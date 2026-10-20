@@ -343,7 +343,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         View btnInputs = findViewById(R.id.btnInputs);
         View btnSettings = findViewById(R.id.btnSettings);
         btnInputs.setOnClickListener(v -> showInputs());
-        btnBluetooth.setOnClickListener(v -> showBluetooth());
+        btnBluetooth.setOnClickListener(v -> openRemotesAndAccessories());
         btnSettings.setOnFocusChangeListener((v, f) -> v.animate().rotation(f ? 60f : 0f).setDuration(300).start());
         // Inputs: the plug slides in. Bluetooth: the icon pulses. (Settings: the gear turns, above.)
         inputsIcon = wrapStartIcon((TextView) btnInputs);
@@ -1125,11 +1125,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         LinearLayout rows = panel.findViewById(R.id.rows);
         int minWidth = (int) (230 * density);
         final PopupWindow popup = newDropdown(panel, minWidth);
-        addInputRow(rows, popup, R.drawable.ic_wallpaper, getString(R.string.choose_wallpaper), -1, this::chooseWallpaper);
-        addInputRow(rows, popup, R.drawable.ic_wallpaper, getString(R.string.depth_front), -1, this::chooseFront);
-        if (WallpaperStore.hasFront(this)) {
-            addInputRow(rows, popup, R.drawable.ic_reset, getString(R.string.depth_remove), -1, this::removeFront);
-        }
+        addInputRow(rows, popup, R.drawable.ic_wallpaper, getString(R.string.wallpaper_tab), -1, this::showWallpaperMenu);
         addInputRow(rows, popup, R.drawable.ic_hide, getString(R.string.hide_apps), -1, this::showHideApps);
         addInputRow(rows, popup, R.drawable.ic_widgets, getString(R.string.widgets), -1, this::showWidgets);
         addInputRow(rows, popup, R.drawable.ic_palette, getString(R.string.fx_title), -1, this::showEffects);
@@ -1141,6 +1137,23 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         addSeparator(rows);
         addInputRow(rows, popup, R.drawable.ic_settings, getString(R.string.system_settings), -1,
                 () -> open(new Intent(Settings.ACTION_SETTINGS)));
+        fitScroll(panel);
+        showDropdown(popup, panel, anchor, minWidth, true);
+    }
+
+    /** One tab for the wallpaper: choose wallpaper and the depth foreground PNG. */
+    private void showWallpaperMenu() {
+        View anchor = findViewById(R.id.btnSettings);
+        View panel = getLayoutInflater().inflate(R.layout.popup_apps, root, false);
+        panel.findViewById(R.id.title).setVisibility(View.GONE);
+        LinearLayout rows = panel.findViewById(R.id.rows);
+        int minWidth = (int) (260 * density);
+        final PopupWindow popup = newDropdown(panel, minWidth);
+        addInputRow(rows, popup, R.drawable.ic_wallpaper, getString(R.string.choose_wallpaper), -1, this::chooseWallpaper);
+        addInputRow(rows, popup, R.drawable.ic_wallpaper, getString(R.string.depth_front), -1, this::chooseFront);
+        if (WallpaperStore.hasFront(this)) {
+            addInputRow(rows, popup, R.drawable.ic_reset, getString(R.string.depth_remove), -1, this::removeFront);
+        }
         fitScroll(panel);
         showDropdown(popup, panel, anchor, minWidth, true);
     }
@@ -1748,50 +1761,14 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     /** Opens the TV's "Remotes & Accessories" page (the Bluetooth device list). */
     private void openRemotesAndAccessories() {
-        PackageManager pm = getPackageManager();
-        List<Intent> tries = new ArrayList<>();
-        // 1) The TV's own settings entries whose name mentions remotes / accessories / Bluetooth.
-        try {
-            Intent q = new Intent(Intent.ACTION_MAIN).addCategory("android.intent.category.LEANBACK_SETTINGS");
-            for (ResolveInfo ri : pm.queryIntentActivities(q, 0)) {
-                String label = String.valueOf(ri.loadLabel(pm)).toLowerCase(Locale.ROOT);
-                if (label.contains("accessor") || label.contains("remote") || label.contains("bluetooth")) {
-                    tries.add(new Intent().setComponent(
-                            new ComponentName(ri.activityInfo.packageName, ri.activityInfo.name)));
-                }
-            }
-        } catch (RuntimeException ignored) {
-        }
-        // 2) Settings screens named like the device list (not the pairing / searching ones).
-        for (String pkg : new String[]{"com.android.tv.settings", "com.google.android.tvsettings"}) {
-            try {
-                PackageInfo pi = pm.getPackageInfo(pkg, PackageManager.GET_ACTIVITIES);
-                if (pi.activities == null) continue;
-                for (ActivityInfo ai : pi.activities) {
-                    String n = ai.name.toLowerCase(Locale.ROOT);
-                    if (ai.exported && n.contains("accessories") && !n.contains("pair") && !n.contains("picker")
-                            && !n.contains("dialog") && !n.contains("request")) {
-                        tries.add(new Intent().setComponent(new ComponentName(ai.packageName, ai.name)));
-                    }
-                }
-            } catch (Exception ignored) {
-            }
-        }
-        // 3) The standard Bluetooth screen, unless on this TV it is the "searching for accessories" one.
-        Intent bt = new Intent(Settings.ACTION_BLUETOOTH_SETTINGS);
-        boolean searching = false;
-        try {
-            ResolveInfo r = pm.resolveActivity(bt, 0);
-            searching = r != null && r.activityInfo != null
-                    && r.activityInfo.name.toLowerCase(Locale.ROOT).contains("addaccessory");
-        } catch (RuntimeException ignored) {
-        }
-        if (!searching) tries.add(bt);
-        // 4) The settings home page: Remotes & Accessories is one click away from there.
-        tries.add(new Intent().setComponent(new ComponentName("com.android.tv.settings",
-                "com.android.tv.settings.MainSettings")));
-        tries.add(new Intent(Settings.ACTION_SETTINGS));
-        if (searching) tries.add(bt);
+        Intent[] tries = {
+                new Intent("android.settings.BLUETOOTH_SETTINGS"),
+                new Intent().setComponent(new ComponentName("com.android.tv.settings",
+                        "com.android.tv.settings.accessories.AccessoriesActivity")),
+                new Intent().setComponent(new ComponentName("com.android.tv.settings",
+                        "com.android.tv.settings.accessories.AddAccessoryActivity")),
+                new Intent(Settings.ACTION_SETTINGS)
+        };
         for (Intent i : tries) {
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             try {
