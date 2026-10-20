@@ -1,7 +1,6 @@
 package com.gathin.tvhome;
 
 import android.content.Context;
-import android.graphics.Bitmap;
 import android.net.Uri;
 
 import java.io.File;
@@ -51,14 +50,37 @@ final class WallpaperStore {
         if (!tmp.renameTo(dst)) throw new IOException("Cannot save wallpaper");
     }
 
-    /** Saves a painted wallpaper (a built-in preset) as the wallpaper. */
-    static void saveBitmap(Context c, Bitmap bmp) throws IOException {
-        File tmp = new File(c.getFilesDir(), "wallpaper.tmp");
-        try (OutputStream out = new FileOutputStream(tmp)) {
-            bmp.compress(Bitmap.CompressFormat.JPEG, 92, out);
+    // ---- depth foreground: a transparent PNG drawn over the glow, under the apps ----
+
+    private static File front(Context c) {
+        return new File(c.getFilesDir(), "wallpaper_front.png");
+    }
+
+    static boolean hasFront(Context c) {
+        File f = front(c);
+        return f.isFile() && f.length() > 0;
+    }
+
+    static Uri frontUri(Context c) {
+        return Uri.fromFile(front(c));
+    }
+
+    static void deleteFront(Context c) {
+        front(c).delete();
+    }
+
+    /** Copies the picked PNG as it is, so its transparency is kept. */
+    static void copyFront(Context c, Uri source) throws IOException {
+        File tmp = new File(c.getFilesDir(), "wallpaper_front.tmp");
+        try (InputStream in = c.getContentResolver().openInputStream(source);
+             OutputStream out = new FileOutputStream(tmp)) {
+            if (in == null) throw new IOException("Cannot open image");
+            byte[] buf = new byte[64 * 1024];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
         }
-        File dst = file(c);
+        File dst = front(c);
         dst.delete();
-        if (!tmp.renameTo(dst)) throw new IOException("Cannot save wallpaper");
+        if (!tmp.renameTo(dst)) throw new IOException("Cannot save image");
     }
 }

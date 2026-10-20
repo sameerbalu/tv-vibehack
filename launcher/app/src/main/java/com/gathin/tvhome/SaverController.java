@@ -40,9 +40,9 @@ final class SaverController {
     private final ColorBar dayBar;
     private final View nowRow;
     private final ImageView nowArt;
-    private final TextView quote, moonName;
-    private final MoonView moon;
-    private final View moonRow;
+    private final TextView quote;
+    private final ImageView front;
+    private Bitmap frontBitmap;
     private int quoteIndex;
     private int ticks;
     private String songId = "";
@@ -69,9 +69,7 @@ final class SaverController {
         nowTitle = root.findViewById(R.id.saverNowTitle);
         nowArtist = root.findViewById(R.id.saverNowArtist);
         quote = root.findViewById(R.id.saverQuote);
-        moon = root.findViewById(R.id.saverMoon);
-        moonName = root.findViewById(R.id.saverMoonName);
-        moonRow = root.findViewById(R.id.saverMoonRow);
+        front = root.findViewById(R.id.saverFront);
         final float d = ctx.getResources().getDisplayMetrics().density;
         nowArt.setOutlineProvider(new ViewOutlineProvider() {
             @Override
@@ -85,14 +83,13 @@ final class SaverController {
     void start() {
         running = true;
         loadBackground();
+        loadFront();
         content.setAlpha(0f);
         content.animate().alpha(1f).setDuration(1500).start();
         quoteIndex = Calendar.getInstance().get(Calendar.DAY_OF_YEAR);
         quote.setText(Quotes.forDay(quoteIndex));
         quote.setAlpha(0f);
         quote.animate().alpha(1f).setDuration(2000).start();
-        moonRow.setAlpha(0f);
-        moonRow.animate().alpha(1f).setDuration(2000).start();
         ticks = 0;
         updateInfo();
         handler.postDelayed(info, INFO_MS);
@@ -103,11 +100,15 @@ final class SaverController {
         handler.removeCallbacksAndMessages(null);
         content.animate().cancel();
         quote.animate().cancel();
-        moonRow.animate().cancel();
         wallpaper.setImageDrawable(null);          // give the picture's memory back
         if (wallpaperBitmap != null) {
             wallpaperBitmap.recycle();
             wallpaperBitmap = null;
+        }
+        front.setImageDrawable(null);
+        if (frontBitmap != null) {
+            frontBitmap.recycle();
+            frontBitmap = null;
         }
     }
 
@@ -126,6 +127,32 @@ final class SaverController {
         } else {
             wallpaper.setVisibility(View.GONE);
             aurora.setVisibility(View.VISIBLE);
+        }
+    }
+
+    /** The transparent depth PNG, if one was chosen (kept with its transparency). */
+    private void loadFront() {
+        front.setVisibility(View.GONE);
+        if (!WallpaperStore.hasFront(ctx)) return;
+        try {
+            BitmapFactory.Options o = new BitmapFactory.Options();
+            o.inJustDecodeBounds = true;
+            try (InputStream in = ctx.getContentResolver().openInputStream(WallpaperStore.frontUri(ctx))) {
+                BitmapFactory.decodeStream(in, null, o);
+            }
+            int sample = 1;
+            while (Math.max(o.outWidth, o.outHeight) / (sample * 2) >= 1920) sample *= 2;
+            o.inJustDecodeBounds = false;
+            o.inSampleSize = sample;
+            try (InputStream in = ctx.getContentResolver().openInputStream(WallpaperStore.frontUri(ctx))) {
+                frontBitmap = BitmapFactory.decodeStream(in, null, o);
+            }
+            if (frontBitmap != null) {
+                front.setImageBitmap(frontBitmap);
+                front.setColorFilter(0x40000000, android.graphics.PorterDuff.Mode.SRC_ATOP);   // match the dimmed picture
+                front.setVisibility(View.VISIBLE);
+            }
+        } catch (Exception | OutOfMemoryError ignored) {
         }
     }
 
@@ -158,10 +185,6 @@ final class SaverController {
         float frac = (hour * 60 + c.get(Calendar.MINUTE)) / 1440f;
         dayBar.set(frac, WidgetPanel.DARK_RED_FROM, 0xFFFFFFFF);
         dayLabel.setText(String.format(Locale.US, "%d%% of today", Math.round(frac * 100)));
-
-        float phase = MoonView.phaseNow();
-        moon.setPhase(phase);
-        moonName.setText(MoonView.phaseName(phase) + "  \u00B7  " + MoonView.litPercent(phase) + "%");
 
         // A new line every ~24 seconds, faded in and out.
         if (++ticks % 6 == 0) {

@@ -44,6 +44,15 @@
         android:alpha="0"
         android:importantForAccessibility="no" />
 
+    <!-- Depth effect: a transparent PNG over the glow (the glow is behind the "character"). -->
+    <ImageView
+        android:id="@+id/wallpaperFront"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:visibility="gone"
+        android:contentDescription="@null" />
+
     <!-- Frosted-glass panel behind the all-apps list (all-apps state only). Top margin is set in code. -->
     <com.gathin.tvhome.GlassPanelView
         android:id="@+id/allAppsPanel"

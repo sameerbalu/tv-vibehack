@@ -66,16 +66,18 @@
     <string name="widget_year">Year progress</string>
     <string name="widget_quote">Quote of the day</string>
     <string name="fx_title">Glow &amp; effects</string>
-    <string name="fx_breathing">Breathing glow</string>
     <string name="fx_strength">Glow strength</string>
     <string name="fx_soft">Soft</string>
     <string name="fx_normal">Normal</string>
     <string name="fx_strong">Strong</string>
-    <string name="presets">Wallpaper presets</string>
-    <string name="preset_midnight">Midnight</string>
-    <string name="preset_sunset">Sunset</string>
-    <string name="preset_forest">Forest</string>
-    <string name="preset_ember">Ember</string>
-    <string name="preset_ocean">Ocean</string>
-    <string name="preset_graphite">Graphite</string>
+    <string name="fx_glow">Background glow</string>
+    <string name="fx_style">Glow style</string>
+    <string name="fx_steady">Steady</string>
+    <string name="fx_breathing">Breathing</string>
+    <string name="fx_heartbeat">Heartbeat</string>
+    <string name="fx_drift">Drift</string>
+    <string name="fx_shimmer">Shimmer</string>
+    <string name="fx_rainbow">Rainbow</string>
+    <string name="depth_front">Depth foreground (PNG)</string>
+    <string name="depth_remove">Remove depth foreground</string>
 </resources>

@@ -25,6 +25,15 @@
         android:layout_height="match_parent"
         android:background="@drawable/saver_scrim" />
 
+    <!-- Depth foreground (transparent PNG), over the picture and under the clock. -->
+    <ImageView
+        android:id="@+id/saverFront"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:visibility="gone"
+        android:contentDescription="@null" />
+
     <LinearLayout
         android:id="@+id/saverContent"
         android:layout_width="wrap_content"
@@ -203,32 +212,4 @@
         android:fontFamily="@font/outfit"
         android:fontVariationSettings="'wght' 300"
         android:letterSpacing="0.04" />
-
-    <!-- Tonight's moon, bottom right. -->
-    <LinearLayout
-        android:id="@+id/saverMoonRow"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom|end"
-        android:layout_marginEnd="64dp"
-        android:layout_marginBottom="48dp"
-        android:orientation="horizontal"
-        android:gravity="center_vertical">
-
-        <com.gathin.tvhome.MoonView
-            android:id="@+id/saverMoon"
-            android:layout_width="40dp"
-            android:layout_height="40dp" />
-
-        <TextView
-            android:id="@+id/saverMoonName"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="12dp"
-            android:textColor="#B3FFFFFF"
-            android:textSize="13sp"
-            android:fontFamily="@font/outfit"
-            android:letterSpacing="0.1"
-            android:textAllCaps="true" />
-    </LinearLayout>
 </FrameLayout>

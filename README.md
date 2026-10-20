@@ -315,3 +315,12 @@ MIT, see [`LICENSE`](LICENSE). The Outfit typeface is under the SIL Open Font Li
 
 - Settings no longer lists "Reset wallpaper" or "Arrange apps" (the features remain in the code).
 - Inputs and Bluetooth pills animate their icons on focus (plug slides in / icon pulses), like the Settings gear turns.
+
+## v11 notes
+
+- Removed wallpaper presets and the screensaver moon.
+- Settings > Glow & effects: background glow on/off, glow style (Steady, Breathing, Heartbeat, Drift, Shimmer, Rainbow), glow strength.
+- Spotify widget is now a large card: album art, title, artist, song progress and an animated equaliser (takes two widget slots).
+- Bluetooth tab looks for the Remotes & Accessories list and avoids the "searching for accessories" screen.
+- Depth wallpaper: Settings > "Depth foreground (PNG)". Use a transparent PNG with the same size/aspect as your wallpaper;
+  the glow is drawn behind it. The screensaver shows it too (over the picture, under the clock).

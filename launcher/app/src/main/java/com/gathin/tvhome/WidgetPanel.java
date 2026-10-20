@@ -7,8 +7,11 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Outline;
+import android.graphics.Paint;
+import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
@@ -65,7 +68,10 @@ public class WidgetPanel extends LinearLayout {
     private int shown;
     private boolean playing;
 
-    private TextView npTitle, npArtist;
+    private TextView npTitle, npArtist, npLabel, npTime;
+    private EqView npEq;
+    private ColorBar npBar;
+    private int nowColor = 0xFF1DB954;
     private ImageView npArt;
     private TextView calDay, calWeek, calMonth;
     private TextView stValue, memValue, netValue, netSub, volValue, dayValue, upValue, upSub;
@@ -98,7 +104,8 @@ public class WidgetPanel extends LinearLayout {
         buildQuote();
         for (String id : IDS) {
             View c = cards.get(id);
-            LayoutParams lp = new LayoutParams((int) (WIDTH_DP * d), (int) (CARD_H_DP * d));
+            int heightDp = id.equals("now_playing") ? 2 * CARD_H_DP + GAP_DP : CARD_H_DP;
+            LayoutParams lp = new LayoutParams((int) (WIDTH_DP * d), (int) (heightDp * d));
             lp.bottomMargin = (int) (GAP_DP * d);
             addView(c, lp);
         }
@@ -152,12 +159,13 @@ public class WidgetPanel extends LinearLayout {
     }
 
     private void applyVisibility() {
-        int count = 0;
+        int count = 0;                                   // slots used; the Now playing card takes two
         for (String id : IDS) {
             View c = cards.get(id);
             boolean want = isOn(id) && (!id.equals("now_playing") || playing);
-            boolean show = want && count < maxCards;
-            if (show) count++;
+            int cost = id.equals("now_playing") ? 2 : 1;
+            boolean show = want && count + cost <= maxCards;
+            if (show) count += cost;
             int vis = show ? VISIBLE : GONE;
             if (c.getVisibility() != vis) {
                 c.setVisibility(vis);
@@ -315,21 +323,48 @@ public class WidgetPanel extends LinearLayout {
 
     /** A song is playing in Spotify. */
     void setNowPlaying(String title, String artist, Bitmap art, int color) {
+        nowColor = color;
         npTitle.setText(TextUtils.isEmpty(title) ? "Spotify" : title);
         npArtist.setText(TextUtils.isEmpty(artist) ? "" : artist);
         npArtist.setVisibility(TextUtils.isEmpty(artist) ? GONE : VISIBLE);
+        npLabel.setTextColor(color);
+        npEq.setColor(color);
         if (art != null && art.getWidth() > 0 && art.getHeight() > 0) {
-            npArt.setImageBitmap(Bitmap.createScaledBitmap(art, 96, 96, true));   // our own copy
+            npArt.setImageBitmap(Bitmap.createScaledBitmap(art, 192, 192, true));   // our own copy
         } else {
             npArt.setImageDrawable(new ColorDrawable(color));
         }
         playing = true;
+        npEq.setActive(true);
         applyVisibility();
+    }
+
+    /** Where the song is: updates the thin progress bar and the "1:23 / 3:45" text. */
+    void setNowProgress(long posMs, long durMs) {
+        if (durMs <= 0) {
+            npBar.set(0f, nowColor, nowColor);
+            npTime.setText("");
+            return;
+        }
+        npBar.set(posMs / (float) durMs, nowColor, lighten(nowColor));
+        npTime.setText(clock(posMs) + " / " + clock(durMs));
+    }
+
+    private static String clock(long ms) {
+        long sec = Math.max(0, ms / 1000);
+        return String.format(Locale.US, "%d:%02d", sec / 60, sec % 60);
+    }
+
+    private static int lighten(int color) {
+        return Color.rgb(Color.red(color) + (255 - Color.red(color)) * 4 / 10,
+                Color.green(color) + (255 - Color.green(color)) * 4 / 10,
+                Color.blue(color) + (255 - Color.blue(color)) * 4 / 10);
     }
 
     void clearNowPlaying() {
         if (!playing) return;
         playing = false;
+        npEq.setActive(false);
         applyVisibility();
     }
 
@@ -383,25 +418,55 @@ public class WidgetPanel extends LinearLayout {
 
     private void buildNowPlaying() {
         LinearLayout c = card(true, 0xFF1DB954);
+        c.setPadding((int) (12 * d), (int) (10 * d), (int) (14 * d), (int) (10 * d));
         npArt = new ImageView(getContext());
         npArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
         npArt.setOutlineProvider(new ViewOutlineProvider() {
             @Override
             public void getOutline(View v, Outline o) {
-                o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), 8 * d);
+                o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), 14 * d);
             }
         });
         npArt.setClipToOutline(true);
-        LayoutParams art = new LayoutParams((int) (44 * d), (int) (44 * d));
-        art.setMarginEnd((int) (12 * d));
+        npArt.setElevation(6 * d);
+        LayoutParams art = new LayoutParams((int) (92 * d), (int) (92 * d));
+        art.setMarginEnd((int) (14 * d));
         c.addView(npArt, art);
+
         LinearLayout col = column();
-        col.addView(label("Spotify", 9, 0xFF1DB954));
-        npTitle = text(14, Color.WHITE, false);
+        LinearLayout head = new LinearLayout(getContext());
+        head.setOrientation(HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        npLabel = label("Now playing", 9, 0xFF1DB954);
+        head.addView(npLabel, new LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        npEq = new EqView(getContext());
+        head.addView(npEq, new LayoutParams((int) (18 * d), (int) (12 * d)));
+        col.addView(head, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        npTitle = text(15, Color.WHITE, false);
         npTitle.setTypeface(font, Typeface.BOLD);
-        col.addView(npTitle);
+        npTitle.setSingleLine(false);
+        npTitle.setMaxLines(2);
+        npTitle.setEllipsize(TextUtils.TruncateAt.END);
+        LayoutParams tl = new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        tl.topMargin = (int) (4 * d);
+        col.addView(npTitle, tl);
+
         npArtist = text(12, 0xB3FFFFFF, false);
-        col.addView(npArtist);
+        LayoutParams al = new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        al.topMargin = (int) (2 * d);
+        col.addView(npArtist, al);
+
+        npBar = new ColorBar(getContext());
+        LayoutParams bl = new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (4 * d));
+        bl.topMargin = (int) (10 * d);
+        col.addView(npBar, bl);
+
+        npTime = text(10, 0x99FFFFFF, false);
+        LayoutParams ml = new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        ml.topMargin = (int) (4 * d);
+        col.addView(npTime, ml);
+
         c.addView(col, new LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         cards.put("now_playing", c);
     }
@@ -539,5 +604,47 @@ public class WidgetPanel extends LinearLayout {
         upSub = text(12, 0xB3FFFFFF, false);
         c.addView(upSub);
         cards.put("uptime", c);
+    }
+
+    /** Four little bars that dance while a song plays. */
+    private static class EqView extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF rect = new RectF();
+        private int color = 0xFF1DB954;
+        private boolean active;
+
+        EqView(Context c) {
+            super(c);
+        }
+
+        void setColor(int c) {
+            color = c;
+            invalidate();
+        }
+
+        void setActive(boolean on) {
+            active = on;
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            float w = getWidth(), h = getHeight();
+            if (w <= 0 || h <= 0) return;
+            int n = 4;
+            float gap = w * 0.12f;
+            float bw = (w - gap * (n - 1)) / n;
+            long t = SystemClock.uptimeMillis();
+            paint.setColor(color);
+            for (int i = 0; i < n; i++) {
+                float v = active
+                        ? 0.3f + 0.7f * (0.5f + 0.5f * (float) Math.sin(t / (170.0 + i * 61.0) + i * 1.7))
+                        : 0.3f;
+                float left = i * (bw + gap);
+                rect.set(left, h - h * v, left + bw, h);
+                canvas.drawRoundRect(rect, bw / 2f, bw / 2f, paint);
+            }
+            if (active) postInvalidateOnAnimation();
+        }
     }
 }
