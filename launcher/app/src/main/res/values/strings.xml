@@ -35,6 +35,17 @@
     <string name="reset_wallpaper">Reset wallpaper</string>
     <string name="arrange_apps">Arrange apps</string>
     <string name="system_settings">System settings</string>
+    <string name="tvcontrol_title">TV Control</string>
+    <string name="tc_memory">Memory</string>
+    <string name="tc_storage">Storage</string>
+    <string name="tc_stop">Stop background apps</string>
+    <string name="tc_open">Open TV Control app</string>
+    <string name="tc_working">Working…</string>
+    <string name="tc_free">%1$s free</string>
+    <string name="tc_stopped">%1$d apps stopped</string>
+    <string name="tc_refused">Not allowed</string>
+    <string name="tc_cache_done">Cache cleared · %1$s free</string>
+    <string name="tc_cache_none">Cache cleared · nothing more to free</string>
     <string name="arrange_help">Arrange apps: move with the arrow keys, OK to place, BACK to cancel.</string>
     <string name="order_saved">Layout saved</string>
     <string name="order_cancelled">Changes cancelled</string>

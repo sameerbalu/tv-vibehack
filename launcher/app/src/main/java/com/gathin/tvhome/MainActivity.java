@@ -172,6 +172,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private int resumeTileTop = NO_TOP;      // top of the tile (in the grid) when we left
     private boolean keepScroll;
     private boolean restorePending;          // true between onResume and the focus restore
+    private static final long DOUBLE_TAP_MS = 320;
+    private long lastSettingsClick;
+    private final Runnable openSettingsMenu = this::showLauncherSettings;
     private boolean paused;                  // true between onPause and onResume
     // We left from the full app list: keep its look (blur, panel, hidden clock) when Home brings us back.
     private static boolean resumeInAll;
@@ -366,7 +369,18 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         btnBluetooth.setCompoundDrawablesRelativeWithIntrinsicBounds(bluetoothIcon, null, null, null);
         btnInputs.setOnFocusChangeListener((v, f) -> inputsIcon.setFocused(f));
         btnBluetooth.setOnFocusChangeListener((v, f) -> bluetoothIcon.setFocused(f));
-        btnSettings.setOnClickListener(v -> showLauncherSettings());
+        // One press opens the menu; two quick presses clear the cache.
+        btnSettings.setOnClickListener(v -> {
+            long t = SystemClock.uptimeMillis();
+            if (t - lastSettingsClick < DOUBLE_TAP_MS) {
+                lastSettingsClick = 0;
+                handler.removeCallbacks(openSettingsMenu);
+                quickClearCache();
+            } else {
+                lastSettingsClick = t;
+                handler.postDelayed(openSettingsMenu, DOUBLE_TAP_MS);
+            }
+        });
 
         // Keep focus on the top bar at its ends and at the top: Android's focus finder would otherwise
         // jump to a tile far below when there is nothing in that direction.
@@ -1136,6 +1150,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         LinearLayout rows = panel.findViewById(R.id.rows);
         int minWidth = (int) (230 * density);
         final PopupWindow popup = newDropdown(panel, minWidth);
+        addInputRow(rows, popup, R.drawable.ic_tvcontrol, getString(R.string.tvcontrol_title), -1, this::showTvControl);
+        addSeparator(rows);
         addInputRow(rows, popup, R.drawable.ic_wallpaper, getString(R.string.wallpaper_tab), -1, this::showWallpaperMenu);
         addInputRow(rows, popup, R.drawable.ic_hide, getString(R.string.hide_apps), -1, this::showHideApps);
         addInputRow(rows, popup, R.drawable.ic_widgets, getString(R.string.widgets), -1, this::showWidgets);
@@ -1150,6 +1166,120 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 () -> open(new Intent(Settings.ACTION_SETTINGS)));
         fitScroll(panel);
         showDropdown(popup, panel, anchor, minWidth, true);
+    }
+
+    // ---- TV Control: memory, storage, background apps ----------------------------------------------
+
+    /** Double tap on the settings icon: clear the cache right away. */
+    private void quickClearCache() {
+        View gear = findViewById(R.id.btnSettings);
+        gear.animate().rotationBy(360f).setDuration(600).start();
+        Toast.makeText(this, R.string.tc_working, Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            long before = TvTools.storage()[1];
+            boolean ok = true;
+            try {
+                TvTools.clearCache(this);
+            } catch (Exception e) {
+                ok = false;
+            }
+            long after = TvTools.storage()[1];
+            final boolean fok = ok;
+            final long freed = after - before;
+            runOnUiThread(() -> {
+                if (!fok) Toast.makeText(this, R.string.tc_refused, Toast.LENGTH_SHORT).show();
+                else if (freed > 0) Toast.makeText(this, getString(R.string.tc_cache_done, TvTools.fmt(after)), Toast.LENGTH_LONG).show();
+                else Toast.makeText(this, R.string.tc_cache_none, Toast.LENGTH_LONG).show();
+            });
+        }).start();
+    }
+
+    private View tcRow(LinearLayout rows, int iconRes, int titleRes) {
+        View row = getLayoutInflater().inflate(R.layout.item_input, rows, false);
+        ((ImageView) row.findViewById(R.id.icon)).setImageResource(iconRes);
+        ((TextView) row.findViewById(R.id.title)).setText(titleRes);
+        row.findViewById(R.id.dot).setVisibility(View.GONE);
+        rows.addView(row);
+        return row;
+    }
+
+    private void tcStatus(View row, String text) {
+        TextView st = row.findViewById(R.id.status);
+        st.setVisibility(View.VISIBLE);
+        st.setText(text);
+    }
+
+    /** Menu with live memory / storage numbers; tapping a row runs it and the row shows the result. */
+    private void showTvControl() {
+        View anchor = findViewById(R.id.btnSettings);
+        View panel = getLayoutInflater().inflate(R.layout.popup_apps, root, false);
+        panel.findViewById(R.id.title).setVisibility(View.GONE);
+        LinearLayout rows = panel.findViewById(R.id.rows);
+        int minWidth = (int) (320 * density);
+        final PopupWindow popup = newDropdown(panel, minWidth);
+
+        final View mem = tcRow(rows, R.drawable.ic_memory, R.string.tc_memory);
+        final View sto = tcRow(rows, R.drawable.ic_storage, R.string.tc_storage);
+        final View stop = tcRow(rows, R.drawable.ic_stopapps, R.string.tc_stop);
+        tcStatus(mem, getString(R.string.tc_free, TvTools.fmt(TvTools.memory(this)[1])));
+        tcStatus(sto, getString(R.string.tc_free, TvTools.fmt(TvTools.storage()[1])));
+        stop.findViewById(R.id.status).setVisibility(View.GONE);
+
+        // Memory: stop background apps, then show the free RAM.
+        mem.setOnClickListener(v -> {
+            tcStatus(mem, getString(R.string.tc_working));
+            new Thread(() -> {
+                TvTools.stopBackground(this);
+                sleepQuietly(1500);
+                final String s = getString(R.string.tc_free, TvTools.fmt(TvTools.memory(this)[1]));
+                runOnUiThread(() -> tcStatus(mem, s));
+            }).start();
+        });
+        // Storage: clear cache, then show the free space.
+        sto.setOnClickListener(v -> {
+            tcStatus(sto, getString(R.string.tc_working));
+            new Thread(() -> {
+                String s;
+                try {
+                    TvTools.clearCache(this);
+                    s = getString(R.string.tc_free, TvTools.fmt(TvTools.storage()[1]));
+                } catch (Exception e) {
+                    s = getString(R.string.tc_refused);
+                }
+                final String fs = s;
+                runOnUiThread(() -> tcStatus(sto, fs));
+            }).start();
+        });
+        // Stop background apps.
+        stop.setOnClickListener(v -> {
+            tcStatus(stop, getString(R.string.tc_working));
+            new Thread(() -> {
+                final int n = TvTools.stopBackground(this);
+                sleepQuietly(1200);
+                final String ms = getString(R.string.tc_free, TvTools.fmt(TvTools.memory(this)[1]));
+                runOnUiThread(() -> {
+                    tcStatus(stop, getString(R.string.tc_stopped, n));
+                    tcStatus(mem, ms);
+                });
+            }).start();
+        });
+
+        final Intent control = getPackageManager().getLaunchIntentForPackage(TvTools.CONTROL_PKG) != null
+                ? getPackageManager().getLaunchIntentForPackage(TvTools.CONTROL_PKG)
+                : getPackageManager().getLeanbackLaunchIntentForPackage(TvTools.CONTROL_PKG);
+        if (control != null) {
+            addSeparator(rows);
+            addInputRow(rows, popup, R.drawable.ic_tvcontrol, getString(R.string.tc_open), -1, () -> open(control));
+        }
+        fitScroll(panel);
+        showDropdown(popup, panel, anchor, minWidth, true);
+    }
+
+    private static void sleepQuietly(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException ignored) {
+        }
     }
 
     /** One tab for the wallpaper: choose wallpaper and the depth foreground PNG. */
