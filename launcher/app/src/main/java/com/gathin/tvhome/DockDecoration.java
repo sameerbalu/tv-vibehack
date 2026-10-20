@@ -59,7 +59,7 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
             }
         }
         if (!any) return;
-        float pad = 14 * density;
+        float pad = 18 * density;
         rect.inset(-pad, -pad);
         style.draw(c, rect, 26 * density, parent.getWidth(), parent.getHeight(), 0f, 0f);
     }

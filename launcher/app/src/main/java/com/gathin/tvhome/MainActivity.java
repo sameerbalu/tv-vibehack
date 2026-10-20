@@ -1749,15 +1749,18 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         return names;
     }
 
-    /** Opens the TV's "Remotes & Accessories" page (the Bluetooth device list). */
+    /** Opens the TV's "Remotes & Accessories" page (the Bluetooth device list), never the pairing/search screens. */
     private void openRemotesAndAccessories() {
         PackageManager pm = getPackageManager();
         List<Intent> tries = new ArrayList<>();
-        // 1) The TV's own settings entries whose name mentions remotes / accessories / Bluetooth.
+        // 1) Settings entries named like the device list. Skip "Add accessory" (that one starts a search) and pairing screens.
         try {
             Intent q = new Intent(Intent.ACTION_MAIN).addCategory("android.intent.category.LEANBACK_SETTINGS");
             for (ResolveInfo ri : pm.queryIntentActivities(q, 0)) {
                 String label = String.valueOf(ri.loadLabel(pm)).toLowerCase(Locale.ROOT);
+                String cls = ri.activityInfo.name.toLowerCase(Locale.ROOT);
+                if (cls.contains("addaccessory") || cls.contains("pair") || cls.contains("picker")
+                        || cls.contains("dialog") || cls.contains("request")) continue;
                 if (label.contains("accessor") || label.contains("remote") || label.contains("bluetooth")) {
                     tries.add(new Intent().setComponent(
                             new ComponentName(ri.activityInfo.packageName, ri.activityInfo.name)));
@@ -1765,36 +1768,16 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             }
         } catch (RuntimeException ignored) {
         }
-        // 2) Settings screens named like the device list (not the pairing / searching ones).
-        for (String pkg : new String[]{"com.android.tv.settings", "com.google.android.tvsettings"}) {
-            try {
-                PackageInfo pi = pm.getPackageInfo(pkg, PackageManager.GET_ACTIVITIES);
-                if (pi.activities == null) continue;
-                for (ActivityInfo ai : pi.activities) {
-                    String n = ai.name.toLowerCase(Locale.ROOT);
-                    if (ai.exported && n.contains("accessories") && !n.contains("pair") && !n.contains("picker")
-                            && !n.contains("dialog") && !n.contains("request")) {
-                        tries.add(new Intent().setComponent(new ComponentName(ai.packageName, ai.name)));
-                    }
-                }
-            } catch (Exception ignored) {
-            }
-        }
-        // 3) The standard Bluetooth screen, unless on this TV it is the "searching for accessories" one.
-        Intent bt = new Intent(Settings.ACTION_BLUETOOTH_SETTINGS);
-        boolean searching = false;
-        try {
-            ResolveInfo r = pm.resolveActivity(bt, 0);
-            searching = r != null && r.activityInfo != null
-                    && r.activityInfo.name.toLowerCase(Locale.ROOT).contains("addaccessory");
-        } catch (RuntimeException ignored) {
-        }
-        if (!searching) tries.add(bt);
-        // 4) The settings home page: Remotes & Accessories is one click away from there.
+        // 2) The settings home page of this TV (Remotes & Accessories is right there), stock and Haier builds.
         tries.add(new Intent().setComponent(new ComponentName("com.android.tv.settings",
                 "com.android.tv.settings.MainSettings")));
+        tries.add(new Intent().setComponent(new ComponentName("com.haier.tv.settings",
+                "com.haier.tv.settings.MainSettings")));
+        tries.add(new Intent().setComponent(new ComponentName("com.google.android.tvsettings",
+                "com.android.tv.settings.MainSettings")));
         tries.add(new Intent(Settings.ACTION_SETTINGS));
-        if (searching) tries.add(bt);
+        // 3) Last resort: the standard Bluetooth screen (on some TVs this is the search screen).
+        tries.add(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS));
         Toast.makeText(this, R.string.bt_opening, Toast.LENGTH_SHORT).show();
         launchChain(tries, 0);
     }

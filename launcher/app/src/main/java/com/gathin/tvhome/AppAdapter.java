@@ -82,6 +82,11 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
     }
 
     static final float FOCUS_SCALE = 1.10f;
+    /** Apps shown as Apple TV-style AMOLED icon tiles (pure black tile, centred app icon) instead of a wide banner. */
+    private static final Set<String> AMOLED_ICON_APPS = new HashSet<>(Arrays.asList(
+            "io.gh.reisxd.tizentube.cobalt", "com.spotify.tv.android", "com.tcl.browser", "com.nuvio.tv",
+            "in.startv.hotstar", "com.kick.mobile", "org.clipbox.player", "org.videolan.vlc",
+            "flar2.homebutton", "com.gathin.tvhome"));
     private static final String PREFS = "launcher_preferences";
     private static final String DOCK_ORDER = "dock_order";      // old: dock packages only
     private static final String HIDDEN_APPS = "hidden_apps";    // packages the person chose to hide
@@ -148,6 +153,7 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
             if (pkg.equals(ctx.getPackageName()) || hidden.contains(pkg) || userHidden.contains(pkg)) continue;
             Drawable banner = ri.activityInfo.loadBanner(pm);
             if (banner == null) banner = ri.activityInfo.applicationInfo.loadBanner(pm);
+            if (AMOLED_ICON_APPS.contains(pkg)) banner = null;
             Drawable icon = IconShapes.shape(ctx, ri.loadIcon(pm),
                     iconShape == IconShapes.AUTO ? IconShapes.ROUNDED : iconShape, iconPx);
             String label = String.valueOf(ri.loadLabel(pm));
