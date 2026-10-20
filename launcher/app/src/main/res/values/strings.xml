@@ -77,6 +77,7 @@
     <string name="bt_off">Bluetooth is off</string>
     <string name="bt_none">No paired devices</string>
     <string name="bt_paired">Paired</string>
+    <string name="bt_history">Connected before</string>
     <string name="bt_settings">Bluetooth settings</string>
     <string name="widget_on">On</string>
     <string name="widget_off">Off</string>

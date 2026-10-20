@@ -70,6 +70,9 @@ import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -169,6 +172,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private int resumeTileTop = NO_TOP;      // top of the tile (in the grid) when we left
     private boolean keepScroll;
     private boolean restorePending;          // true between onResume and the focus restore
+    private boolean paused;                  // true between onPause and onResume
+    // We left from the full app list: keep its look (blur, panel, hidden clock) when Home brings us back.
+    private static boolean resumeInAll;
     private long lastResumeMs;
     private final Runnable restoreFocus = this::restoreFocusNow;
     private List<String> arrangeBackup;
@@ -184,6 +190,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private final BroadcastReceiver btReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
+            if (BluetoothDevice.ACTION_ACL_CONNECTED.equals(intent.getAction())) {
+                try {
+                    BluetoothDevice d = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+                    if (d != null) rememberBt(d.getAddress(), d.getName());
+                } catch (RuntimeException ignored) {
+                }
+            }
             updateBluetoothLabel();
             handler.postDelayed(MainActivity.this::updateBluetoothLabel, 1500);   // profiles settle a moment later
             handler.postDelayed(MainActivity.this::updateBluetoothLabel, 4500);
@@ -343,17 +356,16 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         View btnInputs = findViewById(R.id.btnInputs);
         View btnSettings = findViewById(R.id.btnSettings);
         btnInputs.setOnClickListener(v -> showInputs());
-        btnBluetooth.setOnClickListener(v -> openRemotesAndAccessories());
+        btnBluetooth.setOnClickListener(v -> showBluetooth());
         btnSettings.setOnFocusChangeListener((v, f) -> v.animate().rotation(f ? 60f : 0f).setDuration(300).start());
-        // Inputs: the plug slides in. Bluetooth: the icon pulses. (Settings: the gear turns, above.)
-        inputsIcon = wrapStartIcon((TextView) btnInputs);
-        bluetoothIcon = wrapStartIcon(btnBluetooth);
-        btnInputs.setOnFocusChangeListener((v, f) -> {
-            if (inputsIcon != null) inputsIcon.plugIn(f, 9 * density);
-        });
-        btnBluetooth.setOnFocusChangeListener((v, f) -> {
-            if (bluetoothIcon != null) bluetoothIcon.pulse(f);
-        });
+        // Inputs: the signal arrow glides into the screen. Bluetooth: the rune draws itself and radio waves
+        // ripple out. (Settings: the gear turns, above.)
+        inputsIcon = new PillIcon.Input(density, ((TextView) btnInputs).getTextColors());
+        bluetoothIcon = new PillIcon.Bluetooth(density, btnBluetooth.getTextColors());
+        ((TextView) btnInputs).setCompoundDrawablesRelativeWithIntrinsicBounds(inputsIcon, null, null, null);
+        btnBluetooth.setCompoundDrawablesRelativeWithIntrinsicBounds(bluetoothIcon, null, null, null);
+        btnInputs.setOnFocusChangeListener((v, f) -> inputsIcon.setFocused(f));
+        btnBluetooth.setOnFocusChangeListener((v, f) -> bluetoothIcon.setFocused(f));
         btnSettings.setOnClickListener(v -> showLauncherSettings());
 
         // Keep focus on the top bar at its ends and at the top: Android's focus finder would otherwise
@@ -373,7 +385,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             boolean onTile = newF != null && newF.getId() == R.id.card;
             if (!onTile) {
                 hideGlass();
-                if (allAppsMode) {
+                // While we are in the background (or still restoring after Home) focus bounces around; that
+                // must not switch the look back to the dock.
+                if (allAppsMode && !paused && !restorePending) {
                     allAppsMode = false;
                     refreshChrome();
                 }
@@ -388,6 +402,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     protected void onResume() {
         super.onResume();
         long nowMs = SystemClock.uptimeMillis();
+        paused = false;
+        final boolean keepAll = resumeInAll;
+        resumeInAll = false;
         // Home pressed again right away: skip the slow reload and the enter animation, they only stack up.
         final boolean quick = adapter.getItemCount() > 0 && nowMs - lastResumeMs < 2500;
         lastResumeMs = nowMs;
@@ -406,22 +423,23 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         if (ambientAnim != null) ambientAnim.cancel();
         ambient.setAlpha(0f);
         // Start in the dock state; focusing a tile in the app list switches to the blurred state again.
-        allAppsMode = false;
+        // (If we left from the full app list, its look stays exactly as it was: no flash of the dock state.)
         arranging = false;
-        overlayApplied = false;
-        allUiApplied = false;
         snapActive = false;
         allAppsPanel.animate().cancel();
-        allAppsPanel.setAlpha(0f);
         wallpaperBlurView.animate().cancel();
         allAppsScrim.animate().cancel();
         wallpaperFront.animate().cancel();
         header.animate().cancel();
-        wallpaperBlurView.setAlpha(0f);
-        allAppsScrim.setAlpha(0f);
-        wallpaperFront.setAlpha(1f);
-        header.setAlpha(1f);
-        header.setVisibility(View.VISIBLE);
+        allAppsMode = keepAll;
+        overlayApplied = keepAll;
+        allUiApplied = keepAll;
+        allAppsPanel.setAlpha(keepAll ? 1f : 0f);
+        wallpaperBlurView.setAlpha(keepAll ? 1f : 0f);
+        allAppsScrim.setAlpha(keepAll ? 1f : 0f);
+        wallpaperFront.setAlpha(keepAll ? 0f : 1f);
+        header.setAlpha(keepAll ? 0f : 1f);
+        header.setVisibility(keepAll ? View.INVISIBLE : View.VISIBLE);
         grid.animate().cancel();
         grid.setAlpha(1f);
         grid.setTranslationY(0f);
@@ -441,8 +459,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         handler.postDelayed(minuteTick, MINUTE_MS);
         if (wallpaperView.getVisibility() != View.VISIBLE) restoreWallpaper();   // safety net after a restart
         widgets.animate().cancel();
-        widgets.setAlpha(1f);
-        widgets.setVisibility(View.VISIBLE);
+        widgets.setAlpha(keepAll ? 0f : 1f);
+        widgets.setVisibility(keepAll ? View.INVISIBLE : View.VISIBLE);
         widgets.refresh();
         positionWidgets();
         IntentFilter bt = new IntentFilter();
@@ -507,11 +525,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         if (!restorePending) {
             // Remember where the list was, so Home returns to the same spot.
             resumeTileTop = NO_TOP;
-            if (allAppsMode && !arranging && lastFocused >= COLUMNS) {
+            resumeInAll = allAppsMode && !arranging && lastFocused >= COLUMNS;
+            if (resumeInAll) {
                 RecyclerView.ViewHolder vh = grid.findViewHolderForAdapterPosition(lastFocused);
                 if (vh != null) resumeTileTop = vh.itemView.getTop();
             }
         }
+        paused = true;
         try {
             unregisterReceiver(btReceiver);
         } catch (IllegalArgumentException ignored) {
@@ -829,16 +849,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     // ---- top shelf -------------------------------------------------------------------------------
 
-    private IconAnim inputsIcon, bluetoothIcon;
-
-    /** Replaces a pill's start icon with an animatable copy of it. */
-    private IconAnim wrapStartIcon(TextView pill) {
-        Drawable start = pill.getCompoundDrawablesRelative()[0];
-        if (start == null) return null;
-        IconAnim wrapped = new IconAnim(start.mutate());
-        pill.setCompoundDrawablesRelativeWithIntrinsicBounds(wrapped, null, null, null);
-        return wrapped;
-    }
+    private PillIcon inputsIcon, bluetoothIcon;
 
     private void showHero(int position, float dockTopInRoot) {
         lastDockTop = dockTopInRoot;
@@ -1626,10 +1637,26 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         return null;
     }
 
+    /** Keeps a list of every Bluetooth device that has been connected here, to show in the Bluetooth menu. */
+    private void rememberBt(String address, String name) {
+        if (address == null || name == null || name.trim().isEmpty()) return;
+        try {
+            SharedPreferences sp = getSharedPreferences(PREFS, MODE_PRIVATE);
+            Set<String> old = sp.getStringSet("bt_history", null);
+            Set<String> next = new LinkedHashSet<>();
+            if (old != null) for (String e : old) if (!e.startsWith(address + "\t")) next.add(e);
+            next.add(address + "\t" + name.trim());
+            while (next.size() > 20) next.remove(next.iterator().next());
+            sp.edit().putStringSet("bt_history", next).apply();
+        } catch (RuntimeException ignored) {
+        }
+    }
+
     private static final class BtDev {
         final String name;
         final String address;
         boolean connected;
+        boolean remembered;   // not paired any more, but it was connected here before
 
         BtDev(String name, String address) {
             this.name = name;
@@ -1662,17 +1689,34 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                     } catch (Exception ignored) {
                     }
                     if (!b.connected && audio.containsKey(b.name.toLowerCase())) b.connected = true;
+                    if (b.connected) rememberBt(b.address, b.name);
                     devices.add(b);
                 }
             } catch (RuntimeException ignored) {
             }
+            // Devices that were connected here before but are no longer paired.
+            Set<String> seen = new HashSet<>();
+            for (BtDev d : devices) seen.add(d.address);
+            Set<String> history = getSharedPreferences(PREFS, MODE_PRIVATE).getStringSet("bt_history", null);
+            if (history != null) {
+                for (String e : history) {
+                    String[] sp = e.split("\t", 2);
+                    if (sp.length < 2 || seen.contains(sp[0])) continue;
+                    BtDev d = new BtDev(sp[1], sp[0]);
+                    d.remembered = true;
+                    devices.add(d);
+                }
+            }
             Collections.sort(devices, (a, b) -> {
                 if (a.connected != b.connected) return a.connected ? -1 : 1;
+                if (a.remembered != b.remembered) return a.remembered ? 1 : -1;
                 return a.name.compareToIgnoreCase(b.name);
             });
             for (BtDev b : devices) {
-                View row = addBtRow(rows, popup, b.name, b.connected ? getString(R.string.connected) : getString(R.string.bt_paired),
-                        b.connected, b.connected ? 1f : 0.65f);
+                String status = b.connected ? getString(R.string.connected)
+                        : b.remembered ? getString(R.string.bt_history) : getString(R.string.bt_paired);
+                View row = addBtRow(rows, popup, b.name, status,
+                        b.connected, b.connected ? 1f : b.remembered ? 0.5f : 0.65f);
                 rowByAddress.put(b.address, row);
             }
             if (devices.isEmpty()) addBtRow(rows, popup, getString(R.string.bt_none), null, false, 0.6f);
@@ -2009,6 +2053,14 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         popup.showAsDropDown(anchor, xOff, (int) (10 * density), Gravity.START);
         panel.animate().alpha(1f).scaleY(1f).translationY(0f).setDuration(220)
                 .setInterpolator(new DecelerateInterpolator(1.6f)).start();
+        // Rows ease in one after the other.
+        for (int i = 0; i < rows.getChildCount(); i++) {
+            View r = rows.getChildAt(i);
+            r.setAlpha(0f);
+            r.setTranslationY(-6 * density);
+            r.animate().alpha(1f).translationY(0f).setStartDelay(40L + i * 28L).setDuration(220)
+                    .setInterpolator(new DecelerateInterpolator(1.6f)).start();
+        }
         if (rows.getChildCount() > 0) rows.getChildAt(0).requestFocus();
     }
 
