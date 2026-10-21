@@ -373,6 +373,9 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
         try {
             ctx.startActivity(i);
+            if (ctx instanceof android.app.Activity) {
+                ((android.app.Activity) ctx).overridePendingTransition(R.anim.launch_in, R.anim.launch_out);
+            }
         } catch (Exception ex) {
             Toast.makeText(ctx, ctx.getString(R.string.cant_open, e.label), Toast.LENGTH_SHORT).show();
         }

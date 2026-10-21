@@ -222,6 +222,13 @@
                     android:nextFocusDown="@+id/grid" />
 
                 <ImageView
+                    android:id="@+id/btnAssistant"
+                    style="@style/TopIcon"
+                    android:src="@drawable/ic_mic"
+                    android:contentDescription="@string/assistant"
+                    android:nextFocusDown="@+id/grid" />
+
+                <ImageView
                     android:id="@+id/btnSettings"
                     style="@style/TopIcon"
                     android:src="@drawable/ic_settings"

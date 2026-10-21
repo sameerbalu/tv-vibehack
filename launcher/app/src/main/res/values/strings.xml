@@ -35,6 +35,7 @@
     <string name="reset_wallpaper">Reset wallpaper</string>
     <string name="arrange_apps">Arrange apps</string>
     <string name="system_settings">System settings</string>
+    <string name="assistant">Voice assistant</string>
     <string name="tvcontrol_title">TV Control</string>
     <string name="tc_memory">Memory</string>
     <string name="tc_storage">Storage</string>

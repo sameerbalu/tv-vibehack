@@ -13,6 +13,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
 import android.view.ViewOutlineProvider;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.ImageView;
 import android.widget.TextView;
 
@@ -42,6 +43,7 @@ final class SaverController {
     private final ImageView nowArt;
     private final TextView quote;
     private final ImageView front;
+    private final View scrimView;
     private Bitmap frontBitmap;
     private int quoteIndex;
     private int ticks;
@@ -70,6 +72,7 @@ final class SaverController {
         nowArtist = root.findViewById(R.id.saverNowArtist);
         quote = root.findViewById(R.id.saverQuote);
         front = root.findViewById(R.id.saverFront);
+        scrimView = root.findViewById(R.id.saverScrim);
         final float d = ctx.getResources().getDisplayMetrics().density;
         nowArt.setOutlineProvider(new ViewOutlineProvider() {
             @Override
@@ -84,12 +87,27 @@ final class SaverController {
         running = true;
         loadBackground();
         loadFront();
+        // Slow cinematic entrance: the picture fades in while easing out of a slight zoom, then the clock
+        // rises into place, then the quote appears.
+        final float d = ctx.getResources().getDisplayMetrics().density;
+        for (View v : new View[]{aurora, wallpaper, front, scrimView}) {
+            if (v == null || v.getVisibility() != View.VISIBLE) continue;
+            v.animate().cancel();
+            v.setAlpha(0f);
+            v.setScaleX(1.12f);
+            v.setScaleY(1.12f);
+            v.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(2600)
+                    .setInterpolator(new DecelerateInterpolator(1.4f)).start();
+        }
+        content.animate().cancel();
         content.setAlpha(0f);
-        content.animate().alpha(1f).setDuration(1500).start();
+        content.setTranslationY(26 * d);
+        content.animate().alpha(1f).translationY(0f).setStartDelay(700).setDuration(1400)
+                .setInterpolator(new DecelerateInterpolator(1.8f)).start();
         quoteIndex = Calendar.getInstance().get(Calendar.DAY_OF_YEAR);
         quote.setText(Quotes.forDay(quoteIndex));
         quote.setAlpha(0f);
-        quote.animate().alpha(1f).setDuration(2000).start();
+        quote.animate().alpha(1f).setStartDelay(1700).setDuration(2000).start();
         ticks = 0;
         updateInfo();
         handler.postDelayed(info, INFO_MS);
@@ -100,6 +118,13 @@ final class SaverController {
         handler.removeCallbacksAndMessages(null);
         content.animate().cancel();
         quote.animate().cancel();
+        for (View v : new View[]{aurora, wallpaper, front, scrimView}) {
+            if (v == null) continue;
+            v.animate().cancel();
+            v.setAlpha(1f);
+            v.setScaleX(1f);
+            v.setScaleY(1f);
+        }
         wallpaper.setImageDrawable(null);          // give the picture's memory back
         if (wallpaperBitmap != null) {
             wallpaperBitmap.recycle();

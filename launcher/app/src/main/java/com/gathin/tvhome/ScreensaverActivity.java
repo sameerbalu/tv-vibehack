@@ -31,15 +31,25 @@ public class ScreensaverActivity extends Activity {
         super.onPause();
     }
 
+    private boolean leaving;
+
+    /** Fades and drifts out instead of cutting back to the home screen. */
+    private void leave() {
+        if (leaving) return;
+        leaving = true;
+        findViewById(android.R.id.content).animate().alpha(0f).scaleX(1.05f).scaleY(1.05f).setDuration(320)
+                .withEndAction(this::finish).start();
+    }
+
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
-        if (event.getAction() == KeyEvent.ACTION_DOWN) finish();
+        if (event.getAction() == KeyEvent.ACTION_DOWN) leave();
         return true;
     }
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        if (event.getAction() == MotionEvent.ACTION_DOWN) finish();
+        if (event.getAction() == MotionEvent.ACTION_DOWN) leave();
         return true;
     }
 }
