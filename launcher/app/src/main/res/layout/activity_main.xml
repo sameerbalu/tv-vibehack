@@ -44,6 +44,21 @@
         android:alpha="0"
         android:importantForAccessibility="no" />
 
+    <!-- Top shelf: the focused dock app's name, positioned above the dock in code. -->
+    <TextView
+        android:id="@+id/heroName"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="68dp"
+        android:alpha="0"
+        android:textColor="#FFFFFFFF"
+        android:textSize="48sp"
+        android:fontFamily="@font/outfit"
+        android:fontVariationSettings="'wght' 300"
+        android:letterSpacing="-0.02"
+        android:includeFontPadding="false"
+        android:singleLine="true" />
+
     <!-- Depth effect: a transparent PNG over the glow (the glow is behind the "character"). -->
     <ImageView
         android:id="@+id/wallpaperFront"
@@ -79,21 +94,6 @@
         android:overScrollMode="never"
         android:scrollbars="none"
         android:descendantFocusability="afterDescendants" />
-
-    <!-- Top shelf: the focused dock app's name, positioned above the dock in code. -->
-    <TextView
-        android:id="@+id/heroName"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="68dp"
-        android:alpha="0"
-        android:textColor="#FFFFFFFF"
-        android:textSize="48sp"
-        android:fontFamily="@font/outfit"
-        android:fontVariationSettings="'wght' 300"
-        android:letterSpacing="-0.02"
-        android:includeFontPadding="false"
-        android:singleLine="true" />
 
     <!-- Widget cards on the right; positioned above the dock in code. -->
     <com.gathin.tvhome.WidgetPanel
@@ -156,7 +156,7 @@
                         android:textColor="#FFFFFFFF"
                         android:textSize="52sp"
                         android:fontFamily="@font/outfit"
-                        android:fontVariationSettings="'wght' 300"
+                        android:fontVariationSettings="'wght' 450"
                         android:letterSpacing="-0.04"
                         android:includeFontPadding="false" />
 
@@ -237,6 +237,16 @@
         </RelativeLayout>
 
     </LinearLayout>
+
+    <!-- Second copy of the depth PNG, clipped (in code) to the clock + date block so they sit behind it. -->
+    <ImageView
+        android:id="@+id/wallpaperFrontTop"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:visibility="gone"
+        android:importantForAccessibility="no"
+        android:contentDescription="@null" />
 
     <!-- The single floating glass highlight that springs between tiles. -->
     <com.gathin.tvhome.GlassView

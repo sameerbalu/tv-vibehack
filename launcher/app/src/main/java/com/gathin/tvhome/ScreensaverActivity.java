@@ -6,7 +6,7 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.WindowManager;
 
-/** Screen saver preview (Settings > Screen saver): the same aurora and clock as the real screensaver. Any key returns Home. */
+/** Screen saver (Settings > Screen saver, and started by the launcher after 2 minutes idle). Any key returns Home. */
 public class ScreensaverActivity extends Activity {
 
     private SaverController controller;

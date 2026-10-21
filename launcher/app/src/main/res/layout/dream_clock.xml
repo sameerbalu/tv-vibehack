@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Screensaver (ClockDream and the preview): your wallpaper as the background (the aurora if none is set),
-     a red and white clock fixed in the top-left corner, day progress and the Spotify song that is playing. -->
+     a red and white clock in the top-left corner (behind the depth PNG when one is set) and a Spotify scene. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -24,15 +24,6 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:background="@drawable/saver_scrim" />
-
-    <!-- Depth foreground (transparent PNG), over the picture and under the clock. -->
-    <ImageView
-        android:id="@+id/saverFront"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:scaleType="centerCrop"
-        android:visibility="gone"
-        android:contentDescription="@null" />
 
     <LinearLayout
         android:id="@+id/saverContent"
@@ -70,7 +61,7 @@
                 android:textColor="#FFFFFFFF"
                 android:textSize="120sp"
                 android:fontFamily="@font/outfit"
-                android:fontVariationSettings="'wght' 300"
+                android:fontVariationSettings="'wght' 450"
                 android:letterSpacing="-0.04"
                 android:includeFontPadding="false" />
 
@@ -82,7 +73,7 @@
                 android:textColor="#FFB3121B"
                 android:textSize="120sp"
                 android:fontFamily="@font/outfit"
-                android:fontVariationSettings="'wght' 300"
+                android:fontVariationSettings="'wght' 450"
                 android:letterSpacing="-0.04"
                 android:includeFontPadding="false" />
 
@@ -114,102 +105,122 @@
             android:letterSpacing="0.14"
             android:textAllCaps="true" />
 
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="6dp"
-            android:layout_marginTop="22dp"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
-
-            <com.gathin.tvhome.ColorBar
-                android:id="@+id/saverDayBar"
-                android:layout_width="200dp"
-                android:layout_height="4dp" />
-
-            <TextView
-                android:id="@+id/saverDayLabel"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="14dp"
-                android:textColor="#A6FFFFFF"
-                android:textSize="13sp"
-                android:fontFamily="@font/outfit"
-                android:letterSpacing="0.1"
-                android:textAllCaps="true" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/saverNowRow"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="6dp"
-            android:layout_marginTop="20dp"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:visibility="gone">
-
-            <ImageView
-                android:id="@+id/saverNowArt"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:scaleType="centerCrop"
-                android:contentDescription="@null" />
-
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="14dp"
-                android:orientation="vertical">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Now playing on Spotify"
-                    android:textColor="#FFB3121B"
-                    android:textSize="10sp"
-                    android:fontFamily="@font/outfit"
-                    android:letterSpacing="0.18"
-                    android:textAllCaps="true" />
-
-                <TextView
-                    android:id="@+id/saverNowTitle"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:maxWidth="420dp"
-                    android:singleLine="true"
-                    android:ellipsize="end"
-                    android:textColor="#FFFFFFFF"
-                    android:textSize="17sp"
-                    android:fontFamily="@font/outfit"
-                    android:fontVariationSettings="'wght' 600" />
-
-                <TextView
-                    android:id="@+id/saverNowArtist"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:maxWidth="420dp"
-                    android:singleLine="true"
-                    android:ellipsize="end"
-                    android:textColor="#B3FFFFFF"
-                    android:textSize="13sp"
-                    android:fontFamily="@font/outfit" />
-            </LinearLayout>
-        </LinearLayout>
     </LinearLayout>
 
-    <!-- A short line at the bottom; changes every so often. -->
-    <TextView
-        android:id="@+id/saverQuote"
+    <!-- Depth foreground (transparent PNG), over the picture AND over the clock / date. -->
+    <ImageView
+        android:id="@+id/saverFront"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:visibility="gone"
+        android:contentDescription="@null" />
+
+    <!-- Spotify scene (above the PNG so the song is always readable): glow, album art, song, progress. -->
+    <View
+        android:id="@+id/saverMusicGlow"
+        android:layout_width="720dp"
+        android:layout_height="460dp"
+        android:layout_gravity="bottom|start"
+        android:layout_marginStart="-120dp"
+        android:layout_marginBottom="-140dp"
+        android:alpha="0"
+        android:importantForAccessibility="no" />
+
+    <LinearLayout
+        android:id="@+id/saverNowRow"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|start"
         android:layout_marginStart="64dp"
-        android:layout_marginBottom="52dp"
-        android:maxWidth="640dp"
-        android:textColor="#CCFFFFFF"
-        android:textSize="18sp"
-        android:fontFamily="@font/outfit"
-        android:fontVariationSettings="'wght' 300"
-        android:letterSpacing="0.04" />
+        android:layout_marginBottom="56dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:visibility="gone">
+
+        <ImageView
+            android:id="@+id/saverNowArt"
+            android:layout_width="112dp"
+            android:layout_height="112dp"
+            android:scaleType="centerCrop"
+            android:contentDescription="@null" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="20dp"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <com.gathin.tvhome.EqView
+                    android:id="@+id/saverNowEq"
+                    android:layout_width="22dp"
+                    android:layout_height="14dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp"
+                    android:text="Now playing on Spotify"
+                    android:textColor="#FFB3121B"
+                    android:textSize="11sp"
+                    android:fontFamily="@font/outfit"
+                    android:letterSpacing="0.2"
+                    android:textAllCaps="true" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/saverNowTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:maxWidth="520dp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:textColor="#FFFFFFFF"
+                android:textSize="26sp"
+                android:fontFamily="@font/outfit"
+                android:fontVariationSettings="'wght' 600" />
+
+            <TextView
+                android:id="@+id/saverNowArtist"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:maxWidth="520dp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:textColor="#B3FFFFFF"
+                android:textSize="16sp"
+                android:fontFamily="@font/outfit" />
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <com.gathin.tvhome.ColorBar
+                    android:id="@+id/saverNowBar"
+                    android:layout_width="300dp"
+                    android:layout_height="4dp" />
+
+                <TextView
+                    android:id="@+id/saverNowTime"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="14dp"
+                    android:textColor="#99FFFFFF"
+                    android:textSize="12sp"
+                    android:fontFamily="@font/outfit"
+                    android:letterSpacing="0.06" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
 </FrameLayout>
+

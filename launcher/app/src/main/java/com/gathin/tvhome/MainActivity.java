@@ -115,6 +115,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private ImageView wallpaperView;
     private ImageView wallpaperBlurView;
     private ImageView wallpaperFront;
+    private ImageView wallpaperFrontTop;       // same PNG, clipped to the clock + date so they sit behind it
     private View allAppsScrim;
     private GlassPanelView allAppsPanel;
     private GlassView glass;
@@ -176,6 +177,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private long lastSettingsClick;
     private final Runnable openSettingsMenu = this::showLauncherSettings;
     private boolean paused;                  // true between onPause and onResume
+    private static final long IDLE_MS = 2 * 60 * 1000L;       // screen saver starts after 2 minutes without input
+    private final Runnable idleSaver = this::startSaver;
     // We left from the full app list: keep its look (blur, panel, hidden clock) when Home brings us back.
     private static boolean resumeInAll;
     private long lastResumeMs;
@@ -271,6 +274,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         wallpaperView = findViewById(R.id.wallpaper);
         wallpaperBlurView = findViewById(R.id.wallpaperBlur);
         wallpaperFront = findViewById(R.id.wallpaperFront);
+        wallpaperFrontTop = findViewById(R.id.wallpaperFrontTop);
+        findViewById(R.id.leftBlock).addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> updateFrontTopClip());
         allAppsScrim = findViewById(R.id.allAppsScrim);
         allAppsPanel = findViewById(R.id.allAppsPanel);
         glass = findViewById(R.id.glass);
@@ -444,6 +449,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         wallpaperBlurView.animate().cancel();
         allAppsScrim.animate().cancel();
         wallpaperFront.animate().cancel();
+        wallpaperFrontTop.animate().cancel();
         header.animate().cancel();
         allAppsMode = keepAll;
         overlayApplied = keepAll;
@@ -452,6 +458,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         wallpaperBlurView.setAlpha(keepAll ? 1f : 0f);
         allAppsScrim.setAlpha(keepAll ? 1f : 0f);
         wallpaperFront.setAlpha(keepAll ? 0f : 1f);
+        wallpaperFrontTop.setAlpha(keepAll ? 0f : 1f);
         header.setAlpha(keepAll ? 0f : 1f);
         header.setVisibility(keepAll ? View.INVISIBLE : View.VISIBLE);
         grid.animate().cancel();
@@ -471,6 +478,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         updateGreeting();
         updateBluetoothLabel();
         handler.postDelayed(minuteTick, MINUTE_MS);
+        rescheduleIdle();
         if (wallpaperView.getVisibility() != View.VISIBLE) restoreWallpaper();   // safety net after a restart
         widgets.animate().cancel();
         widgets.setAlpha(keepAll ? 0f : 1f);
@@ -534,6 +542,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         super.onPause();
         handler.removeCallbacks(restoreFocus);
         handler.removeCallbacks(minuteTick);
+        handler.removeCallbacks(idleSaver);
         if (inputsIcon != null) inputsIcon.rest();
         if (bluetoothIcon != null) bluetoothIcon.rest();
         if (!restorePending) {
@@ -641,6 +650,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             wallpaperBlurView.animate().alpha(overlay ? 1f : 0f).setDuration(350).start();
             allAppsScrim.animate().alpha(overlay ? 1f : 0f).setDuration(350).start();
             wallpaperFront.animate().alpha(overlay ? 0f : 1f).setDuration(350).start();
+            wallpaperFrontTop.animate().alpha(overlay ? 0f : 1f).setDuration(350).start();
             setHeaderShown(!overlay);
         }
         if (allUiChanged) setAllUiShown(allUi);
@@ -704,6 +714,26 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 if (overlayApplied) widgets.setVisibility(View.INVISIBLE);
             }).start();
         }
+    }
+
+    @Override
+    public void onUserInteraction() {
+        super.onUserInteraction();
+        rescheduleIdle();               // any key or touch starts the 2 minutes again
+    }
+
+    private void rescheduleIdle() {
+        handler.removeCallbacks(idleSaver);
+        if (!paused) handler.postDelayed(idleSaver, IDLE_MS);
+    }
+
+    private void startSaver() {
+        if (paused || isFinishing()) return;
+        if (!hasWindowFocus()) {        // a menu is open: the person is still here, try again later
+            rescheduleIdle();
+            return;
+        }
+        startActivity(new Intent(this, ScreensaverActivity.class));
     }
 
     /** Puts the widget cards on the right, just above the dock, and drops the ones that do not fit. */
@@ -1440,6 +1470,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         WallpaperStore.deleteFront(this);
         wallpaperFront.setImageDrawable(null);
         wallpaperFront.setVisibility(View.GONE);
+        wallpaperFrontTop.setImageDrawable(null);
+        wallpaperFrontTop.setVisibility(View.GONE);
     }
 
     /** Shows the transparent depth PNG over the glow (and over the picture), under the apps. */
@@ -1466,10 +1498,23 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             // The picture behind it is dimmed a bit; match that so the cut-out does not look pasted on.
             wallpaperFront.setColorFilter(0x73000000, android.graphics.PorterDuff.Mode.SRC_ATOP);
             wallpaperFront.setVisibility(View.VISIBLE);
+            // Second copy over the clock and date: they end up behind the character, like on a phone lock screen.
+            wallpaperFrontTop.setImageBitmap(bitmap);
+            wallpaperFrontTop.setColorFilter(0x73000000, android.graphics.PorterDuff.Mode.SRC_ATOP);
+            wallpaperFrontTop.setVisibility(View.VISIBLE);
+            root.post(this::updateFrontTopClip);
         } catch (Exception | OutOfMemoryError e) {
             wallpaperFront.setVisibility(View.GONE);
             Toast.makeText(this, R.string.wallpaper_failed, Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private void updateFrontTopClip() {
+        View left = findViewById(R.id.leftBlock);
+        if (left == null || wallpaperFrontTop == null || left.getWidth() == 0) return;
+        Rect r = new Rect(0, 0, left.getWidth(), left.getHeight());
+        root.offsetDescendantRectToMyCoords(left, r);
+        wallpaperFrontTop.setClipBounds(r);
     }
 
     private void restoreFront() {

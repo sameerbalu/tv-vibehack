@@ -324,3 +324,10 @@ MIT, see [`LICENSE`](LICENSE). The Outfit typeface is under the SIL Open Font Li
 - Bluetooth tab looks for the Remotes & Accessories list and avoids the "searching for accessories" screen.
 - Depth wallpaper: Settings > "Depth foreground (PNG)". Use a transparent PNG with the same size/aspect as your wallpaper;
   the glow is drawn behind it. The screensaver shows it too (over the picture, under the clock).
+
+## v21 notes
+
+- Screensaver: removed the daily quote and the "% of today" bar; new Spotify scene (big album art with a soft breathing glow, equaliser, progress).
+- Depth wallpaper: clock + date (home and screensaver) and the big dock app name now sit behind the PNG.
+- The launcher starts the screensaver after 2 minutes without input.
+- Clock font weight raised (light -> medium) on the home screen and the screensaver.

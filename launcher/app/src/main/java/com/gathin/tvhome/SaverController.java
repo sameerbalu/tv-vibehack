@@ -1,18 +1,22 @@
 package com.gathin.tvhome;
 
+import android.animation.ValueAnimator;
 import android.content.ComponentName;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Outline;
+import android.graphics.drawable.GradientDrawable;
 import android.media.MediaMetadata;
 import android.media.session.MediaController;
 import android.media.session.MediaSessionManager;
 import android.media.session.PlaybackState;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.view.View;
 import android.view.ViewOutlineProvider;
+import android.view.animation.AccelerateDecelerateInterpolator;
 import android.view.animation.DecelerateInterpolator;
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -25,7 +29,7 @@ import java.util.Locale;
 /**
  * Drives the screensaver layout (dream_clock.xml) for both the real screensaver and the preview:
  * the user's wallpaper as background (the aurora when none is set), the clock fixed in the top-left
- * corner, a greeting, how much of the day has passed, and the Spotify song that is playing.
+ * corner (behind the depth PNG when one is set), a greeting, and a Spotify scene while a song plays.
  */
 final class SaverController {
 
@@ -37,18 +41,28 @@ final class SaverController {
     private final ImageView wallpaper;
     private Bitmap wallpaperBitmap;
     private final View content;
-    private final TextView greeting, dayLabel, nowTitle, nowArtist;
-    private final ColorBar dayBar;
-    private final View nowRow;
+    private final TextView greeting, nowTitle, nowArtist, nowTime;
+    private final ColorBar nowBar;
+    private final EqView nowEq;
+    private final View nowRow, musicGlow;
     private final ImageView nowArt;
-    private final TextView quote;
+    private final GradientDrawable glowDrawable = new GradientDrawable();
+    private ValueAnimator glowPulse;
+    private MediaController current;
+    private int accent = 0xFFB3121B;
     private final ImageView front;
     private final View scrimView;
     private Bitmap frontBitmap;
-    private int quoteIndex;
-    private int ticks;
     private String songId = "";
     private boolean running;
+
+    private final Runnable progress = new Runnable() {
+        @Override
+        public void run() {
+            updateProgress();
+            if (running && current != null) handler.postDelayed(this, 1000);
+        }
+    };
 
     private final Runnable info = new Runnable() {
         @Override
@@ -64,23 +78,30 @@ final class SaverController {
         wallpaper = root.findViewById(R.id.saverWallpaper);
         content = root.findViewById(R.id.saverContent);
         greeting = root.findViewById(R.id.saverGreeting);
-        dayLabel = root.findViewById(R.id.saverDayLabel);
-        dayBar = root.findViewById(R.id.saverDayBar);
         nowRow = root.findViewById(R.id.saverNowRow);
         nowArt = root.findViewById(R.id.saverNowArt);
         nowTitle = root.findViewById(R.id.saverNowTitle);
         nowArtist = root.findViewById(R.id.saverNowArtist);
-        quote = root.findViewById(R.id.saverQuote);
+        nowBar = root.findViewById(R.id.saverNowBar);
+        nowTime = root.findViewById(R.id.saverNowTime);
+        nowEq = root.findViewById(R.id.saverNowEq);
+        musicGlow = root.findViewById(R.id.saverMusicGlow);
         front = root.findViewById(R.id.saverFront);
         scrimView = root.findViewById(R.id.saverScrim);
         final float d = ctx.getResources().getDisplayMetrics().density;
         nowArt.setOutlineProvider(new ViewOutlineProvider() {
             @Override
             public void getOutline(View v, Outline o) {
-                o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), 8 * d);
+                o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), 14 * d);
             }
         });
         nowArt.setClipToOutline(true);
+        nowArt.setElevation(10 * d);
+        // Soft coloured light behind the album art (the colour is set per song).
+        glowDrawable.setGradientType(GradientDrawable.RADIAL_GRADIENT);
+        glowDrawable.setGradientRadius(330 * d);
+        glowDrawable.setGradientCenter(0.5f, 0.5f);
+        musicGlow.setBackground(glowDrawable);
     }
 
     void start() {
@@ -88,7 +109,7 @@ final class SaverController {
         loadBackground();
         loadFront();
         // Slow cinematic entrance: the picture fades in while easing out of a slight zoom, then the clock
-        // rises into place, then the quote appears.
+        // rises into place.
         final float d = ctx.getResources().getDisplayMetrics().density;
         for (View v : new View[]{aurora, wallpaper, front, scrimView}) {
             if (v == null || v.getVisibility() != View.VISIBLE) continue;
@@ -104,11 +125,6 @@ final class SaverController {
         content.setTranslationY(26 * d);
         content.animate().alpha(1f).translationY(0f).setStartDelay(700).setDuration(1400)
                 .setInterpolator(new DecelerateInterpolator(1.8f)).start();
-        quoteIndex = Calendar.getInstance().get(Calendar.DAY_OF_YEAR);
-        quote.setText(Quotes.forDay(quoteIndex));
-        quote.setAlpha(0f);
-        quote.animate().alpha(1f).setStartDelay(1700).setDuration(2000).start();
-        ticks = 0;
         updateInfo();
         handler.postDelayed(info, INFO_MS);
     }
@@ -117,7 +133,9 @@ final class SaverController {
         running = false;
         handler.removeCallbacksAndMessages(null);
         content.animate().cancel();
-        quote.animate().cancel();
+        stopGlowPulse();
+        current = null;
+        songId = "";
         for (View v : new View[]{aurora, wallpaper, front, scrimView}) {
             if (v == null) continue;
             v.animate().cancel();
@@ -155,7 +173,7 @@ final class SaverController {
         }
     }
 
-    /** The transparent depth PNG, if one was chosen (kept with its transparency). */
+    /** The transparent depth PNG, if one was chosen (kept with its transparency). It sits over the clock. */
     private void loadFront() {
         front.setVisibility(View.GONE);
         if (!WallpaperStore.hasFront(ctx)) return;
@@ -197,8 +215,7 @@ final class SaverController {
     }
 
     private void updateInfo() {
-        Calendar c = Calendar.getInstance();
-        int hour = c.get(Calendar.HOUR_OF_DAY);
+        int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
         int res;
         if (hour < 5) res = R.string.good_night;
         else if (hour < 12) res = R.string.good_morning;
@@ -206,24 +223,12 @@ final class SaverController {
         else if (hour < 22) res = R.string.good_evening;
         else res = R.string.good_night;
         greeting.setText(res);
-
-        float frac = (hour * 60 + c.get(Calendar.MINUTE)) / 1440f;
-        dayBar.set(frac, WidgetPanel.DARK_RED_FROM, 0xFFFFFFFF);
-        dayLabel.setText(String.format(Locale.US, "%d%% of today", Math.round(frac * 100)));
-
-        // A new line every ~24 seconds, faded in and out.
-        if (++ticks % 6 == 0) {
-            quoteIndex++;
-            quote.animate().alpha(0f).setDuration(700).withEndAction(() -> {
-                quote.setText(Quotes.forDay(quoteIndex));
-                quote.animate().alpha(1f).setDuration(1200).start();
-            }).start();
-        }
         updateMusic();
     }
 
     private void updateMusic() {
         MediaMetadata meta = null;
+        MediaController playing = null;
         try {
             MediaSessionManager sm = (MediaSessionManager) ctx.getSystemService(Context.MEDIA_SESSION_SERVICE);
             List<MediaController> list = sm.getActiveSessions(new ComponentName(ctx, MediaListener.class));
@@ -233,36 +238,104 @@ final class SaverController {
                 if (pkg != null && pkg.startsWith("com.spotify") && st != null
                         && st.getState() == PlaybackState.STATE_PLAYING) {
                     meta = mc.getMetadata();
+                    playing = mc;
                     break;
                 }
             }
         } catch (RuntimeException ignored) {
             // No notification access: the saver simply shows no song.
         }
+        current = playing;
         if (meta == null) {
             if (!songId.isEmpty()) {
                 songId = "";
                 aurora.setPalette(AuroraView.DEFAULT_PALETTE);
-                nowRow.animate().alpha(0f).setDuration(400).withEndAction(() -> nowRow.setVisibility(View.GONE)).start();
+                stopGlowPulse();
+                nowEq.setActive(false);
+                musicGlow.animate().alpha(0f).setDuration(800).start();
+                nowRow.animate().alpha(0f).setDuration(500).withEndAction(() -> nowRow.setVisibility(View.GONE)).start();
             }
             return;
         }
+        // Keep the progress bar moving once a second while the song plays.
+        handler.removeCallbacks(progress);
+        handler.post(progress);
         String id = SongColors.idOf(meta);
         if (id.equals(songId)) return;
         songId = id;
-        aurora.setPalette(SongColors.palette(meta));
+        int[] palette = SongColors.palette(meta);
+        aurora.setPalette(palette);
+        accent = palette != null && palette.length > 0 ? palette[0] : 0xFFB3121B;
         String title = meta.getString(MediaMetadata.METADATA_KEY_TITLE);
         String artist = meta.getString(MediaMetadata.METADATA_KEY_ARTIST);
         nowTitle.setText(title == null ? "Spotify" : title);
         nowArtist.setText(artist == null ? "" : artist);
         Bitmap art = SongColors.artOf(meta);
         if (art != null && art.getWidth() > 0 && art.getHeight() > 0) {
-            nowArt.setImageBitmap(Bitmap.createScaledBitmap(art, 96, 96, true));
+            nowArt.setImageBitmap(Bitmap.createScaledBitmap(art, 224, 224, true));
         } else {
-            nowArt.setImageDrawable(null);
+            nowArt.setImageDrawable(new android.graphics.drawable.ColorDrawable(accent));
         }
+        nowEq.setColor(accent);
+        nowEq.setActive(true);
+        int rgb = accent & 0x00FFFFFF;
+        glowDrawable.setColors(new int[]{0x70000000 | rgb, 0x28000000 | rgb, rgb});
         nowRow.setVisibility(View.VISIBLE);
         nowRow.setAlpha(0f);
-        nowRow.animate().alpha(1f).setDuration(600).start();
+        nowRow.animate().alpha(1f).setDuration(900).start();
+        musicGlow.animate().cancel();
+        musicGlow.animate().alpha(1f).setDuration(1800).start();
+        startGlowPulse();
+        updateProgress();
+    }
+
+    /** Song position: the thin bar and "1:23 / 3:45". */
+    private void updateProgress() {
+        MediaController c = current;
+        if (c == null) return;
+        PlaybackState st = c.getPlaybackState();
+        MediaMetadata m = c.getMetadata();
+        if (st == null || m == null) return;
+        long dur = m.getLong(MediaMetadata.METADATA_KEY_DURATION);
+        long pos = st.getPosition();
+        if (st.getState() == PlaybackState.STATE_PLAYING) {
+            pos += (long) ((SystemClock.elapsedRealtime() - st.getLastPositionUpdateTime()) * st.getPlaybackSpeed());
+        }
+        if (dur <= 0) {
+            nowBar.set(0f, accent, accent);
+            nowTime.setText("");
+            return;
+        }
+        pos = Math.max(0, Math.min(pos, dur));
+        nowBar.set(pos / (float) dur, accent, 0xFFFFFFFF);
+        nowTime.setText(clock(pos) + " / " + clock(dur));
+    }
+
+    private static String clock(long ms) {
+        long sec = Math.max(0, ms / 1000);
+        return String.format(Locale.US, "%d:%02d", sec / 60, sec % 60);
+    }
+
+    /** The light behind the album art slowly breathes while the song plays. */
+    private void startGlowPulse() {
+        if (glowPulse != null) return;
+        glowPulse = ValueAnimator.ofFloat(0.72f, 1f);
+        glowPulse.setDuration(4200);
+        glowPulse.setRepeatCount(ValueAnimator.INFINITE);
+        glowPulse.setRepeatMode(ValueAnimator.REVERSE);
+        glowPulse.setInterpolator(new AccelerateDecelerateInterpolator());
+        glowPulse.addUpdateListener(a -> {
+            float v = (Float) a.getAnimatedValue();
+            musicGlow.setScaleX(0.9f + 0.18f * v);
+            musicGlow.setScaleY(0.9f + 0.18f * v);
+        });
+        glowPulse.start();
+    }
+
+    private void stopGlowPulse() {
+        if (glowPulse != null) {
+            glowPulse.cancel();
+            glowPulse = null;
+        }
     }
 }
