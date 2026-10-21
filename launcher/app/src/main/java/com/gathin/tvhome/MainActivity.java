@@ -174,7 +174,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private boolean restorePending;          // true between onResume and the focus restore
     private static final long DOUBLE_TAP_MS = 320;
     private long lastSettingsClick;
-    private ValueAnimator micPulse;
     private final Runnable openSettingsMenu = this::showLauncherSettings;
     private boolean paused;                  // true between onPause and onResume
     // We left from the full app list: keep its look (blur, panel, hidden clock) when Home brings us back.
@@ -368,39 +367,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         bluetoothIcon = new PillIcon.Bluetooth(density, btnBluetooth.getTextColors());
         ((TextView) btnInputs).setCompoundDrawablesRelativeWithIntrinsicBounds(inputsIcon, null, null, null);
         btnBluetooth.setCompoundDrawablesRelativeWithIntrinsicBounds(bluetoothIcon, null, null, null);
-        btnInputs.setOnFocusChangeListener((v, f) -> {
-            inputsIcon.setFocused(f);
-            v.animate().scaleX(f ? 1.05f : 1f).scaleY(f ? 1.05f : 1f).setDuration(160).start();
-        });
-        btnBluetooth.setOnFocusChangeListener((v, f) -> {
-            bluetoothIcon.setFocused(f);
-            v.animate().scaleX(f ? 1.05f : 1f).scaleY(f ? 1.05f : 1f).setDuration(160).start();
-        });
-        // ChatGPT assistant: mic button next to Settings (the remote's assistant button does the same).
-        View btnAssistant = findViewById(R.id.btnAssistant);
-        btnAssistant.setOnClickListener(v -> openAssistant());
-        btnAssistant.setOnKeyListener((v, keyCode, event) ->
-                event.getAction() == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_DPAD_UP);
-        btnAssistant.setOnFocusChangeListener((v, f) -> {
-            if (micPulse != null) {
-                micPulse.cancel();
-                micPulse = null;
-            }
-            if (f) {
-                micPulse = ValueAnimator.ofFloat(0f, 1f);
-                micPulse.setDuration(800);
-                micPulse.setRepeatCount(ValueAnimator.INFINITE);
-                micPulse.setRepeatMode(ValueAnimator.REVERSE);
-                micPulse.addUpdateListener(a -> {
-                    float sc = 1.06f + 0.14f * (Float) a.getAnimatedValue();
-                    v.setScaleX(sc);
-                    v.setScaleY(sc);
-                });
-                micPulse.start();
-            } else {
-                v.animate().scaleX(1f).scaleY(1f).setDuration(160).start();
-            }
-        });
+        btnInputs.setOnFocusChangeListener((v, f) -> inputsIcon.setFocused(f));
+        btnBluetooth.setOnFocusChangeListener((v, f) -> bluetoothIcon.setFocused(f));
         // One press opens the menu; two quick presses clear the cache.
         btnSettings.setOnClickListener(v -> {
             long t = SystemClock.uptimeMillis();
@@ -2023,26 +1991,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         if (changed && heroShown) animateAmbient(ambientFor(lastFocused), 4500);   // slow, soft fade
     }
 
-    private void openAssistant() {
-        startActivity(new Intent(this, AssistantActivity.class));
-        overridePendingTransition(0, 0);
-    }
-
-    @Override
-    public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (event.getRepeatCount() == 0 && (keyCode == KeyEvent.KEYCODE_VOICE_ASSIST
-                || keyCode == KeyEvent.KEYCODE_ASSIST || keyCode == KeyEvent.KEYCODE_SEARCH)) {
-            openAssistant();
-            return true;
-        }
-        return super.onKeyDown(keyCode, event);
-    }
-
     private void open(Intent i) {
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         try {
             startActivity(i);
-            overridePendingTransition(R.anim.launch_in, R.anim.launch_out);
         } catch (ActivityNotFoundException e) {
             Toast.makeText(this, R.string.not_available, Toast.LENGTH_SHORT).show();
         }

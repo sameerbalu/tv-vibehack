@@ -21,5 +21,5 @@ jobs:
           ./gradlew assembleDebug --console=plain
       - uses: actions/upload-artifact@v4
         with:
-          name: tvhome-v19-apk
+          name: tvhome-v20-apk
           path: launcher/app/build/outputs/apk/debug/app-debug.apk

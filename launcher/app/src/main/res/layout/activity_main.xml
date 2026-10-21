@@ -110,13 +110,17 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
+        android:clipChildren="false"
+        android:clipToPadding="false"
         android:paddingStart="56dp"
         android:paddingEnd="56dp"
         android:paddingTop="26dp">
 
         <RelativeLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content">
+            android:layout_height="wrap_content"
+            android:clipChildren="false"
+            android:clipToPadding="false">
 
             <LinearLayout
                 android:id="@+id/leftBlock"
@@ -205,6 +209,8 @@
                 android:layout_alignParentEnd="true"
                 android:layout_alignBottom="@id/leftBlock"
                 android:layout_marginBottom="6dp"
+                android:clipChildren="false"
+                android:clipToPadding="false"
                 android:orientation="horizontal">
 
                 <TextView
@@ -219,13 +225,6 @@
                     style="@style/TopButton"
                     android:text="@string/bluetooth"
                     android:drawableStart="@drawable/ic_bluetooth"
-                    android:nextFocusDown="@+id/grid" />
-
-                <ImageView
-                    android:id="@+id/btnAssistant"
-                    style="@style/TopIcon"
-                    android:src="@drawable/ic_mic"
-                    android:contentDescription="@string/assistant"
                     android:nextFocusDown="@+id/grid" />
 
                 <ImageView
