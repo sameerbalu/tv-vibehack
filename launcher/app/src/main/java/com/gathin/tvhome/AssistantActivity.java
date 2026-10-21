@@ -69,13 +69,14 @@ public class AssistantActivity extends Activity implements TextToSpeech.OnInitLi
     }
 
     private static Provider providerFor(String key) {
-        if (key.startsWith("AIza")) {
-            return new Provider("Gemini", "https://generativelanguage.googleapis.com/v1beta/openai/", "gemini-flash-latest", false);
-        }
         if (key.startsWith("gsk_")) {
             return new Provider("Groq", "https://api.groq.com/openai/v1/", "llama-3.3-70b-versatile", false);
         }
-        return new Provider("ChatGPT", "https://api.openai.com/v1/", "gpt-5-mini", true);
+        if (key.startsWith("sk-")) {
+            return new Provider("ChatGPT", "https://api.openai.com/v1/", "gpt-5-mini", true);
+        }
+        // Google keys: "AIza..." (classic) and "AQ...." (newer). Anything unrecognised is tried as Gemini (free).
+        return new Provider("Gemini", "https://generativelanguage.googleapis.com/v1beta/openai/", "gemini-flash-latest", false);
     }
     private static final int REQUEST_MIC = 81;
 
@@ -484,7 +485,7 @@ public class AssistantActivity extends Activity implements TextToSpeech.OnInitLi
 
     private void promptKey() {
         final EditText input = new EditText(this);
-        input.setHint("Paste key: AIza… (Gemini, free) · gsk_… (Groq, free) · sk-… (OpenAI)");
+        input.setHint("Paste key: Gemini (free) · gsk_… Groq (free) · sk-… OpenAI");
         input.setSingleLine(true);
         input.setText(key());
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
@@ -578,6 +579,7 @@ public class AssistantActivity extends Activity implements TextToSpeech.OnInitLi
             c.setReadTimeout(60000);
             c.setDoOutput(true);
             c.setRequestProperty("Authorization", "Bearer " + key);
+            if (url.contains("generativelanguage.googleapis.com")) c.setRequestProperty("x-goog-api-key", key);
             c.setRequestProperty("Content-Type", "application/json");
             try (OutputStream os = c.getOutputStream()) {
                 os.write(body.toString().getBytes("UTF-8"));
@@ -625,6 +627,7 @@ public class AssistantActivity extends Activity implements TextToSpeech.OnInitLi
             c.setConnectTimeout(15000);
             c.setReadTimeout(30000);
             c.setRequestProperty("Authorization", "Bearer " + key);
+            if (p.base.contains("generativelanguage.googleapis.com")) c.setRequestProperty("x-goog-api-key", key);
             Reply r = read(c);
             if (r.code >= 400) throw new Exception(errorText(r));
             JSONArray data = new JSONObject(r.raw).getJSONArray("data");
