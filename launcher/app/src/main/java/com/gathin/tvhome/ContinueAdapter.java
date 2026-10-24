@@ -55,6 +55,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
     private final float d;
     private final List<NuvioHistory.Entry> entries = new ArrayList<>();
     private final android.util.LruCache<String, Bitmap> posters = new android.util.LruCache<>(32);
+    private final android.util.LruCache<String, Bitmap> blurs = new android.util.LruCache<>(32);
     private static final float POSTER_FOCUS_SCALE = 1.07f;
     private String signature = "";
     private String nuvioPkg;
@@ -145,7 +146,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
 
     private static final class PosterHolder extends RecyclerView.ViewHolder {
         final View card, scrim;
-        final ImageView poster;
+        final ImageView poster, posterBg;
         final TextView name;
         final ColorBar progress;
 
@@ -154,6 +155,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
             card = v.findViewById(R.id.card);
             scrim = v.findViewById(R.id.scrim);
             poster = v.findViewById(R.id.poster);
+            posterBg = v.findViewById(R.id.posterBg);
             name = v.findViewById(R.id.name);
             progress = v.findViewById(R.id.progress);
         }
@@ -240,12 +242,29 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
             }
         }
         if (bmp != null) {
-            // Always landscape and always edge to edge: the artwork fills the whole card. Tall artwork (posters)
-            // is cropped to the upper part, where the faces and the title art usually are.
-            h.poster.setScaleType(ImageView.ScaleType.MATRIX);
-            h.poster.setImageBitmap(bmp);
-            h.poster.setImageMatrix(coverMatrix(bmp.getWidth(), bmp.getHeight(), w, ht));
+            float ratio = bmp.getWidth() / (float) bmp.getHeight();
+            if (ratio >= 1.5f || ratio < 0.8f) {
+                // Wide artwork (episode stills) and tall posters fill the whole card. Tall artwork keeps its upper part.
+                h.posterBg.setImageDrawable(null);
+                h.poster.setScaleType(ImageView.ScaleType.MATRIX);
+                h.poster.setImageBitmap(bmp);
+                h.poster.setImageMatrix(coverMatrix(bmp.getWidth(), bmp.getHeight(), w, ht));
+            } else {
+                // Square-ish artwork (VLC and similar): shown whole, not zoomed, over a soft blurred copy of itself.
+                h.poster.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                h.poster.setImageBitmap(bmp);
+                Bitmap bl = blurs.get(e.poster);
+                if (bl == null) {
+                    try {
+                        bl = BlurUtil.blur(bmp, 96, 6);
+                        if (bl != null) blurs.put(e.poster, bl);
+                    } catch (RuntimeException | OutOfMemoryError ignored) {
+                    }
+                }
+                h.posterBg.setImageBitmap(bl);
+            }
         } else {
+            h.posterBg.setImageDrawable(null);
             h.poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
             float hue = Math.abs(e.title.hashCode()) % 360;
             int c1 = Color.HSVToColor(new float[]{hue, 0.55f, 0.50f});

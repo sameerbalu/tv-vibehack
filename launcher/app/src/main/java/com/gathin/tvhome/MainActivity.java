@@ -1225,17 +1225,17 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         LinearLayout rows = panel.findViewById(R.id.rows);
         int minWidth = (int) (230 * density);
         final PopupWindow popup = newDropdown(panel, minWidth);
-        addInputRow(rows, popup, R.drawable.ic_wallpaper, getString(R.string.wallpaper_tab), -1, this::showWallpaperMenu);
-        addInputRow(rows, popup, R.drawable.ic_hide, getString(R.string.hide_apps), -1, this::showHideApps);
-        addInputRow(rows, popup, R.drawable.ic_widgets, getString(R.string.widgets), -1, this::showWidgets);
-        addInputRow(rows, popup, R.drawable.ic_palette, getString(R.string.fx_title), -1, this::showEffects);
+        addInputRow(rows, popup, MenuIcons.WALLPAPER, getString(R.string.wallpaper_tab), -1, this::showWallpaperMenu);
+        addInputRow(rows, popup, MenuIcons.EYE, getString(R.string.hide_apps), -1, this::showHideApps);
+        addInputRow(rows, popup, MenuIcons.WIDGETS, getString(R.string.widgets), -1, this::showWidgets);
+        addInputRow(rows, popup, MenuIcons.SPARKLE, getString(R.string.fx_title), -1, this::showEffects);
         if (!hasListenerAccess()) {
-            addInputRow(rows, popup, R.drawable.ic_saver, getString(R.string.music_access), -1, this::openMusicAccess);
+            addInputRow(rows, popup, MenuIcons.BELL, getString(R.string.music_access), -1, this::openMusicAccess);
         }
-        addInputRow(rows, popup, R.drawable.ic_saver, getString(R.string.screen_saver), -1,
+        addInputRow(rows, popup, MenuIcons.MOON, getString(R.string.screen_saver), -1,
                 () -> startActivity(new Intent(this, ScreensaverActivity.class)));
         addSeparator(rows);
-        addInputRow(rows, popup, R.drawable.ic_settings, getString(R.string.system_settings), -1,
+        addInputRow(rows, popup, MenuIcons.GEAR, getString(R.string.system_settings), -1,
                 () -> open(new Intent(Settings.ACTION_SETTINGS)));
         fitScroll(panel);
         showDropdown(popup, panel, anchor, minWidth, true);
@@ -1275,10 +1275,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         LinearLayout rows = panel.findViewById(R.id.rows);
         int minWidth = (int) (260 * density);
         final PopupWindow popup = newDropdown(panel, minWidth);
-        addInputRow(rows, popup, R.drawable.ic_wallpaper, getString(R.string.choose_wallpaper), -1, this::chooseWallpaper);
-        addInputRow(rows, popup, R.drawable.ic_wallpaper, getString(R.string.depth_front), -1, this::chooseFront);
+        addInputRow(rows, popup, MenuIcons.WALLPAPER, getString(R.string.choose_wallpaper), -1, this::chooseWallpaper);
+        addInputRow(rows, popup, MenuIcons.DEPTH, getString(R.string.depth_front), -1, this::chooseFront);
         if (WallpaperStore.hasFront(this)) {
-            addInputRow(rows, popup, R.drawable.ic_reset, getString(R.string.depth_remove), -1, this::removeFront);
+            addInputRow(rows, popup, MenuIcons.TRASH, getString(R.string.depth_remove), -1, this::removeFront);
         }
         fitScroll(panel);
         showDropdown(popup, panel, anchor, minWidth, true);
@@ -1304,7 +1304,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         final PopupWindow popup = newDropdown(panel, minWidth);
         for (final String id : WidgetPanel.IDS) {
             final View row = getLayoutInflater().inflate(R.layout.item_input, rows, false);
-            ((ImageView) row.findViewById(R.id.icon)).setImageResource(R.drawable.ic_widgets);
+            setMenuIcon(row, MenuIcons.WIDGETS);
             ((TextView) row.findViewById(R.id.title)).setText(WidgetPanel.titleRes(id));
             updateWidgetRow(row, widgets.isOn(id));
             row.setOnClickListener(v -> {
@@ -1329,19 +1329,19 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         final PopupWindow popup = newDropdown(panel, minWidth);
 
         final View glowRow = getLayoutInflater().inflate(R.layout.item_input, rows, false);
-        ((ImageView) glowRow.findViewById(R.id.icon)).setImageResource(R.drawable.ic_palette);
+        setMenuIcon(glowRow, MenuIcons.GLOW);
         ((TextView) glowRow.findViewById(R.id.title)).setText(R.string.fx_glow);
         updateWidgetRow(glowRow, fxGlowOn);
         rows.addView(glowRow);
 
         final View styleRow = getLayoutInflater().inflate(R.layout.item_input, rows, false);
-        ((ImageView) styleRow.findViewById(R.id.icon)).setImageResource(R.drawable.ic_palette);
+        setMenuIcon(styleRow, MenuIcons.BRUSH);
         ((TextView) styleRow.findViewById(R.id.title)).setText(R.string.fx_style);
         updateStyleRow(styleRow);
         rows.addView(styleRow);
 
         final View strength = getLayoutInflater().inflate(R.layout.item_input, rows, false);
-        ((ImageView) strength.findViewById(R.id.icon)).setImageResource(R.drawable.ic_palette);
+        setMenuIcon(strength, MenuIcons.LEVELS);
         ((TextView) strength.findViewById(R.id.title)).setText(R.string.fx_strength);
         updateStrengthRow(strength);
         rows.addView(strength);
@@ -2046,19 +2046,19 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         LinearLayout rows = panel.findViewById(R.id.rows);
         int minWidth = (int) (230 * density);
         final PopupWindow popup = newDropdown(panel, minWidth);
-        addMenuRow(rows, popup, R.drawable.ic_play_circle, getString(R.string.poster_resume),
+        addMenuRow(rows, popup, MenuIcons.PLAY, getString(R.string.poster_resume),
                 () -> continueAdapter.resume(e));
         String app = continueAdapter.appLabel(e);
         if (app != null) {
-            addMenuRow(rows, popup, R.drawable.ic_av, getString(R.string.poster_open_app, app),
+            addMenuRow(rows, popup, MenuIcons.OPEN, getString(R.string.poster_open_app, app),
                     () -> continueAdapter.openApp(e));
         }
         addSeparator(rows);
-        addMenuRow(rows, popup, R.drawable.ic_hide, getString(R.string.poster_remove), () -> {
+        addMenuRow(rows, popup, MenuIcons.TRASH, getString(R.string.poster_remove), () -> {
             NuvioHistory.remove(this, e);
             postersChanged(index);
         });
-        addMenuRow(rows, popup, R.drawable.ic_reset, getString(R.string.poster_clear), () -> {
+        addMenuRow(rows, popup, MenuIcons.CLEAR, getString(R.string.poster_clear), () -> {
             NuvioHistory.clear(this);
             postersChanged(0);
         });
@@ -2067,15 +2067,36 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
 
     private void addMenuRow(LinearLayout rows, PopupWindow popup, int iconRes, String title, Runnable action) {
         View row = getLayoutInflater().inflate(R.layout.item_menu, rows, false);
-        ImageView icon = row.findViewById(R.id.icon);
-        icon.setImageResource(iconRes);
-        icon.setTag(IconFx.styleFor(iconRes));
+        setMenuIcon(row, iconRes);
         ((TextView) row.findViewById(R.id.title)).setText(title);
         row.setOnClickListener(v -> {
             popup.dismiss();
             handler.postDelayed(action, 160);
         });
         rows.addView(row);
+    }
+
+    /** Puts the animated icon of this kind on a menu row; it plays while the row has focus. */
+    private void setMenuIcon(View row, int kind) {
+        final ImageView iv = row.findViewById(R.id.icon);
+        final PillIcon icon = MenuIcons.make(kind, density);
+        iv.setImageDrawable(icon);
+        final View.OnFocusChangeListener prev = row.getOnFocusChangeListener();
+        row.setOnFocusChangeListener((v, focused) -> {
+            if (prev != null) prev.onFocusChange(v, focused);
+            icon.setFocused(focused);
+        });
+        // The menu closed: stop the loop so nothing keeps animating behind the scenes.
+        iv.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override
+            public void onViewAttachedToWindow(View v) {
+            }
+
+            @Override
+            public void onViewDetachedFromWindow(View v) {
+                icon.rest();
+            }
+        });
     }
 
     /** The poster list changed (removed / cleared): rebuild the row and put the focus somewhere sensible. */
@@ -2414,14 +2435,14 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             }
         }
         addSeparator(rows);
-        addInputRow(rows, popup, R.drawable.ic_bluetooth, getString(R.string.bt_settings), -1, this::openRemotesAndAccessories);
+        addInputRow(rows, popup, MenuIcons.BLUETOOTH, getString(R.string.bt_settings), -1, this::openRemotesAndAccessories);
         fitScroll(panel);
         showDropdown(popup, panel, anchor, minWidth, false);
     }
 
     private View addBtRow(LinearLayout rows, PopupWindow popup, String title, String status, boolean connected, float alpha) {
         View row = getLayoutInflater().inflate(R.layout.item_input, rows, false);
-        ((ImageView) row.findViewById(R.id.icon)).setImageResource(R.drawable.ic_bluetooth);
+        setMenuIcon(row, MenuIcons.BLUETOOTH);
         ((TextView) row.findViewById(R.id.title)).setText(title);
         TextView st = row.findViewById(R.id.status);
         if (status == null) st.setVisibility(View.GONE);
@@ -2664,7 +2685,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
                 int state = hdmi && hdmiStateBogus ? -1 : tim.getInputState(id);
                 if (!hdmi && rows.getChildCount() > 0 && !sawNonHdmi) addSeparator(rows);
                 if (!hdmi) sawNonHdmi = true;
-                addInputRow(rows, popup, hdmi ? R.drawable.ic_input : R.drawable.ic_av, label, state,
+                addInputRow(rows, popup, MenuIcons.SOURCE, label, state,
                         () -> open(new Intent(Intent.ACTION_VIEW).setDataAndType(
                                 TvContract.buildChannelUriForPassthroughInput(id), "vnd.android.cursor.item/channel")));
             }
@@ -2678,7 +2699,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         if (liveTv != null) {
             if (rows.getChildCount() > 0) addSeparator(rows);
             final Intent liveTvIntent = liveTv;
-            addInputRow(rows, popup, R.drawable.ic_livetv, getString(R.string.live_tv), -1, () -> open(liveTvIntent));
+            addInputRow(rows, popup, MenuIcons.TV, getString(R.string.live_tv), -1, () -> open(liveTvIntent));
         }
         if (rows.getChildCount() == 0) {
             Toast.makeText(this, R.string.no_inputs, Toast.LENGTH_SHORT).show();
@@ -2715,7 +2736,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         // Rows ease in one after the other.
         for (int i = 0; i < rows.getChildCount(); i++) {
             View r = rows.getChildAt(i);
-            IconFx.attach(r, r.findViewById(R.id.icon));
             r.setAlpha(0f);
             r.setTranslationY(-6 * density);
             r.animate().alpha(1f).translationY(0f).setStartDelay(40L + i * 28L).setDuration(220)
@@ -2755,9 +2775,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
 
     private void addInputRow(LinearLayout rows, PopupWindow popup, int iconRes, String title, int state, Runnable action) {
         View row = getLayoutInflater().inflate(R.layout.item_input, rows, false);
-        ImageView rowIcon = row.findViewById(R.id.icon);
-        rowIcon.setImageResource(iconRes);
-        rowIcon.setTag(IconFx.styleFor(iconRes));
+        setMenuIcon(row, iconRes);
         ((TextView) row.findViewById(R.id.title)).setText(title);
         TextView status = row.findViewById(R.id.status);
         View dot = row.findViewById(R.id.dot);
