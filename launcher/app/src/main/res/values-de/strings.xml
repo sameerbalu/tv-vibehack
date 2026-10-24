@@ -95,4 +95,6 @@
     <string name="poster_open_app">%1$s öffnen</string>
     <string name="poster_remove">Aus „Weiterschauen“ entfernen</string>
     <string name="poster_clear">„Weiterschauen“ leeren</string>
+    <string name="cc_nothing_playing">Nichts wird abgespielt</string>
+    <string name="cc_now_playing">Wiedergabe</string>
 </resources>

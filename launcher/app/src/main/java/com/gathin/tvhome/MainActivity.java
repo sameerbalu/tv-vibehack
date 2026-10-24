@@ -480,7 +480,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         overlayApplied = keepAll;
         allUiApplied = keepAll;
         allAppsPanel.setAlpha(keepAll ? 1f : 0f);
-        wallpaperBlurView.setAlpha(keepAll ? 1f : 0f);
+        wallpaperBlurView.setAlpha(keepAll ? BLUR_ALL_APPS : 0f);
         allAppsScrim.setAlpha(keepAll ? 1f : 0f);
         wallpaperFront.setAlpha(keepAll ? 0f : 1f);
         wallpaperFrontTop.setAlpha(keepAll ? 0f : 1f);
@@ -679,7 +679,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         overlayApplied = overlay;
         allUiApplied = allUi;
         if (overlayChanged) {
-            wallpaperBlurView.animate().alpha(overlay ? 1f : 0f).setDuration(350).start();
+            wallpaperBlurView.animate().alpha(overlay ? BLUR_ALL_APPS : 0f).setDuration(350).start();
             allAppsScrim.animate().alpha(overlay ? 1f : 0f).setDuration(350).start();
             wallpaperFront.animate().alpha(overlay ? 0f : 1f).setDuration(350).start();
             wallpaperFrontTop.animate().alpha(overlay ? 0f : 1f).setDuration(350).start();
@@ -1242,23 +1242,23 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
 
     private void showLauncherSettings() {
         dismissOpenPopup();
-        java.util.List<ControlCenter.Tile> tiles = new ArrayList<>();
-        tiles.add(new ControlCenter.Tile(MenuIcons.WALLPAPER, getString(R.string.wallpaper_tab), this::showWallpaperMenu));
-        tiles.add(new ControlCenter.Tile(MenuIcons.EYE, getString(R.string.hide_apps), this::showHideApps));
-        tiles.add(new ControlCenter.Tile(MenuIcons.WIDGETS, getString(R.string.widgets), this::showWidgets));
-        tiles.add(new ControlCenter.Tile(MenuIcons.SPARKLE, getString(R.string.fx_title), this::showEffects));
-        tiles.add(new ControlCenter.Tile(MenuIcons.MOON, getString(R.string.screen_saver),
-                () -> startActivity(new Intent(this, ScreensaverActivity.class))));
-        if (!hasListenerAccess()) {
-            tiles.add(new ControlCenter.Tile(MenuIcons.BELL, getString(R.string.music_access), this::openMusicAccess));
-        }
-        tiles.add(new ControlCenter.Tile(MenuIcons.GEAR, getString(R.string.system_settings),
-                () -> open(new Intent(Settings.ACTION_SETTINGS))));
+        ControlCenter.Actions a = new ControlCenter.Actions();
+        a.wallpaper = this::showWallpaperMenu;
+        a.hideApps = this::showHideApps;
+        a.effects = this::showEffects;
+        a.widgets = this::showWidgets;
+        a.saver = () -> startActivity(new Intent(this, ScreensaverActivity.class));
+        a.bluetooth = () -> open(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS));
+        a.system = () -> open(new Intent(Settings.ACTION_SETTINGS));
+        a.clearCache = this::quickClearCache;
+        a.stopApps = this::quickStopApps;
+        if (!hasListenerAccess()) a.musicAccess = this::openMusicAccess;
         controlCenter = new ControlCenter(this, menuBackdrop);
-        controlCenter.show(getString(R.string.settings), tiles,
-                getString(R.string.tc_storage), TvTools.storage(), this::quickClearCache,
-                getString(R.string.tc_memory), TvTools.memory(this), this::quickStopApps);
+        controlCenter.show(a, TvTools.storage(), TvTools.memory(this));
     }
+
+    /** How strongly the blurred wallpaper covers the sharp one while the app list is open (1 = fully blurred). */
+    private static final float BLUR_ALL_APPS = 0.55f;
 
     private ControlCenter controlCenter;
 

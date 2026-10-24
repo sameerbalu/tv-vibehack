@@ -17,7 +17,7 @@ public class GlassPanelView extends View {
     public GlassPanelView(Context context, AttributeSet attrs) {
         super(context, attrs);
         density = context.getResources().getDisplayMetrics().density;
-        style = new GlassStyle(density, 0x4A000000, 0x12FFFFFF, 0x06FFFFFF, 0x2EFFFFFF);
+        style = new GlassStyle(density, 0x30000000, 0x0AFFFFFF, 0x04FFFFFF, 0x2EFFFFFF);
     }
 
     void setBackdrop(Bitmap blurred) {

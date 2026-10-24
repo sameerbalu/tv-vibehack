@@ -149,7 +149,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
     // ---- views ---------------------------------------------------------------------------------------
 
     private static final class PosterHolder extends RecyclerView.ViewHolder {
-        final View card, scrim;
+        final View card, scrim, shadow;
         final ImageView poster, posterBg;
         final TextView name;
         final ColorBar progress;
@@ -157,6 +157,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         PosterHolder(View v) {
             super(v);
             card = v.findViewById(R.id.card);
+            shadow = v.findViewById(R.id.shadow);
             scrim = v.findViewById(R.id.scrim);
             poster = v.findViewById(R.id.poster);
             posterBg = v.findViewById(R.id.posterBg);
@@ -178,7 +179,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
             }
         });
         h.card.setClipToOutline(true);
-        GlassStyle.shadow(h.card, d);
+        GlassStyle.attachShadow(h.card, h.shadow, d, RADIUS_DP);
         h.scrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[]{0x00000000, 0xB8000000}));
         h.card.setOnKeyListener((view, keyCode, event) -> {
@@ -199,7 +200,9 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         });
         h.card.setOnFocusChangeListener((view, focused) -> {
             float s = focused ? POSTER_FOCUS_SCALE : 1f;
-            view.animate().scaleX(s).scaleY(s).translationZ(focused ? 8f * d : 0f)
+            h.shadow.animate().scaleX(s).scaleY(s).setDuration(focused ? 260 : 180)
+                    .setInterpolator(new OvershootInterpolator(focused ? 1.6f : 0f)).start();
+            view.animate().scaleX(s).scaleY(s)
                     .setDuration(focused ? 260 : 180)
                     .setInterpolator(new OvershootInterpolator(focused ? 1.6f : 0f))
                     .start();

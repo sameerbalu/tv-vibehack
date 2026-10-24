@@ -26,7 +26,7 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
     DockDecoration(int dockSize, float density) {
         this.dockSize = dockSize;
         this.density = density;
-        style = new GlassStyle(density, 0x73000000, 0x24FFFFFF, 0x0AFFFFFF, 0x33FFFFFF);
+        style = new GlassStyle(density, 0x4D000000, 0x10FFFFFF, 0x05FFFFFF, 0x2EFFFFFF);
     }
 
     /** Blurred wallpaper (or null for none). Must be the same bitmap the full-screen blur uses. */

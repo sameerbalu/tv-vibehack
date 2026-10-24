@@ -289,6 +289,8 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         h.name.setAlpha(focused ? 1f : 0f);
         h.card.setScaleX(focused ? FOCUS_SCALE : 1f);
         h.card.setScaleY(focused ? FOCUS_SCALE : 1f);
+        h.shadow.setScaleX(focused ? FOCUS_SCALE : 1f);
+        h.shadow.setScaleY(focused ? FOCUS_SCALE : 1f);
         applyVisual(h.banner, h.icon, h.label, e);
         if (e.packIcon == null && e.banner == null) {
             // Icon-only tile: a gradient in the app's own colour instead of flat grey.
@@ -480,6 +482,7 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         final TextView label;
         final TextView name;
         final Drawable defaultBg;
+        final View shadow;
 
         Holder(View v, TileListener listener) {
             super(v);
@@ -498,7 +501,8 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
                 }
             });
             card.setClipToOutline(true);
-            GlassStyle.shadow(card, density);
+            shadow = v.findViewById(R.id.shadow);
+            GlassStyle.attachShadow(card, shadow, density, 16f);
             card.setOnKeyListener((view, keyCode, event) -> {
                 if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
                 int pos = getBindingAdapterPosition();
@@ -513,7 +517,9 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
             });
             card.setOnFocusChangeListener((view, focused) -> {
                 float s = focused ? FOCUS_SCALE : 1.0f;
-                view.animate().scaleX(s).scaleY(s).translationZ(focused ? 8f * density : 0f)
+                shadow.animate().scaleX(s).scaleY(s).setDuration(focused ? 260 : 180)
+                        .setInterpolator(new OvershootInterpolator(focused ? 1.6f : 0f)).start();
+                view.animate().scaleX(s).scaleY(s)
                         .setDuration(focused ? 260 : 180)
                         .setInterpolator(new OvershootInterpolator(focused ? 1.6f : 0f))
                         .start();

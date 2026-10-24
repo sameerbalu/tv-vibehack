@@ -42,8 +42,8 @@ final class GlassStyle {
         this.edgeColor = edgeColor;
         this.veilTop = veilTop;
         this.veilBottom = veilBottom;
-        base.setColor(0xFF0C0C0E);
-        image.setAlpha(209);
+        base.setColor(0x660C0C0E);        // see-through: the wallpaper behind the glass stays visible
+        image.setAlpha(150);          // more of the sharp wallpaper shows through: less blur
         dim.setColor(dimColor);
         edge.setStyle(Paint.Style.STROKE);
         edge.setStrokeWidth(1.2f * density);
@@ -92,39 +92,88 @@ final class GlassStyle {
             lastR = rect.right;
             lastB = rect.bottom;
             lastRad = radius;
-            // Light falls from the top-left: a soft diagonal sheen across the glass.
-            diag.setShader(new LinearGradient(rect.left, rect.top, rect.right, rect.bottom,
-                    new int[]{0x30FFFFFF, 0x00FFFFFF, 0x00FFFFFF, 0x14FFFFFF}, new float[]{0f, 0.38f, 0.7f, 1f},
-                    Shader.TileMode.CLAMP));
-            // Thin specular line along the top edge that fades out toward the corners.
+            // A faint specular line along the top edge (no white haze): only a hint of glass.
             spec.setShader(new LinearGradient(rect.left, 0, rect.right, 0,
-                    new int[]{0x00FFFFFF, 0x99FFFFFF, 0x99FFFFFF, 0x00FFFFFF}, new float[]{0f, 0.16f, 0.84f, 1f},
+                    new int[]{0x00FFFFFF, 0x4DFFFFFF, 0x4DFFFFFF, 0x00FFFFFF}, new float[]{0f, 0.18f, 0.82f, 1f},
                     Shader.TileMode.CLAMP));
-            // The lower edge is a little darker, which gives the sheet some thickness.
-            lowShade.setShader(new LinearGradient(0, rect.top + (rect.bottom - rect.top) * 0.72f, 0, rect.bottom,
-                    0x00000000, 0x2E000000, Shader.TileMode.CLAMP));
-            // The rim is brightest at the top and nearly gone at the bottom.
+            // The rim is a little brighter at the top and fades toward the bottom.
             int a = edgeColor >>> 24;
             edge.setShader(new LinearGradient(0, rect.top, 0, rect.bottom,
-                    ((Math.min(255, a * 2)) << 24) | 0xFFFFFF, ((a / 2) << 24) | 0xFFFFFF, Shader.TileMode.CLAMP));
+                    ((Math.min(255, a * 3 / 2)) << 24) | 0xFFFFFF, ((a / 2) << 24) | 0xFFFFFF, Shader.TileMode.CLAMP));
             clip.reset();
             clip.addRoundRect(rect, radius, radius, Path.Direction.CW);
         }
-        c.drawRoundRect(rect, radius, radius, diag);
-        c.drawRoundRect(rect, radius, radius, lowShade);
         c.save();
         c.clipPath(clip);
-        c.drawRect(rect.left, rect.top + 0.6f * density, rect.right, rect.top + 1.8f * density, spec);
+        c.drawRect(rect.left, rect.top + 0.6f * density, rect.right, rect.top + 1.6f * density, spec);
         c.restore();
         c.drawRoundRect(rect, radius, radius, edge);
     }
 
-    /** A soft black shadow under a tile or poster (elevation based, so it follows the rounded outline). */
-    static void shadow(android.view.View v, float density) {
-        v.setElevation(7f * density);
-        if (android.os.Build.VERSION.SDK_INT >= 28) {
-            v.setOutlineAmbientShadowColor(0xFF000000);
-            v.setOutlineSpotShadowColor(0xFF000000);
+    /** Space the soft shadow reaches beyond a tile on every side. */
+    static final float SHADOW_SPREAD_DP = 12f;
+
+    /** A soft black shadow, the same on all four sides: layered rounded rects with a falling opacity. */
+    static final class SoftShadow extends android.graphics.drawable.Drawable {
+        private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF r = new RectF();
+        private final float d, cornerDp;
+        private static final int LAYERS = 12;
+
+        SoftShadow(float density, float cornerDp) {
+            this.d = density;
+            this.cornerDp = cornerDp;
+            p.setColor(0xFF000000);
         }
+
+        @Override
+        public void draw(Canvas c) {
+            android.graphics.Rect b = getBounds();
+            float spread = SHADOW_SPREAD_DP * d;
+            for (int i = 0; i < LAYERS; i++) {
+                float inset = spread * (i + 1) / (LAYERS + 1f);      // outermost first
+                r.set(b.left + inset, b.top + inset, b.right - inset, b.bottom - inset);
+                float rad = cornerDp * d + (spread - inset);
+                p.setAlpha(9);
+                c.drawRoundRect(r, rad, rad, p);
+            }
+        }
+
+        @Override
+        public void setAlpha(int alpha) {
+        }
+
+        @Override
+        public void setColorFilter(android.graphics.ColorFilter colorFilter) {
+        }
+
+        @Override
+        public int getOpacity() {
+            return android.graphics.PixelFormat.TRANSLUCENT;
+        }
+    }
+
+    /** Puts the soft shadow view behind a card and keeps it sized to the card. Scale is synced by the caller. */
+    static void attachShadow(final View card, final View shadow, final float density, float cornerDp) {
+        shadow.setBackground(new SoftShadow(density, cornerDp));
+        shadow.setFocusable(false);
+        shadow.setClickable(false);
+        shadow.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        card.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> shadow.post(() -> {
+            int s = Math.round(SHADOW_SPREAD_DP * density);
+            android.widget.FrameLayout.LayoutParams lp = (android.widget.FrameLayout.LayoutParams) shadow.getLayoutParams();
+            android.widget.FrameLayout.LayoutParams cp = (android.widget.FrameLayout.LayoutParams) card.getLayoutParams();
+            int w = card.getWidth() + 2 * s, h = card.getHeight() + 2 * s;
+            boolean centred = (cp.gravity & android.view.Gravity.HORIZONTAL_GRAVITY_MASK) == android.view.Gravity.CENTER_HORIZONTAL;
+            int left = centred ? cp.leftMargin : cp.leftMargin - s;
+            int top = cp.topMargin - s;
+            if (lp.width == w && lp.height == h && lp.leftMargin == left && lp.topMargin == top && lp.gravity == cp.gravity) return;
+            lp.width = w;
+            lp.height = h;
+            lp.leftMargin = left;
+            lp.topMargin = top;
+            lp.gravity = cp.gravity;
+            shadow.setLayoutParams(lp);
+        }));
     }
 }
