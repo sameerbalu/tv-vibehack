@@ -404,6 +404,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             boolean onTile = newF != null && newF.getId() == R.id.card;
             if (!onTile) {
                 hideGlass();
+                setLibraryHint(false);
                 // While we are in the background (or still restoring after Home) focus bounces around; that
                 // must not switch the look back to the dock.
                 if (allAppsMode && !paused && !restorePending) {
@@ -727,6 +728,31 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         if (!paused) handler.postDelayed(idleSaver, IDLE_MS);
     }
 
+    /** Opens the page after the last row of All apps (Nuvio Continue watching). */
+    private void openLibrary() {
+        startActivity(new Intent(this, LibraryActivity.class));
+        overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
+    }
+
+    /** The little "Continue watching" pill is shown while the cursor is on the last row of All apps. */
+    private void updateLibraryHint(int position) {
+        int count = adapter.getItemCount();
+        int lastRowStart = count <= 0 ? 0 : ((count - 1) / COLUMNS) * COLUMNS;
+        setLibraryHint(!arranging && position >= COLUMNS && position >= lastRowStart);
+    }
+
+    private void setLibraryHint(boolean show) {
+        View hint = findViewById(R.id.libraryHint);
+        if (hint == null) return;
+        hint.animate().cancel();
+        if (show) {
+            hint.setVisibility(View.VISIBLE);
+            hint.animate().alpha(1f).setDuration(250).start();
+        } else if (hint.getVisibility() == View.VISIBLE) {
+            hint.animate().alpha(0f).setDuration(150).withEndAction(() -> hint.setVisibility(View.INVISIBLE)).start();
+        }
+    }
+
     private void startSaver() {
         if (paused || isFinishing()) return;
         if (!hasWindowFocus()) {        // a menu is open: the person is still here, try again later
@@ -849,6 +875,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     public void onTileFocused(int position, View card) {
         if (restorePending) return;                    // focus jumps while the list rebinds; the restore sets the real one
+        updateLibraryHint(position);
         if (snapActive) endSnap();
         lastFocused = position;
         lastFocusedKey = adapter.keyAt(position);
@@ -1089,7 +1116,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             target = position - COLUMNS;
         } else {
             int lastRowStart = ((count - 1) / COLUMNS) * COLUMNS;
-            if (position >= lastRowStart) return true;     // already on the last row: stay put
+            if (position >= lastRowStart) {                // already on the last row
+                if (position >= COLUMNS) openLibrary();    // ... Down goes on to the Continue watching page
+                return true;
+            }
             target = Math.min(position + COLUMNS, count - 1);
         }
         focusTile(target);
@@ -1183,6 +1213,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         addInputRow(rows, popup, R.drawable.ic_wallpaper, getString(R.string.wallpaper_tab), -1, this::showWallpaperMenu);
         addInputRow(rows, popup, R.drawable.ic_hide, getString(R.string.hide_apps), -1, this::showHideApps);
         addInputRow(rows, popup, R.drawable.ic_widgets, getString(R.string.widgets), -1, this::showWidgets);
+        addInputRow(rows, popup, R.drawable.ic_play_circle, getString(R.string.library_title), -1, this::openLibrary);
         addInputRow(rows, popup, R.drawable.ic_palette, getString(R.string.fx_title), -1, this::showEffects);
         if (!hasListenerAccess()) {
             addInputRow(rows, popup, R.drawable.ic_saver, getString(R.string.music_access), -1, this::openMusicAccess);

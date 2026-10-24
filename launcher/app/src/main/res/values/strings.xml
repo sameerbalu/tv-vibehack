@@ -112,4 +112,12 @@
     <string name="depth_front">Depth foreground (PNG)</string>
     <string name="depth_remove">Remove depth foreground</string>
     <string name="wallpaper_tab">Wallpaper</string>
+    <string name="library_title">Continue watching</string>
+    <string name="library_sub">Pick up where you left off in Nuvio</string>
+    <string name="library_hint">Continue watching</string>
+    <string name="library_open">Open Nuvio</string>
+    <string name="library_open_sub">Its own home page has more</string>
+    <string name="library_empty">Nothing here yet. Play something in Nuvio and it shows up here.</string>
+    <string name="library_setup">One-time setup: Settings, then %1$s. It lets the launcher see what Nuvio plays.</string>
+    <string name="library_no_nuvio">Nuvio is not installed on this TV.</string>
 </resources>

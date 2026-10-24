@@ -238,6 +238,26 @@
 
     </LinearLayout>
 
+    <!-- Shown under the last row of All apps: Down opens the Continue watching page. -->
+    <TextView
+        android:id="@+id/libraryHint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="26dp"
+        android:background="@drawable/hint_pill"
+        android:paddingStart="22dp"
+        android:paddingEnd="22dp"
+        android:paddingTop="9dp"
+        android:paddingBottom="9dp"
+        android:text="@string/library_hint"
+        android:textColor="#E6FFFFFF"
+        android:textSize="13sp"
+        android:fontFamily="@font/outfit"
+        android:alpha="0"
+        android:visibility="invisible"
+        android:importantForAccessibility="no" />
+
     <!-- Second copy of the depth PNG, clipped (in code) to the clock + date block so they sit behind it. -->
     <ImageView
         android:id="@+id/wallpaperFrontTop"

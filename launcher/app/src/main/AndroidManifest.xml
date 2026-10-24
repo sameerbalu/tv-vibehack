@@ -5,6 +5,8 @@
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
     <!-- Connected Bluetooth device name on the top bar. -->
+    <!-- Nuvio artwork that is only given as a link is downloaded once for "Continue watching". -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
@@ -41,7 +43,15 @@
             android:screenOrientation="landscape"
             android:theme="@style/Theme.TvHome" />
 
-        <!-- Only exists so Android lets the launcher read the Spotify "now playing" session (album colour glow).
+        <!-- The page after the last row of All apps: Nuvio "Continue watching". -->
+        <activity
+            android:name=".LibraryActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.TvHome" />
+
+        <!-- Only exists so Android lets the launcher read the Spotify "now playing" session (album colour glow) and what is playing in Nuvio (Continue watching).
              Enable it once: Settings > Notification access, or the adb command in the README. -->
         <service
             android:name=".MediaListener"

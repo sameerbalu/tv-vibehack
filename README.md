@@ -331,3 +331,10 @@ MIT, see [`LICENSE`](LICENSE). The Outfit typeface is under the SIL Open Font Li
 - Depth wallpaper: clock + date (home and screensaver) and the big dock app name now sit behind the PNG.
 - The launcher starts the screensaver after 2 minutes without input.
 - Clock font weight raised (light -> medium) on the home screen and the screensaver.
+
+## v22 notes
+
+- Nuvio "Continue watching": press Down on the last row of All apps (or Settings > Continue watching).
+  It lists what Nuvio reported while playing (title, artwork, position) with rounded posters.
+  Needs the notification access that Settings > "Music glow access" opens (the launcher reads Nuvio's media session).
+- Picking a card brings Nuvio forward and, if Nuvio still holds that title paused, presses play.
