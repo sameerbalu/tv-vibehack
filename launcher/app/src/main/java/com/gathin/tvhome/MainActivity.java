@@ -838,6 +838,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private Rect moveGlassTo(View card, boolean animate) {
         Rect r = new Rect(0, 0, card.getWidth(), card.getHeight());
         root.offsetDescendantRectToMyCoords(card, r);
+        // That call ignores translation, and the Continue watching row is positioned with translationY.
+        if (continueRow != null && card.getParent() instanceof View && ((View) card.getParent()).getParent() == continueRow) {
+            r.offset(Math.round(continueRow.getTranslationX()), Math.round(continueRow.getTranslationY()));
+        }
         float pad = GlassView.PAD_DP * density;        // matches GlassView's glow inset
         float w = card.getWidth() * AppAdapter.FOCUS_SCALE + 2 * pad;
         float h = card.getHeight() * AppAdapter.FOCUS_SCALE + 2 * pad;
@@ -1631,6 +1635,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         continueRow.setHorizontalScrollBarEnabled(false);
         continueRow.setAdapter(continueAdapter);
         continueRow.setAlpha(0f);
+        // A RecyclerView is focusable itself; this invisible one must never catch focus (it sat in the way of Up).
+        continueRow.setFocusable(false);
+        continueRow.setFocusableInTouchMode(false);
         continueRow.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         continueRow.setPadding((int) (56 * density), 0, (int) (56 * density), 0);
         root.addView(continueRow, root.indexOfChild(grid) + 1,
@@ -1712,6 +1719,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         if (v == null) return root.getWidth() / 2f;
         Rect r = new Rect(0, 0, v.getWidth(), v.getHeight());
         root.offsetDescendantRectToMyCoords(v, r);
+        if (continueRow != null && v.getParent() instanceof View && ((View) v.getParent()).getParent() == continueRow) {
+            r.offset(Math.round(continueRow.getTranslationX()), 0);
+        }
         return r.exactCenterX();
     }
 
