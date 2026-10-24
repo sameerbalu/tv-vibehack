@@ -46,7 +46,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
     }
 
     private static final int TYPE_HEADER = 1, TYPE_POSTER = 2;
-    private static final int CARD_W_DP = 180, MIN_H_DP = 101, MAX_H_DP = 250;
+    private static final int CARD_W_DP = 140, MIN_H_DP = 79, MAX_H_DP = 196;
 
     private final Context ctx;
     private final Host host;
@@ -116,7 +116,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
     private static final class PosterHolder extends RecyclerView.ViewHolder {
         final View card, scrim;
         final ImageView poster;
-        final TextView badge, name;
+        final TextView name;
         final ColorBar progress;
 
         PosterHolder(View v) {
@@ -124,7 +124,6 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
             card = v.findViewById(R.id.card);
             scrim = v.findViewById(R.id.scrim);
             poster = v.findViewById(R.id.poster);
-            badge = v.findViewById(R.id.badge);
             name = v.findViewById(R.id.name);
             progress = v.findViewById(R.id.progress);
         }
@@ -134,15 +133,8 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
     @Override
     public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
         if (viewType == TYPE_HEADER) {
-            TextView t = new TextView(ctx);
-            t.setText(R.string.library_title);
-            t.setTextColor(0xE6FFFFFF);
-            t.setTextSize(18f);
-            t.setTypeface(androidx.core.content.res.ResourcesCompat.getFont(ctx, R.font.outfit));
-            t.setSingleLine(true);
-            t.setPadding((int) (6 * d), (int) (22 * d), 0, (int) (6 * d));
-            t.setLayoutParams(new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT));
+            View t = new View(ctx);      // just a gap that starts the posters on a fresh row
+            t.setLayoutParams(new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (14 * d)));
             return new HeaderHolder(t);
         }
         View v = LayoutInflater.from(ctx).inflate(R.layout.item_continue, parent, false);
@@ -230,13 +222,10 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         h.name.setText(e.title);
         h.name.setTextColor(AppAdapter.textTint(color));
         if (e.duration > 0) {
-            h.badge.setVisibility(View.VISIBLE);
-            h.badge.setText(left(e.duration - e.position));
             h.progress.setVisibility(View.VISIBLE);
             h.progress.set(e.position / (float) e.duration, 0xFFE50914, 0xFFFFFFFF);
             h.scrim.setVisibility(View.VISIBLE);
         } else {
-            h.badge.setVisibility(View.GONE);
             h.progress.setVisibility(View.GONE);
             h.scrim.setVisibility(View.GONE);
         }
@@ -257,12 +246,6 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         } catch (Exception | OutOfMemoryError ex) {
             return null;
         }
-    }
-
-    private static String left(long ms) {
-        long mins = Math.max(1, ms / 60000L);
-        if (mins >= 60) return (mins / 60) + "h " + (mins % 60) + "m left";
-        return mins + " min left";
     }
 
     // ---- opening ---------------------------------------------------------------------------------------

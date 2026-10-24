@@ -618,6 +618,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
 
     @Override
     public void onBackPressed() {
+        if (dismissOpenPopup()) return;
         if (arranging) {
             finishArrange(false);
             return;
@@ -2230,7 +2231,27 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             r.animate().alpha(1f).translationY(0f).setStartDelay(40L + i * 28L).setDuration(220)
                     .setInterpolator(new DecelerateInterpolator(1.6f)).start();
         }
+        openPopup = popup;
         if (rows.getChildCount() > 0) rows.getChildAt(0).requestFocus();
+    }
+
+    private PopupWindow openPopup;
+
+    /** Closes the open dropdown, if any. Returns true when there was one. */
+    private boolean dismissOpenPopup() {
+        PopupWindow p = openPopup;
+        openPopup = null;
+        if (p != null && p.isShowing()) {
+            p.dismiss();
+            return true;
+        }
+        return false;
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        dismissOpenPopup();         // Home pressed while a menu is open
     }
 
     private void addSeparator(LinearLayout rows) {
@@ -2262,7 +2283,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         }
         row.setOnClickListener(v -> {
             popup.dismiss();
-            action.run();
+            // Let this popup finish closing first: opening the next one in the same frame left it without
+            // key focus, so Back and Home did nothing.
+            handler.postDelayed(action, 160);
         });
         rows.addView(row);
     }
