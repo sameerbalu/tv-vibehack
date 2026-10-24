@@ -10,8 +10,8 @@
 
     <FrameLayout
         android:id="@+id/card"
-        android:layout_width="140dp"
-        android:layout_height="79dp"
+        android:layout_width="280dp"
+        android:layout_height="158dp"
         android:layout_gravity="center_horizontal|top"
         android:background="@drawable/tile_bg"
         android:focusable="true"
@@ -27,25 +27,25 @@
         <View
             android:id="@+id/scrim"
             android:layout_width="match_parent"
-            android:layout_height="40dp"
+            android:layout_height="64dp"
             android:layout_gravity="bottom" />
 
         <com.gathin.tvhome.ColorBar
             android:id="@+id/progress"
             android:layout_width="match_parent"
-            android:layout_height="4dp"
+            android:layout_height="5dp"
             android:layout_gravity="bottom"
-            android:layout_marginStart="8dp"
-            android:layout_marginEnd="8dp"
-            android:layout_marginBottom="8dp" />
+            android:layout_marginStart="14dp"
+            android:layout_marginEnd="14dp"
+            android:layout_marginBottom="12dp" />
     </FrameLayout>
 
     <TextView
         android:id="@+id/name"
-        android:layout_width="140dp"
+        android:layout_width="280dp"
         android:layout_height="22dp"
         android:layout_gravity="center_horizontal|top"
-        android:layout_marginTop="86dp"
+        android:layout_marginTop="165dp"
         android:gravity="center"
         android:singleLine="true"
         android:ellipsize="end"

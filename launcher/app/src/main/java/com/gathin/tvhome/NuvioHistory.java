@@ -30,7 +30,6 @@ final class NuvioHistory {
         long time;
     }
 
-    private static final int MAX_ENTRIES = 24;
     private static final String FILE = "nuvio_history.json";
     private static final String POSTERS = "nuvio_posters";
 
@@ -137,10 +136,6 @@ final class NuvioHistory {
             e.position = Math.max(0, position);
         }
         if (art != null && art.getWidth() > 0 && art.getHeight() > 0) e.poster = writePoster(c, key, art);
-        while (list.size() > MAX_ENTRIES) {
-            Entry old = list.remove(list.size() - 1);
-            deletePoster(c, old);
-        }
         save(c, list);
     }
 

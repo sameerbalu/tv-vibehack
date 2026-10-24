@@ -322,6 +322,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         grid.setItemAnimator(null);
         dockDecoration = new DockDecoration(COLUMNS, density);
         grid.addItemDecoration(dockDecoration);
+        grid.addItemDecoration(new ContinueDecoration(
+                () -> continueAdapter != null && continueAdapter.posterCount() > 0 ? adapter.getItemCount() : -1,
+                density));
         grid.setLayoutAnimation(new LayoutAnimationController(
                 AnimationUtils.loadAnimation(this, R.anim.tile_enter), 0.06f));
         adapter = new AppAdapter(this, this, COLUMNS);
@@ -336,7 +339,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             public int getSpanSize(int position) {
                 // The "Continue watching" heading sits right after the last app and takes a whole row.
                 int apps = adapter.getItemCount();
-                return position >= apps && continueAdapter.isHeader(position - apps) ? COLUMNS : 1;
+                if (position < apps) return 1;
+                return continueAdapter.isHeader(position - apps) ? COLUMNS : posterSpan();
             }
         });
 
@@ -1112,7 +1116,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             if (position >= lastRowStart) {                // already on the last row
                 // ... Down goes on into the Continue watching section below the apps
                 int n = continueAdapter.posterCount();
-                if (position >= COLUMNS && n > 0) focusPoster(Math.min(position % COLUMNS, n - 1));
+                if (position >= COLUMNS && n > 0) focusPoster(Math.min((position % COLUMNS) / posterSpan(), n - 1));
                 return true;
             }
             target = Math.min(position + COLUMNS, count - 1);
@@ -1603,7 +1607,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     public void onPosterFocused(int index, View card, int color) {
         if (restorePending) return;
         if (snapActive) endSnap();
-        glass.setColor(color, glassShown);
+        glass.setColor(0xFFE50914, glassShown);        // red cursor on the posters
         moveGlassTo(card, true);
         View item = (View) card.getParent();
         if (arranging) return;
@@ -1611,8 +1615,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         refreshChrome();
         hideHero();
         int top = item.getTop();
-        if (index < COLUMNS) {
-            // First row of posters: keep the "Continue watching" heading in view too.
+        if (index < perRow()) {
+            // First row of posters: keep the section's top edge in view too.
             RecyclerView.ViewHolder hv = grid.findViewHolderForAdapterPosition(adapter.getItemCount());
             if (hv != null) top = Math.min(top, hv.itemView.getTop());
         }
@@ -1623,19 +1627,29 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     public boolean onPosterKey(int index, int keyCode) {
         if (arranging) return true;
         int n = continueAdapter.posterCount();
+        int per = perRow();
         if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-            if (index - COLUMNS >= 0) {
-                focusPoster(index - COLUMNS);
+            if (index - per >= 0) {
+                focusPoster(index - per);
             } else {
                 int count = adapter.getItemCount();
                 int lastRowStart = ((count - 1) / COLUMNS) * COLUMNS;
-                focusTile(Math.min(lastRowStart + index % COLUMNS, count - 1));
+                focusTile(Math.min(lastRowStart + (index % per) * posterSpan(), count - 1));
             }
             return true;
         }
-        if (index + COLUMNS < n) focusPoster(index + COLUMNS);
-        else if (index < ((n - 1) / COLUMNS) * COLUMNS) focusPoster(n - 1);
+        if (index + per < n) focusPoster(index + per);
+        else if (index < ((n - 1) / per) * per) focusPoster(n - 1);
         return true;
+    }
+
+    /** Posters are big (two per row on a four column grid), so each takes half the columns. */
+    private int posterSpan() {
+        return Math.max(1, COLUMNS / 2);
+    }
+
+    private int perRow() {
+        return Math.max(1, COLUMNS / posterSpan());
     }
 
     private void focusPoster(int index) {

@@ -46,7 +46,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
     }
 
     private static final int TYPE_HEADER = 1, TYPE_POSTER = 2;
-    private static final int CARD_W_DP = 140, MIN_H_DP = 79, MAX_H_DP = 196;
+    private static final int CARD_W_DP = 280, CARD_H_DP = 158;
 
     private final Context ctx;
     private final Host host;
@@ -134,7 +134,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
     public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
         if (viewType == TYPE_HEADER) {
             View t = new View(ctx);      // just a gap that starts the posters on a fresh row
-            t.setLayoutParams(new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (14 * d)));
+            t.setLayoutParams(new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (26 * d)));
             return new HeaderHolder(t);
         }
         View v = LayoutInflater.from(ctx).inflate(R.layout.item_continue, parent, false);
@@ -193,19 +193,6 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
                 if (bmp != null) posters.put(e.poster, bmp);
             }
         }
-        // Tile height follows the artwork (landscape stays app-tile sized, portrait posters get taller).
-        int hDp = MIN_H_DP;
-        if (bmp != null && bmp.getWidth() > 0) {
-            float aspect = bmp.getHeight() / (float) bmp.getWidth();
-            hDp = Math.max(MIN_H_DP, Math.min(MAX_H_DP, Math.round(CARD_W_DP * aspect)));
-        }
-        ViewGroup.LayoutParams lp = h.card.getLayoutParams();
-        lp.height = (int) (hDp * d);
-        h.card.setLayoutParams(lp);
-        FrameLayout.LayoutParams np = (FrameLayout.LayoutParams) h.name.getLayoutParams();
-        np.topMargin = (int) ((hDp + 7) * d);
-        h.name.setLayoutParams(np);
-
         int color;
         if (bmp != null) {
             h.poster.setImageBitmap(bmp);
@@ -220,7 +207,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         colors.put(position, color);
 
         h.name.setText(e.title);
-        h.name.setTextColor(AppAdapter.textTint(color));
+        h.name.setTextColor(Color.WHITE);
         if (e.duration > 0) {
             h.progress.setVisibility(View.VISIBLE);
             h.progress.set(e.position / (float) e.duration, 0xFFE50914, 0xFFFFFFFF);
