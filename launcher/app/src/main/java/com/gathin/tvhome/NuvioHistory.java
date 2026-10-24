@@ -15,7 +15,7 @@ import java.util.List;
 
 /**
  * What was being watched in Nuvio, newest first. Filled by MediaListener from the playback Nuvio reports
- * (title, artwork, position) and shown by LibraryActivity as "Continue watching".
+ * (title, artwork, position) and shown in the All apps grid (ContinueAdapter) as "Continue watching".
  */
 final class NuvioHistory {
 

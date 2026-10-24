@@ -62,6 +62,7 @@ import androidx.annotation.NonNull;
 import androidx.dynamicanimation.animation.DynamicAnimation;
 import androidx.dynamicanimation.animation.SpringAnimation;
 import androidx.dynamicanimation.animation.SpringForce;
+import androidx.recyclerview.widget.ConcatAdapter;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -86,7 +87,7 @@ import java.util.Map;
  *   <li>Arrange: every app, dock included, can be moved to any position.</li>
  * </ul>
  */
-public class MainActivity extends Activity implements AppAdapter.TileListener {
+public class MainActivity extends Activity implements AppAdapter.TileListener, ContinueAdapter.Host {
 
     /** Tiles per row and dock slots (res/values/config.xml, columns). Set in onCreate. */
     static int COLUMNS = 4;
@@ -157,6 +158,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private float glassTargetX, glassTargetY;
     private boolean glassShown;
     /** True while focus is on the app list below the dock. */
+    private ContinueAdapter continueAdapter;
     private boolean allAppsMode;
     /** True while apps are being rearranged. */
     private boolean arranging;
@@ -324,7 +326,19 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 AnimationUtils.loadAnimation(this, R.anim.tile_enter), 0.06f));
         adapter = new AppAdapter(this, this, COLUMNS);
         if (!adapter.iconPackPackage().isEmpty()) adapter.setIconPack("");   // icon packs were removed in v6
-        grid.setAdapter(adapter);
+        continueAdapter = new ContinueAdapter(this, this);
+        grid.setAdapter(new ConcatAdapter(new ConcatAdapter.Config.Builder()
+                .setIsolateViewTypes(true)
+                .setStableIdMode(ConcatAdapter.Config.StableIdMode.ISOLATED_STABLE_IDS)
+                .build(), adapter, continueAdapter));
+        ((GridLayoutManager) grid.getLayoutManager()).setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
+            @Override
+            public int getSpanSize(int position) {
+                // The "Continue watching" heading sits right after the last app and takes a whole row.
+                int apps = adapter.getItemCount();
+                return position >= apps && continueAdapter.isHeader(position - apps) ? COLUMNS : 1;
+            }
+        });
 
         // tvOS layout: the dock row sits at the bottom of the screen; the app list is below it, out of sight.
         grid.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
@@ -404,7 +418,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             boolean onTile = newF != null && newF.getId() == R.id.card;
             if (!onTile) {
                 hideGlass();
-                setLibraryHint(false);
                 // While we are in the background (or still restoring after Home) focus bounces around; that
                 // must not switch the look back to the dock.
                 if (allAppsMode && !paused && !restorePending) {
@@ -476,6 +489,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         } else {
             if (adapter.reloadIfChanged()) grid.scheduleLayoutAnimation();
         }
+        continueAdapter.refresh();
         updateGreeting();
         updateBluetoothLabel();
         handler.postDelayed(minuteTick, MINUTE_MS);
@@ -728,31 +742,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         if (!paused) handler.postDelayed(idleSaver, IDLE_MS);
     }
 
-    /** Opens the page after the last row of All apps (Nuvio Continue watching). */
-    private void openLibrary() {
-        startActivity(new Intent(this, LibraryActivity.class));
-        overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
-    }
-
-    /** The little "Continue watching" pill is shown while the cursor is on the last row of All apps. */
-    private void updateLibraryHint(int position) {
-        int count = adapter.getItemCount();
-        int lastRowStart = count <= 0 ? 0 : ((count - 1) / COLUMNS) * COLUMNS;
-        setLibraryHint(!arranging && position >= COLUMNS && position >= lastRowStart);
-    }
-
-    private void setLibraryHint(boolean show) {
-        View hint = findViewById(R.id.libraryHint);
-        if (hint == null) return;
-        hint.animate().cancel();
-        if (show) {
-            hint.setVisibility(View.VISIBLE);
-            hint.animate().alpha(1f).setDuration(250).start();
-        } else if (hint.getVisibility() == View.VISIBLE) {
-            hint.animate().alpha(0f).setDuration(150).withEndAction(() -> hint.setVisibility(View.INVISIBLE)).start();
-        }
-    }
-
     private void startSaver() {
         if (paused || isFinishing()) return;
         if (!hasWindowFocus()) {        // a menu is open: the person is still here, try again later
@@ -822,6 +811,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     /** Scrolls just enough so the whole tile, with its glass and name, is on screen (inside the panel). */
     private void ensureVisible(View item) {
+        ensureVisible(item.getTop(), item.getBottom());
+    }
+
+    private void ensureVisible(int itemTop, int itemBottom) {
         int topLimit, bottomLimit;
         if (arranging) {
             topLimit = (int) (12 * density);
@@ -831,8 +824,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             bottomLimit = grid.getHeight() - (int) ((PANEL_BOTTOM_DP + 8) * density);
         }
         int dy = 0;
-        if (item.getTop() < topLimit) dy = item.getTop() - topLimit;
-        else if (item.getBottom() > bottomLimit) dy = item.getBottom() - bottomLimit;
+        if (itemTop < topLimit) dy = itemTop - topLimit;
+        else if (itemBottom > bottomLimit) dy = itemBottom - bottomLimit;
         scrollGridBy(dy);
     }
 
@@ -875,7 +868,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     public void onTileFocused(int position, View card) {
         if (restorePending) return;                    // focus jumps while the list rebinds; the restore sets the real one
-        updateLibraryHint(position);
         if (snapActive) endSnap();
         lastFocused = position;
         lastFocusedKey = adapter.keyAt(position);
@@ -1117,7 +1109,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         } else {
             int lastRowStart = ((count - 1) / COLUMNS) * COLUMNS;
             if (position >= lastRowStart) {                // already on the last row
-                if (position >= COLUMNS) openLibrary();    // ... Down goes on to the Continue watching page
+                // ... Down goes on into the Continue watching section below the apps
+                int n = continueAdapter.posterCount();
+                if (position >= COLUMNS && n > 0) focusPoster(Math.min(position % COLUMNS, n - 1));
                 return true;
             }
             target = Math.min(position + COLUMNS, count - 1);
@@ -1213,7 +1207,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         addInputRow(rows, popup, R.drawable.ic_wallpaper, getString(R.string.wallpaper_tab), -1, this::showWallpaperMenu);
         addInputRow(rows, popup, R.drawable.ic_hide, getString(R.string.hide_apps), -1, this::showHideApps);
         addInputRow(rows, popup, R.drawable.ic_widgets, getString(R.string.widgets), -1, this::showWidgets);
-        addInputRow(rows, popup, R.drawable.ic_play_circle, getString(R.string.library_title), -1, this::openLibrary);
         addInputRow(rows, popup, R.drawable.ic_palette, getString(R.string.fx_title), -1, this::showEffects);
         if (!hasListenerAccess()) {
             addInputRow(rows, popup, R.drawable.ic_saver, getString(R.string.music_access), -1, this::openMusicAccess);
@@ -1601,6 +1594,66 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             clearWallpaperViews();
             Toast.makeText(this, R.string.wallpaper_failed, Toast.LENGTH_SHORT).show();
         }
+    }
+
+    // ---- Continue watching (posters at the end of All apps) -------------------------------------
+
+    @Override
+    public void onPosterFocused(int index, View card, int color) {
+        if (restorePending) return;
+        if (snapActive) endSnap();
+        glass.setColor(color, glassShown);
+        moveGlassTo(card, true);
+        View item = (View) card.getParent();
+        if (arranging) return;
+        allAppsMode = true;
+        refreshChrome();
+        hideHero();
+        int top = item.getTop();
+        if (index < COLUMNS) {
+            // First row of posters: keep the "Continue watching" heading in view too.
+            RecyclerView.ViewHolder hv = grid.findViewHolderForAdapterPosition(adapter.getItemCount());
+            if (hv != null) top = Math.min(top, hv.itemView.getTop());
+        }
+        ensureVisible(top, item.getBottom());
+    }
+
+    @Override
+    public boolean onPosterKey(int index, int keyCode) {
+        if (arranging) return true;
+        int n = continueAdapter.posterCount();
+        if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+            if (index - COLUMNS >= 0) {
+                focusPoster(index - COLUMNS);
+            } else {
+                int count = adapter.getItemCount();
+                int lastRowStart = ((count - 1) / COLUMNS) * COLUMNS;
+                focusTile(Math.min(lastRowStart + index % COLUMNS, count - 1));
+            }
+            return true;
+        }
+        if (index + COLUMNS < n) focusPoster(index + COLUMNS);
+        else if (index < ((n - 1) / COLUMNS) * COLUMNS) focusPoster(n - 1);
+        return true;
+    }
+
+    private void focusPoster(int index) {
+        final int pos = adapter.getItemCount() + 1 + Math.max(0, Math.min(index, continueAdapter.posterCount() - 1));
+        RecyclerView.ViewHolder vh = grid.findViewHolderForAdapterPosition(pos);
+        if (vh != null) {
+            vh.itemView.findViewById(R.id.card).requestFocus();
+            return;
+        }
+        grid.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override
+            public void onScrollStateChanged(@NonNull RecyclerView rv, int newState) {
+                if (newState != RecyclerView.SCROLL_STATE_IDLE) return;
+                rv.removeOnScrollListener(this);
+                RecyclerView.ViewHolder h = rv.findViewHolderForAdapterPosition(pos);
+                if (h != null) h.itemView.findViewById(R.id.card).requestFocus();
+            }
+        });
+        grid.smoothScrollToPosition(pos);
     }
 
     private void focusTile(int position) {
