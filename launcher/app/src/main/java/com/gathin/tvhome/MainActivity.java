@@ -168,6 +168,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private boolean allUiApplied;
     /** True from the start of the "back to dock" animation until it ends. */
     private boolean snapActive;
+    /** True while the dock rises after the fade; the continue row must stay hidden then. */
+    private boolean snapRising;
     /** Align the focused row to the top of the screen on the next focus, even if we were already in the app list. */
     private boolean alignNext;
     // Coming back from an app opened in All apps: the list stays exactly where it was.
@@ -788,6 +790,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         grid.animate().alpha(0f).setDuration(110).withEndAction(() -> {
             if (!snapActive) return;
             final float lift = 56 * density;
+            snapRising = true;
             grid.scrollBy(0, dy);                     // the scroll listener also moves glassTargetY
             handler.removeCallbacks(clipRunnable);
             clipRunnable.run();                       // hide the rows below the dock right away
@@ -796,7 +799,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             glass.setTranslationY(glassTargetY + lift);
             DecelerateInterpolator rise = new DecelerateInterpolator(1.8f);
             grid.animate().alpha(1f).translationY(0f).setDuration(340).setInterpolator(rise)
-                    .withEndAction(() -> snapActive = false).start();
+                    .withEndAction(() -> {
+                        snapActive = false;
+                        snapRising = false;
+                    }).start();
             glassShown = true;
             glass.animate().alpha(1f).translationY(glassTargetY).setDuration(340).setInterpolator(rise).start();
         }).start();
@@ -805,6 +811,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     /** Stops the back-to-dock animation early (another key arrived) and puts everything back in place. */
     private void endSnap() {
         snapActive = false;
+        snapRising = false;
         grid.animate().cancel();
         glass.animate().cancel();
         grid.setAlpha(1f);
@@ -1611,6 +1618,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     // ---- Continue watching (row above the apps in All apps) ---------------------------------------
 
     private RecyclerView continueRow;
+    /** Side padding of the poster row: keeps a focused (scaled) poster and its glass cursor inside the panel. */
+    private static final int CONT_PAD_DP = 84;
+    /** The row is clipped this far from each screen edge (panel margin 40dp + a little). */
+    private static final int CONT_CLIP_DP = 46;
+    /** Extra air above the row when a poster is focused, so the cursor never touches the panel top. */
+    private static final int CONT_TOP_AIR_DP = 18;
     private int continueGapPx, continueRowPx;
 
     /** True while the row is part of the layout: there is something to show and we are not arranging. */
@@ -1639,7 +1652,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         continueRow.setFocusable(false);
         continueRow.setFocusableInTouchMode(false);
         continueRow.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
-        continueRow.setPadding((int) (56 * density), 0, (int) (56 * density), 0);
+        continueRow.setPadding((int) (CONT_PAD_DP * density), 0, (int) (CONT_PAD_DP * density), 0);
         root.addView(continueRow, root.indexOfChild(grid) + 1,
                 new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (200 * density)));
         // The row floats over the gap above the first row of apps and follows the grid (scroll, fades, clip).
@@ -1672,7 +1685,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     /** Poster size: three full posters and a peek of the next one fit across the screen. */
     private void layoutContinue() {
         if (continueRow == null || grid == null || grid.getWidth() == 0) return;
-        int contentW = grid.getWidth() - grid.getPaddingLeft() - grid.getPaddingRight();
+        int contentW = grid.getWidth() - 2 * (int) (CONT_PAD_DP * density);
         int gap = (int) (18 * density);
         int w = (int) ((contentW - 2 * gap) / 3.2f);
         int h = Math.round(w * 9f / 16f);
@@ -1703,9 +1716,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         float y = grid.getTop() + grid.getTranslationY() + vh.itemView.getTop() - continueGapPx;
         if (continueRow.getTranslationY() != y) continueRow.setTranslationY(y);
         float alpha = grid.getAlpha() * (allAppsPanel != null ? allAppsPanel.getAlpha() : 1f);
+        if (snapRising || (!allAppsMode && !snapActive)) alpha = 0f;   // never over the dock
         if (continueRow.getAlpha() != alpha) continueRow.setAlpha(alpha);
         Rect gc = grid.getClipBounds();
-        Rect want2 = gc == null ? null : new Rect(gc.left, Math.round(gc.top - y), gc.right, Math.round(gc.bottom - y));
+        int side = (int) (CONT_CLIP_DP * density);
+        int cl = Math.max(gc == null ? 0 : gc.left, side);
+        int cr = Math.min(gc == null ? root.getWidth() : gc.right, root.getWidth() - side);
+        int ct = gc == null ? Math.round(-y) : Math.round(gc.top - y);
+        int cb = gc == null ? continueRow.getHeight() : Math.round(gc.bottom - y);
+        Rect want2 = new Rect(cl, ct, cr, cb);
         Rect have = continueRow.getClipBounds();
         if (want2 == null ? have != null : !want2.equals(have)) continueRow.setClipBounds(want2);
     }
@@ -1757,8 +1776,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         RecyclerView.ViewHolder vh = grid.findViewHolderForAdapterPosition(COLUMNS);
         if (vh == null) return;
         int rowTop = vh.itemView.getTop() - continueGapPx;
-        if (entering) scrollGridBy(rowTop - allTopPx());
-        else ensureVisible(rowTop, rowTop + continueRowPx);
+        int air = (int) (CONT_TOP_AIR_DP * density);
+        if (entering) scrollGridBy(rowTop - air - allTopPx());
+        else ensureVisible(rowTop - air, rowTop + continueRowPx);
     }
 
     @Override
