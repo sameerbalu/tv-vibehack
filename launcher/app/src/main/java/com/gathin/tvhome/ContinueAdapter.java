@@ -409,7 +409,11 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         }
     }
 
-    /** If Nuvio still holds this title (paused) tell it to play, then bring Nuvio to the front. */
+    /**
+     * Opens exactly what was being watched. In order: the app still has the video open (it jumps to the saved
+     * spot and plays), a link that opens that one video in the app, the app's own "open player" shortcut,
+     * and finally just the app.
+     */
     void resume(NuvioHistory.Entry e) {
         PackageManager pm = ctx.getPackageManager();
         String pkg = (e.pkg == null || e.pkg.isEmpty() || pm.getLaunchIntentForPackage(e.pkg) == null
@@ -418,18 +422,49 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
             Toast.makeText(ctx, R.string.library_no_nuvio, Toast.LENGTH_SHORT).show();
             return;
         }
+        // 1) The app still holds this video: play it from the saved position and bring the app up.
         try {
             MediaSessionManager sm = (MediaSessionManager) ctx.getSystemService(Context.MEDIA_SESSION_SERVICE);
             for (MediaController c : sm.getActiveSessions(new ComponentName(ctx, MediaListener.class))) {
                 if (!pkg.equals(c.getPackageName())) continue;
                 MediaMetadata m = c.getMetadata();
                 String t = m == null ? null : m.getString(MediaMetadata.METADATA_KEY_TITLE);
-                if (t != null && t.trim().equals(e.title)) {
-                    c.getTransportControls().play();
-                    break;
+                if (t == null || !t.trim().equals(e.title)) continue;
+                android.media.session.PlaybackState st = c.getPlaybackState();
+                long cur = st == null ? 0L : st.getPosition();
+                if (e.position > 0 && Math.abs(cur - e.position) > 5000L) c.getTransportControls().seekTo(e.position);
+                c.getTransportControls().play();
+                android.app.PendingIntent pi = c.getSessionActivity();
+                if (pi != null) {
+                    try {
+                        pi.send();
+                        return;
+                    } catch (android.app.PendingIntent.CanceledException ignored) {
+                    }
                 }
+                launch(pkg);
+                return;
             }
         } catch (RuntimeException ignored) {
+        }
+        // 2) A link that opens this one video in the app.
+        Intent link = DeepLinks.build(ctx, pkg, e);
+        if (link != null) {
+            link.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            try {
+                ctx.startActivity(link);
+                return;
+            } catch (Exception ignored) {
+            }
+        }
+        // 3) The app's own shortcut to its player (kept while the launcher is running).
+        android.app.PendingIntent pi = MediaListener.sessionActivityFor(e.key);
+        if (pi != null) {
+            try {
+                pi.send();
+                return;
+            } catch (android.app.PendingIntent.CanceledException ignored) {
+            }
         }
         launch(pkg);
     }

@@ -52,9 +52,9 @@
         android:layout_marginStart="68dp"
         android:alpha="0"
         android:textColor="#FFFFFFFF"
-        android:textSize="48sp"
+        android:textSize="50sp"
         android:fontFamily="@font/outfit"
-        android:fontVariationSettings="'wght' 300"
+        android:fontVariationSettings="'wght' 700"
         android:letterSpacing="-0.02"
         android:includeFontPadding="false"
         android:singleLine="true" />
@@ -177,6 +177,7 @@
                         android:textAllCaps="true" />
 
                     <View
+                        android:id="@+id/clockDivider"
                         android:layout_width="1dp"
                         android:layout_height="26dp"
                         android:layout_gravity="bottom"

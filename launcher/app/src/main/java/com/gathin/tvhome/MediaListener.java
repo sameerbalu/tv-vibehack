@@ -221,7 +221,20 @@ public class MediaListener extends NotificationListenerService {
             Bitmap art = landscapeArt(m);
             // A wide picture saved earlier must not be overwritten by this session's portrait poster.
             Bitmap toSave = (art != null && (isWide(art) || !NuvioHistory.hasPoster(this, title, sub))) ? art : null;
-            NuvioHistory.record(this, c.getPackageName(), title, sub, toSave, pos, dur);
+            String artUri = first(m, MediaMetadata.METADATA_KEY_ART_URI, MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI,
+                    MediaMetadata.METADATA_KEY_ALBUM_ART_URI);
+            NuvioHistory.record(this, c.getPackageName(), title, sub, toSave, pos, dur,
+                    first(m, MediaMetadata.METADATA_KEY_MEDIA_ID), first(m, MediaMetadata.METADATA_KEY_MEDIA_URI), artUri);
+            // The app's own "open the player" shortcut: valid while this process lives, used as a resume path.
+            try {
+                android.app.PendingIntent pi = c.getSessionActivity();
+                if (pi != null) SESSION_ACTIVITY.put(title + "|" + (sub == null ? "" : sub), pi);
+            } catch (RuntimeException ignored) {
+            }
+            if (isNuvio(c.getPackageName()) && !NuvioHistory.hasImdb(this, title, sub)
+                    && lookedUp.add(title + "|" + (sub == null ? "" : sub))) {
+                lookupImdb(title, sub);
+            }
             // Only a portrait poster (or nothing) so far: look for a wide picture (the episode still) by link.
             if ((art == null || !isWide(art)) && triedArt.add(title + "|" + sub)) {
                 String uri = first(m, MediaMetadata.METADATA_KEY_ART_URI, MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI,
@@ -233,6 +246,72 @@ public class MediaListener extends NotificationListenerService {
     }
 
     private final Set<String> triedArt = new HashSet<>();
+    private final Set<String> lookedUp = new HashSet<>();
+
+    /** Session shortcuts by entry key (title|subtitle), kept in memory only. */
+    private static final java.util.Map<String, android.app.PendingIntent> SESSION_ACTIVITY =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    static android.app.PendingIntent sessionActivityFor(String key) {
+        return key == null ? null : SESSION_ACTIVITY.get(key);
+    }
+
+    /** Finds the IMDb id of a title through the public Cinemeta catalogue (the one Stremio / Nuvio use). */
+    private void lookupImdb(final String title, final String sub) {
+        if (io == null) return;
+        io.execute(() -> {
+            String id = null, kind = null;
+            try {
+                String q = Uri.encode(title.replaceAll("\\(\\d{4}\\)\\s*$", "").trim());
+                String want = norm(title.replaceAll("\\(\\d{4}\\)\\s*$", ""));
+                boolean looksSeries = sub != null && sub.matches("(?is).*\\b(s\\d+|e\\d+|season|episode)\\b.*");
+                String[] types = looksSeries ? new String[]{"series", "movie"} : new String[]{"movie", "series"};
+                for (String type : types) {
+                    String json = httpText("https://v3-cinemeta.strem.io/catalog/" + type + "/top/search=" + q + ".json");
+                    org.json.JSONArray metas = new org.json.JSONObject(json).optJSONArray("metas");
+                    for (int i = 0; metas != null && i < metas.length(); i++) {
+                        org.json.JSONObject m = metas.getJSONObject(i);
+                        String mid = m.optString("imdb_id", m.optString("id", ""));
+                        if (mid.startsWith("tt") && norm(m.optString("name", "")).equals(want)) {
+                            id = mid;
+                            kind = type;
+                            break;
+                        }
+                    }
+                    if (id != null) break;
+                }
+            } catch (Exception ignored) {
+            }
+            final String fid = id, fkind = kind;
+            if (fid != null) handler.post(() -> NuvioHistory.setLink(MediaListener.this, title, sub, fid, fkind));
+        });
+    }
+
+    private static String norm(String s) {
+        return s == null ? "" : s.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
+    }
+
+    private static String httpText(String url) throws Exception {
+        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+        try {
+            conn.setConnectTimeout(8000);
+            conn.setReadTimeout(10000);
+            conn.setRequestProperty("User-Agent", "TVHome/9");
+            if (conn.getResponseCode() != 200) throw new java.io.IOException("HTTP " + conn.getResponseCode());
+            try (InputStream in = conn.getInputStream()) {
+                java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+                byte[] chunk = new byte[8192];
+                int n;
+                while ((n = in.read(chunk)) > 0) {
+                    buf.write(chunk, 0, n);
+                    if (buf.size() > 2 * 1024 * 1024) throw new java.io.IOException("too large");
+                }
+                return new String(buf.toByteArray(), "UTF-8");
+            }
+        } finally {
+            conn.disconnect();
+        }
+    }
 
     private static boolean isWide(Bitmap b) {
         return b != null && b.getHeight() > 0 && b.getWidth() >= b.getHeight() * 1.3f;

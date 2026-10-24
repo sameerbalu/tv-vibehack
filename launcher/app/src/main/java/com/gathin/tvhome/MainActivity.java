@@ -51,6 +51,7 @@ import android.view.animation.AnimationUtils;
 import android.view.animation.DecelerateInterpolator;
 import android.view.animation.AccelerateDecelerateInterpolator;
 import android.view.animation.LayoutAnimationController;
+import android.view.animation.OvershootInterpolator;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -153,6 +154,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private final List<MediaController> watched = new ArrayList<>();
     private static boolean btPermissionAsked;
     private boolean heroShown;
+    private ValueAnimator heroSettle, heroSheen, clockSheen;
+    /** Every so often a soft light sweeps over the clock. */
+    private final Runnable clockShine = new Runnable() {
+        @Override
+        public void run() {
+            if (!paused && !overlayApplied) startClockSheen(0);
+            handler.postDelayed(this, 45_000L);
+        }
+    };
     private TextView greeting;
     private TextView btnBluetooth;
     private SpringAnimation springX, springY;
@@ -244,6 +254,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             updateBluetoothLabel();
             widgets.refresh();
             positionWidgets();
+            // Posters older than 48 hours drop out (only while the row is out of sight, so nothing moves under the cursor).
+            if (!allAppsMode && !arranging && continueAdapter.refresh()) layoutContinue();
             handler.postDelayed(this, MINUTE_MS);
         }
     };
@@ -453,6 +465,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         springY.cancel();
         glass.setAlpha(0f);
         heroShown = false;
+        cancelHeroFx();
         heroName.animate().cancel();
         heroName.setTranslationX(0f);
         heroName.setAlpha(0f);
@@ -500,6 +513,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         updateBluetoothLabel();
         handler.postDelayed(minuteTick, MINUTE_MS);
         rescheduleIdle();
+        resetClockFx();
+        if (!keepAll && !quick) header.post(this::playClockIntro);
+        handler.removeCallbacks(clockShine);
+        handler.postDelayed(clockShine, 45_000L);
         if (wallpaperView.getVisibility() != View.VISIBLE) restoreWallpaper();   // safety net after a restart
         widgets.animate().cancel();
         widgets.setAlpha(keepAll ? 0f : 1f);
@@ -563,6 +580,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         super.onPause();
         handler.removeCallbacks(restoreFocus);
         handler.removeCallbacks(minuteTick);
+        handler.removeCallbacks(clockShine);
+        cancelHeroFx();
+        if (clockSheen != null) clockSheen.cancel();
         handler.removeCallbacks(idleSaver);
         if (inputsIcon != null) inputsIcon.rest();
         if (bluetoothIcon != null) bluetoothIcon.rest();
@@ -726,6 +746,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         if (show) {
             header.setVisibility(View.VISIBLE);
             header.animate().alpha(1f).setDuration(300).start();
+            header.post(this::playClockIntro);
             widgets.setVisibility(View.VISIBLE);
             widgets.animate().alpha(1f).setDuration(300).start();
         } else {
@@ -943,18 +964,20 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             heroName.setTextColor(tint);
             heroName.setY(y);
             heroName.setTranslationX(0f);
-            heroName.animate().alpha(1f).setDuration(260).start();
+            playHeroIn(tint);
             if (ambientAnim != null) ambientAnim.cancel();
             applyAmbientColor(ambientFor(position));
             ambient.animate().alpha(1f).setDuration(600).start();
             heroShown = true;
         } else if (changed) {
-            heroName.animate().alpha(0f).translationX(-12 * density).setDuration(120).withEndAction(() -> {
+            cancelHeroFx();
+            heroName.animate().alpha(0f).translationX(-26 * density).setDuration(140).withEndAction(() -> {
+                if (!heroShown) return;
                 heroName.setText(label);
                 heroName.setTextColor(tint);
                 heroName.setY(y);
-                heroName.setTranslationX(12 * density);
-                heroName.animate().alpha(1f).translationX(0f).setDuration(200).start();
+                heroName.setTranslationX(0f);
+                playHeroIn(tint);
             }).start();
             animateAmbient(ambientFor(position), 600);   // cross-fade to the next app's colour
         } else {
@@ -1089,9 +1112,84 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
                 (int) (Color.blue(color) * 0.8f));
     }
 
+    /** Dock title: letters settle together while the title rises, a glow in the app's colour, then a light sweeps over it. */
+    private void playHeroIn(int tint) {
+        cancelHeroFx();
+        heroName.animate().cancel();
+        heroName.setShadowLayer(24 * density, 0f, 0f, (tint & 0x00FFFFFF) | 0xAA000000);
+        heroName.setAlpha(0f);
+        heroSettle = TextFx.settle(heroName, 0.16f, -0.02f, 18f, 700);
+        heroSheen = TextFx.sheen(heroName, 0xFFFFFFFF, 1000, 420);
+    }
+
+    private void cancelHeroFx() {
+        if (heroSettle != null) heroSettle.cancel();
+        if (heroSheen != null) heroSheen.cancel();
+        heroSettle = null;
+        heroSheen = null;
+    }
+
+    // ---- clock in the corner ---------------------------------------------------------------------------
+
+    private void resetClockFx() {
+        if (clockSheen != null) clockSheen.cancel();
+        clockSheen = null;
+        int[] ids = {R.id.greeting, R.id.clock, R.id.ampm, R.id.clockDivider, R.id.date};
+        for (int id : ids) {
+            View v = findViewById(id);
+            if (v == null) continue;
+            v.animate().cancel();
+            v.setAlpha(1f);
+            v.setTranslationX(0f);
+            v.setTranslationY(0f);
+            v.setScaleX(1f);
+            v.setScaleY(1f);
+        }
+    }
+
+    /** The corner clock builds up piece by piece: greeting slides in, the time rises, the divider grows, the date follows. */
+    private void playClockIntro() {
+        View g = findViewById(R.id.greeting), c = findViewById(R.id.clock), a = findViewById(R.id.ampm),
+                dv = findViewById(R.id.clockDivider), dt = findViewById(R.id.date);
+        if (g == null || c == null || a == null || dv == null || dt == null) return;
+        resetClockFx();
+        float d = density;
+        DecelerateInterpolator out = new DecelerateInterpolator(2f);
+        g.setAlpha(0f);
+        g.setTranslationX(-20 * d);
+        g.animate().alpha(1f).translationX(0f).setDuration(520).setInterpolator(out).start();
+        c.setPivotX(0f);
+        c.setPivotY(c.getHeight());
+        c.setAlpha(0f);
+        c.setTranslationY(28 * d);
+        c.setScaleX(0.9f);
+        c.setScaleY(0.9f);
+        c.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f).setStartDelay(90).setDuration(780)
+                .setInterpolator(new OvershootInterpolator(0.8f)).start();
+        a.setAlpha(0f);
+        a.setTranslationX(-10 * d);
+        a.animate().alpha(1f).translationX(0f).setStartDelay(420).setDuration(450).setInterpolator(out).start();
+        dv.setPivotY(dv.getHeight());
+        dv.setScaleY(0f);
+        dv.animate().scaleY(1f).setStartDelay(380).setDuration(420).setInterpolator(out).start();
+        dt.setAlpha(0f);
+        dt.setTranslationX(-24 * d);
+        dt.animate().alpha(1f).translationX(0f).setStartDelay(470).setDuration(560).setInterpolator(out).start();
+        startClockSheen(1000);
+    }
+
+    private void startClockSheen(long delayMs) {
+        View c = findViewById(R.id.clock);
+        if (!(c instanceof TextView)) return;
+        if (clockSheen != null) clockSheen.cancel();
+        int accent = AppAdapter.textTint(ambientColor != 0 ? ambientColor : 0xFF66B2FF);
+        clockSheen = TextFx.sheen((TextView) c, accent, 1300, delayMs);
+    }
+
     private void hideHero() {
         if (!heroShown) return;
         heroShown = false;
+        cancelHeroFx();
         heroName.animate().alpha(0f).setDuration(160).start();
         ambient.animate().alpha(0f).setDuration(300).start();
     }

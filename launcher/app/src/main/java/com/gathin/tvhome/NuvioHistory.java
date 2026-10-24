@@ -28,7 +28,17 @@ final class NuvioHistory {
         long position;
         long duration;
         long time;
+        /** What the app told us about the video: used to open exactly this one again. */
+        String mediaId = "";
+        String mediaUri = "";
+        String artUri = "";
+        /** IMDb id and "movie" / "series" (looked up for Nuvio), or empty. */
+        String imdb = "";
+        String kind = "";
     }
+
+    /** Entries older than this (since last watched) leave the list. */
+    static final long MAX_AGE_MS = 48L * 60L * 60L * 1000L;
 
     private static final String FILE = "nuvio_history.json";
     private static final String POSTERS = "nuvio_posters";
@@ -66,11 +76,28 @@ final class NuvioHistory {
                 e.position = o.optLong("position");
                 e.duration = o.optLong("duration");
                 e.time = o.optLong("time");
+                e.mediaId = o.optString("mid");
+                e.mediaUri = o.optString("muri");
+                e.artUri = o.optString("auri");
+                e.imdb = o.optString("imdb");
+                e.kind = o.optString("kind");
                 if (!e.title.isEmpty()) out.add(e);
             }
         } catch (Exception ignored) {
             // A damaged file just means an empty list; it is rewritten on the next record().
         }
+        // 48 hours after it was last watched a poster disappears (with its saved picture).
+        long now = System.currentTimeMillis();
+        boolean expired = false;
+        for (int i = out.size() - 1; i >= 0; i--) {
+            Entry e = out.get(i);
+            if (e.time > 0 && now - e.time > MAX_AGE_MS) {
+                deletePoster(c, e);
+                out.remove(i);
+                expired = true;
+            }
+        }
+        if (expired) save(c, out);
         return out;
     }
 
@@ -87,6 +114,11 @@ final class NuvioHistory {
                 o.put("position", e.position);
                 o.put("duration", e.duration);
                 o.put("time", e.time);
+                o.put("mid", e.mediaId);
+                o.put("muri", e.mediaUri);
+                o.put("auri", e.artUri);
+                o.put("imdb", e.imdb);
+                o.put("kind", e.kind);
                 arr.put(o);
             }
             File tmp = new File(c.getFilesDir(), FILE + ".tmp");
@@ -103,6 +135,11 @@ final class NuvioHistory {
     /** Notes that this title is being watched (or was just paused) at this position. */
     static synchronized void record(Context c, String pkg, String title, String subtitle, Bitmap art,
                                     long position, long duration) {
+        record(c, pkg, title, subtitle, art, position, duration, null, null, null);
+    }
+
+    static synchronized void record(Context c, String pkg, String title, String subtitle, Bitmap art,
+                                    long position, long duration, String mediaId, String mediaUri, String artUri) {
         if (title == null || title.trim().isEmpty()) return;
         title = title.trim();
         String key = keyOf(title, subtitle);
@@ -131,6 +168,9 @@ final class NuvioHistory {
         e.title = title;
         e.subtitle = subtitle == null ? "" : subtitle.trim();
         e.time = System.currentTimeMillis();
+        if (mediaId != null && !mediaId.isEmpty()) e.mediaId = mediaId;
+        if (mediaUri != null && !mediaUri.isEmpty()) e.mediaUri = mediaUri;
+        if (artUri != null && !artUri.isEmpty()) e.artUri = artUri;
         if (duration > 0) {
             e.duration = duration;
             e.position = Math.max(0, position);
@@ -159,6 +199,26 @@ final class NuvioHistory {
                 return;
             }
         }
+    }
+
+    /** Remembers which title (IMDb id) this entry is, so its page can be opened later. */
+    static synchronized void setLink(Context c, String title, String subtitle, String imdb, String kind) {
+        String key = keyOf(title == null ? "" : title.trim(), subtitle);
+        List<Entry> list = load(c);
+        for (Entry e : list) {
+            if (e.key.equals(key)) {
+                e.imdb = imdb == null ? "" : imdb;
+                e.kind = kind == null ? "" : kind;
+                save(c, list);
+                return;
+            }
+        }
+    }
+
+    static synchronized boolean hasImdb(Context c, String title, String subtitle) {
+        String key = keyOf(title == null ? "" : title.trim(), subtitle);
+        for (Entry e : load(c)) if (e.key.equals(key)) return !e.imdb.isEmpty();
+        return false;
     }
 
     /** Empties the whole Continue watching list (and deletes the saved artwork). */
