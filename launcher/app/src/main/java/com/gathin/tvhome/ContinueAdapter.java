@@ -52,6 +52,9 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
     private final float d;
     private final List<NuvioHistory.Entry> entries = new ArrayList<>();
     private final android.util.LruCache<String, Bitmap> posters = new android.util.LruCache<>(32);
+    private final android.util.LruCache<String, Bitmap> blurs = new android.util.LruCache<>(32);
+    private final android.util.LruCache<String, android.graphics.drawable.Drawable> badges = new android.util.LruCache<>(12);
+    private static final float POSTER_FOCUS_SCALE = 1.07f;
     private String signature = "";
     private String nuvioPkg;
     private int cardW, cardH, gapPx;
@@ -107,7 +110,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
 
     private static final class PosterHolder extends RecyclerView.ViewHolder {
         final View card, scrim;
-        final ImageView poster;
+        final ImageView poster, posterBg, badge;
         final TextView name;
         final ColorBar progress;
 
@@ -116,6 +119,8 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
             card = v.findViewById(R.id.card);
             scrim = v.findViewById(R.id.scrim);
             poster = v.findViewById(R.id.poster);
+            posterBg = v.findViewById(R.id.posterBg);
+            badge = v.findViewById(R.id.badge);
             name = v.findViewById(R.id.name);
             progress = v.findViewById(R.id.progress);
         }
@@ -153,12 +158,12 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
             }
         });
         h.card.setOnFocusChangeListener((view, focused) -> {
-            float s = focused ? AppAdapter.FOCUS_SCALE : 1f;
+            float s = focused ? POSTER_FOCUS_SCALE : 1f;
             view.animate().scaleX(s).scaleY(s)
                     .setDuration(focused ? 260 : 180)
                     .setInterpolator(new OvershootInterpolator(focused ? 1.6f : 0f))
                     .start();
-            h.name.animate().alpha(focused ? 1f : 0.7f).setDuration(200).start();
+            h.name.animate().alpha(1f).setDuration(200).start();
             int p = h.getBindingAdapterPosition();
             if (focused && p != RecyclerView.NO_POSITION) host.onPosterFocused(p, view, 0xFFE50914);
         });
@@ -197,15 +202,36 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
             }
         }
         if (bmp != null) {
+            // Artwork that is not 16:9 (posters, squares) is shown whole over a soft blurred copy of itself,
+            // instead of being cropped and blown up.
+            float ratio = bmp.getWidth() / (float) bmp.getHeight();
+            boolean wide = Math.abs(ratio - 16f / 9f) < 0.28f;
+            h.poster.setScaleType(wide ? ImageView.ScaleType.CENTER_CROP : ImageView.ScaleType.FIT_CENTER);
             h.poster.setImageBitmap(bmp);
+            if (wide) {
+                h.posterBg.setImageDrawable(null);
+            } else {
+                Bitmap bl = blurs.get(e.poster);
+                if (bl == null) {
+                    try {
+                        bl = Bitmap.createScaledBitmap(bmp, 16, 9, true);
+                        blurs.put(e.poster, bl);
+                    } catch (RuntimeException | OutOfMemoryError ignored) {
+                    }
+                }
+                h.posterBg.setImageBitmap(bl);
+            }
         } else {
+            h.posterBg.setImageDrawable(null);
+            h.poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
             float hue = Math.abs(e.title.hashCode()) % 360;
             int c1 = Color.HSVToColor(new float[]{hue, 0.55f, 0.50f});
             int c2 = Color.HSVToColor(new float[]{(hue + 40f) % 360f, 0.7f, 0.16f});
             h.poster.setImageDrawable(new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{c1, c2}));
         }
         h.name.setText(e.title);
-        h.name.setAlpha(h.card.isFocused() ? 1f : 0.7f);
+        h.name.setAlpha(1f);
+        h.badge.setImageDrawable(badgeFor(e.pkg));
         if (e.duration > 0) {
             h.progress.setVisibility(View.VISIBLE);
             h.progress.set(e.position / (float) e.duration, 0xFFE50914, 0xFFFF4D4D);
@@ -213,6 +239,25 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         } else {
             h.progress.setVisibility(View.GONE);
             h.scrim.setVisibility(View.GONE);
+        }
+    }
+
+    /** Small icon of the app this title was playing in. */
+    private android.graphics.drawable.Drawable badgeFor(String pkg) {
+        if (pkg == null || pkg.isEmpty()) return null;
+        android.graphics.drawable.Drawable d = badges.get(pkg);
+        if (d != null) {
+            android.graphics.drawable.Drawable.ConstantState c0 = d.getConstantState();
+            return c0 == null ? d : c0.newDrawable().mutate();
+        }
+        try {
+            d = ctx.getPackageManager().getApplicationIcon(pkg);
+            android.graphics.drawable.Drawable.ConstantState cs = d.getConstantState();
+            if (cs != null) d = cs.newDrawable().mutate();
+            badges.put(pkg, d);
+            return cs == null ? d : cs.newDrawable().mutate();
+        } catch (PackageManager.NameNotFoundException | RuntimeException ex) {
+            return null;
         }
     }
 

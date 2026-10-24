@@ -106,16 +106,47 @@ public class MediaListener extends NotificationListenerService {
         return pkg != null && pkg.toLowerCase(Locale.ROOT).contains("nuvio");
     }
 
+    /** Video / streaming apps whose playback appears in "Continue watching" (matched on the package name). */
+    private static final String[] VIDEO_APPS = {
+            "nuvio", "netflix", "com.google.android.youtube.tv", "com.google.android.youtube.tvunplugged",
+            "com.amazon.amazonvideo", "com.amazon.avod", "hotstar", "jiocinema", "jio.media", "disney",
+            "plex", "kodi", "stremio", "jellyfin", "emby", "hulu", "hbo", "com.wbd", "paramount", "peacock",
+            "apple.atve", "com.apple.tv", "sonyliv", "com.graymatrix.did", "zee5", "voot", "mxtech", "mxplayer",
+            "vlc", "justwatch", "crunchyroll", "tubi", "pluto", "twitch", "discovery", "starz", "showtime",
+            "viki", "curiosity", "mubi", "sunnxt", "erosnow", "altbalaji", "lionsgate", "bbc.iplayer",
+            "itvx", "channel4", "canalplus", "rakuten", "kinopoisk", "hbomax"};
+    /** Music, podcast and other audio apps: never listed, whatever they report. */
+    private static final String[] AUDIO_APPS = {
+            "spotify", "music", "deezer", "tidal", "soundcloud", "pandora", "shazam", "audible", "podcast",
+            "radio", "tunein", "jiosaavn", "gaana", "wynk", "hungama", "napster", "qobuz", "audio"};
+
+    /** True for apps whose playing video should be remembered. */
+    static boolean isVideoApp(String pkg, long durationMs) {
+        if (pkg == null) return false;
+        String p = pkg.toLowerCase(Locale.ROOT);
+        for (String a : AUDIO_APPS) if (p.contains(a) && !p.contains("youtube")) return false;
+        for (String v : VIDEO_APPS) if (p.contains(v)) return true;
+        // Any other app that plays something long, like a film or an episode.
+        return durationMs >= 8 * 60_000L;
+    }
+
     private void watch(List<MediaController> controllers) {
         for (Watcher w : watchers) w.release();
         watchers.clear();
         if (controllers != null) {
             for (MediaController c : controllers) {
-                if (isNuvio(c.getPackageName())) watchers.add(new Watcher(c));
+                if (c.getPackageName() != null && !c.getPackageName().equals(getPackageName())
+                        && !isAudioOnly(c.getPackageName())) watchers.add(new Watcher(c));
             }
         }
         for (Watcher w : watchers) snapshot(w.controller);
         scheduleTick();
+    }
+
+    private static boolean isAudioOnly(String pkg) {
+        String p = pkg.toLowerCase(Locale.ROOT);
+        for (String a : AUDIO_APPS) if (p.contains(a) && !p.contains("youtube")) return true;
+        return false;
     }
 
     private void scheduleTick() {
@@ -182,6 +213,7 @@ public class MediaListener extends NotificationListenerService {
             final String sub = first(m, MediaMetadata.METADATA_KEY_ARTIST, MediaMetadata.METADATA_KEY_ALBUM,
                     MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE);
             long dur = m.getLong(MediaMetadata.METADATA_KEY_DURATION);
+            if (!isVideoApp(c.getPackageName(), dur)) return;
             long pos = st.getPosition();
             if (state == PlaybackState.STATE_PLAYING) {
                 pos += (long) ((SystemClock.elapsedRealtime() - st.getLastPositionUpdateTime()) * st.getPlaybackSpeed());

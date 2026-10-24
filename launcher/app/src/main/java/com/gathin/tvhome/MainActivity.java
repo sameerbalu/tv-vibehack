@@ -231,6 +231,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             if (musicPalette == null || musicPalette.length < 2) return;
             musicIndex = (musicIndex + 1) % musicPalette.length;
             musicColor = musicPalette[musicIndex];
+            tintPills(musicColor);
             if (heroShown) animateAmbient(ambientFor(lastFocused), 9000);   // long, slow cross-fade
             handler.postDelayed(this, MUSIC_CYCLE_MS);
         }
@@ -330,7 +331,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             public void getItemOffsets(@NonNull Rect outRect, @NonNull View view, @NonNull RecyclerView parent,
                                        @NonNull RecyclerView.State state) {
                 int pos = parent.getChildAdapterPosition(view);
-                if (pos >= COLUMNS && pos < 2 * COLUMNS && continueActive()) outRect.top = continueGapPx;
+                if (pos >= COLUMNS && pos < 2 * COLUMNS && sectionsActive()) outRect.top = gapTotalPx();
             }
         });
         grid.setLayoutAnimation(new LayoutAnimationController(
@@ -1622,8 +1623,14 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private static final int CONT_PAD_DP = 84;
     /** The row is clipped this far from each screen edge (panel margin 40dp + a little). */
     private static final int CONT_CLIP_DP = 46;
-    /** Extra air above the row when a poster is focused, so the cursor never touches the panel top. */
-    private static final int CONT_TOP_AIR_DP = 18;
+    private static final int PILL_H_DP = 34;          // height of the "Continue watching" / "All apps" pills
+    private static final int TOP_BUF_DP = 40;         // hidden space above the first pill: the dock never reaches the panel
+    private static final int CONT_PILL_GAP_DP = 18;   // pill -> posters
+    private static final int APPS_PILL_GAP_DP = 14;   // pill -> first row of apps
+    private TextView contPill, appsPill;
+    private PillIcon.Film contPillIcon;
+    private PillIcon.Apps appsPillIcon;
+    private boolean pillsRunning;
     private int continueGapPx, continueRowPx;
 
     /** True while the row is part of the layout: there is something to show and we are not arranging. */
@@ -1632,9 +1639,30 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
                 && adapter != null && adapter.getItemCount() > COLUMNS;
     }
 
-    /** Extra space above this app position (only the first row of apps has any). */
+    /** The first row of apps carries the section pills (and the posters) above it. */
+    private boolean sectionsActive() {
+        return adapter != null && adapter.getItemCount() > COLUMNS && !arranging;
+    }
+
+    private int contPillBlockPx() {
+        return (int) ((PILL_H_DP + CONT_PILL_GAP_DP) * density);
+    }
+
+    private int appsPillBlockPx() {
+        return (int) ((PILL_H_DP + APPS_PILL_GAP_DP) * density);
+    }
+
+    /** Whole space reserved above the first row of apps, including the hidden buffer under the panel top. */
+    private int gapTotalPx() {
+        int g = (int) (TOP_BUF_DP * density) + appsPillBlockPx();
+        if (continueActive()) g += contPillBlockPx() + continueRowPx + (int) (6 * density);
+        return g;
+    }
+
+    /** The part of the gap that has to be on screen when the first row of apps is shown (no hidden buffer). */
     private int firstRowGap(int position) {
-        return position >= COLUMNS && position < 2 * COLUMNS && continueActive() ? continueGapPx : 0;
+        return position >= COLUMNS && position < 2 * COLUMNS && sectionsActive()
+                ? gapTotalPx() - (int) (TOP_BUF_DP * density) : 0;
     }
 
     private void setupContinueRow() {
@@ -1655,6 +1683,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         continueRow.setPadding((int) (CONT_PAD_DP * density), 0, (int) (CONT_PAD_DP * density), 0);
         root.addView(continueRow, root.indexOfChild(grid) + 1,
                 new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (200 * density)));
+        contPillIcon = new PillIcon.Film(density, android.content.res.ColorStateList.valueOf(0xFFFFFFFF));
+        appsPillIcon = new PillIcon.Apps(density, android.content.res.ColorStateList.valueOf(0xFFFFFFFF));
+        contPill = makeSectionPill(getString(R.string.continue_watching), contPillIcon);
+        appsPill = makeSectionPill(getString(R.string.all_apps_title), appsPillIcon);
+        // The pills float over the gap above the posters and above the first row of apps.
+        root.addView(contPill, root.indexOfChild(continueRow) + 1,
+                new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, (int) (PILL_H_DP * density)));
+        root.addView(appsPill, root.indexOfChild(continueRow) + 1,
+                new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, (int) (PILL_H_DP * density)));
         // The row floats over the gap above the first row of apps and follows the grid (scroll, fades, clip).
         grid.getViewTreeObserver().addOnPreDrawListener(() -> {
             syncContinueRow();
@@ -1682,6 +1719,119 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         });
     }
 
+    private TextView makeSectionPill(String text, PillIcon icon) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextColor(0xFFFFFFFF);
+        tv.setTextSize(13f);
+        tv.setSingleLine(true);
+        tv.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        tv.setPadding((int) (12 * density), 0, (int) (16 * density), 0);
+        tv.setCompoundDrawablePadding((int) (7 * density));
+        int sz = (int) (17 * density);
+        icon.setBounds(0, 0, sz, sz);
+        tv.setCompoundDrawablesRelative(icon, null, null, null);
+        tv.setLetterSpacing(0.01f);
+        if (Build.VERSION.SDK_INT >= 26) {
+            try {
+                tv.setTypeface(getResources().getFont(R.font.outfit));
+                tv.setFontVariationSettings("'wght' 600");
+            } catch (RuntimeException ignored) {
+            }
+        }
+        tv.setBackground(pillBackground(false, 17f, pillTintCur));
+        tv.setFocusable(false);
+        tv.setClickable(false);
+        tv.setAlpha(0f);
+        tv.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        return tv;
+    }
+
+    // ---- pill colour: follows the album art while a Spotify song plays ----------------------------------
+
+    private int pillTintCur;              // 0 = plain glass
+    private ValueAnimator pillTintAnim;
+
+    private static int mix(int a, int b, float t) {
+        return Color.argb(255, Math.round(Color.red(a) + (Color.red(b) - Color.red(a)) * t),
+                Math.round(Color.green(a) + (Color.green(b) - Color.green(a)) * t),
+                Math.round(Color.blue(a) + (Color.blue(b) - Color.blue(a)) * t));
+    }
+
+    private static int lerpArgb(int a, int b, float t) {
+        return Color.argb(Math.round(Color.alpha(a) + (Color.alpha(b) - Color.alpha(a)) * t),
+                Math.round(Color.red(a) + (Color.red(b) - Color.red(a)) * t),
+                Math.round(Color.green(a) + (Color.green(b) - Color.green(a)) * t),
+                Math.round(Color.blue(a) + (Color.blue(b) - Color.blue(a)) * t));
+    }
+
+    /**
+     * A frosted pill background (focused / normal). The tint's alpha is how strongly the song colour is
+     * blended in: 0 = plain white glass, 255 = fully the song colour.
+     */
+    private Drawable pillBackground(boolean round, float radiusDp, int tint) {
+        float k = Color.alpha(tint) / 255f;
+        int fTop = 0x66FFFFFF, fBot = 0x2EFFFFFF, fStroke = 0xA6FFFFFF;
+        int nTop = 0x2EFFFFFF, nBot = 0x14FFFFFF, nStroke = 0x38FFFFFF;
+        if (k > 0f) {
+            int rgb = tint & 0xFFFFFF;
+            int soft = mix(tint | 0xFF000000, 0xFFFFFFFF, 0.30f) & 0xFFFFFF;
+            int bright = mix(tint | 0xFF000000, 0xFFFFFFFF, 0.55f) & 0xFFFFFF;
+            fTop = lerpArgb(fTop, 0xAA000000 | rgb, k);
+            fBot = lerpArgb(fBot, 0x66000000 | rgb, k);
+            fStroke = lerpArgb(fStroke, 0xE6000000 | bright, k);
+            nTop = lerpArgb(nTop, 0x78000000 | rgb, k);
+            nBot = lerpArgb(nBot, 0x40000000 | rgb, k);
+            nStroke = lerpArgb(nStroke, 0x8C000000 | soft, k);
+        }
+        android.graphics.drawable.StateListDrawable sl = new android.graphics.drawable.StateListDrawable();
+        sl.addState(new int[]{android.R.attr.state_focused},
+                pillShape(round, radiusDp, fTop, fBot, fStroke, 1.5f));
+        sl.addState(new int[0], pillShape(round, radiusDp, nTop, nBot, nStroke, 1f));
+        return sl;
+    }
+
+    private GradientDrawable pillShape(boolean round, float radiusDp, int top, int bottom, int stroke, float strokeDp) {
+        GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{top, bottom});
+        g.setShape(round ? GradientDrawable.OVAL : GradientDrawable.RECTANGLE);
+        if (!round) g.setCornerRadius(radiusDp * density);
+        g.setStroke(Math.max(1, Math.round(strokeDp * density)), stroke);
+        return g;
+    }
+
+    private void applyPillTint(int tint) {
+        pillTintCur = tint;
+        View b1 = findViewById(R.id.btnInputs), b2 = findViewById(R.id.btnBluetooth), b3 = findViewById(R.id.btnSettings);
+        if (b1 != null) b1.setBackground(pillBackground(false, 21f, tint));
+        if (b2 != null) b2.setBackground(pillBackground(false, 21f, tint));
+        if (b3 != null) b3.setBackground(pillBackground(true, 0f, tint));
+        if (contPill != null) contPill.setBackground(pillBackground(false, 17f, tint));
+        if (appsPill != null) appsPill.setBackground(pillBackground(false, 17f, tint));
+    }
+
+    private int pillTintTarget;           // the colour the pills are heading to (0 = plain glass)
+
+    /** Fades every pill to the song colour (0 = back to plain glass). */
+    private void tintPills(final int target) {
+        if (target == pillTintTarget) return;
+        pillTintTarget = target;
+        if (pillTintAnim != null) pillTintAnim.cancel();
+        final int from = pillTintCur;                    // ARGB: alpha = strength
+        final int fromRgb = Color.alpha(from) == 0 ? (target & 0xFFFFFF) : (from & 0xFFFFFF);
+        final int fromK = Color.alpha(from);
+        final int toRgb = target == 0 ? fromRgb : (target & 0xFFFFFF);
+        final int toK = target == 0 ? 0 : 255;
+        pillTintAnim = ValueAnimator.ofFloat(0f, 1f);
+        pillTintAnim.setDuration(1400);
+        pillTintAnim.addUpdateListener(an -> {
+            float t = (Float) an.getAnimatedValue();
+            int rgb = mix(0xFF000000 | fromRgb, 0xFF000000 | toRgb, t) & 0xFFFFFF;
+            int k = Math.round(fromK + (toK - fromK) * t);
+            applyPillTint(k == 0 ? 0 : (k << 24) | rgb);
+        });
+        pillTintAnim.start();
+    }
+
     /** Poster size: three full posters and a peek of the next one fit across the screen. */
     private void layoutContinue() {
         if (continueRow == null || grid == null || grid.getWidth() == 0) return;
@@ -1690,8 +1840,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         int w = (int) ((contentW - 2 * gap) / 3.2f);
         int h = Math.round(w * 9f / 16f);
         continueAdapter.setSize(w, h, gap);
-        int block = h + (int) (44 * density);                  // 8 air + poster + title line + 8 air
-        continueGapPx = block + (int) (6 * density);
+        int block = h + (int) (52 * density);                  // 8 air + poster + title line + 8 air
+        continueGapPx = block + (int) (6 * density) + appsPillBlockPx();   // poster row top -> first row of apps
         if (continueRowPx != block) {
             continueRowPx = block;
             ViewGroup.LayoutParams lp = continueRow.getLayoutParams();
@@ -1701,22 +1851,25 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         }
     }
 
-    /** Keeps the row glued to the gap above the first row of apps. Only draw properties change here. */
+    /** Keeps the row and the pills glued to the gap above the first row of apps. Only draw properties change here. */
     private void syncContinueRow() {
         if (continueRow == null) return;
         boolean active = continueActive();
         // In dock state the row is invisible but overlaps the dock's neighbourhood, so keys like Up must not find it.
         int want = active && allAppsMode ? ViewGroup.FOCUS_AFTER_DESCENDANTS : ViewGroup.FOCUS_BLOCK_DESCENDANTS;
         if (continueRow.getDescendantFocusability() != want) continueRow.setDescendantFocusability(want);
-        RecyclerView.ViewHolder vh = active ? grid.findViewHolderForAdapterPosition(COLUMNS) : null;
+        RecyclerView.ViewHolder vh = sectionsActive() ? grid.findViewHolderForAdapterPosition(COLUMNS) : null;
         if (vh == null) {
             if (continueRow.getAlpha() != 0f) continueRow.setAlpha(0f);
+            hidePills();
             return;
         }
-        float y = grid.getTop() + grid.getTranslationY() + vh.itemView.getTop() - continueGapPx;
+        float itemY = grid.getTop() + grid.getTranslationY() + vh.itemView.getTop();
+        float y = itemY - continueGapPx;
         if (continueRow.getTranslationY() != y) continueRow.setTranslationY(y);
         float alpha = grid.getAlpha() * (allAppsPanel != null ? allAppsPanel.getAlpha() : 1f);
         if (snapRising || (!allAppsMode && !snapActive)) alpha = 0f;   // never over the dock
+        if (!active) alpha = 0f;
         if (continueRow.getAlpha() != alpha) continueRow.setAlpha(alpha);
         Rect gc = grid.getClipBounds();
         int side = (int) (CONT_CLIP_DP * density);
@@ -1726,7 +1879,43 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         int cb = gc == null ? continueRow.getHeight() : Math.round(gc.bottom - y);
         Rect want2 = new Rect(cl, ct, cr, cb);
         Rect have = continueRow.getClipBounds();
-        if (want2 == null ? have != null : !want2.equals(have)) continueRow.setClipBounds(want2);
+        if (!want2.equals(have)) continueRow.setClipBounds(want2);
+
+        // Pills: "Continue watching" above the posters, "All apps" above the first row of apps.
+        float pillAlpha = grid.getAlpha() * (allAppsPanel != null ? allAppsPanel.getAlpha() : 1f);
+        if (snapRising || (!allAppsMode && !snapActive)) pillAlpha = 0f;
+        float px = CONT_PAD_DP * density;
+        placePill(contPill, active ? pillAlpha : 0f, px, y - contPillBlockPx(), gc);
+        placePill(appsPill, pillAlpha, px, itemY - appsPillBlockPx(), gc);
+        boolean run = pillAlpha > 0.05f;
+        if (run != pillsRunning) {
+            pillsRunning = run;
+            contPillIcon.setFocused(run);
+            appsPillIcon.setFocused(run);
+        }
+    }
+
+    private void placePill(TextView pill, float alpha, float x, float y, Rect gc) {
+        if (pill == null) return;
+        if (pill.getAlpha() != alpha) pill.setAlpha(alpha);
+        if (pill.getTranslationX() != x) pill.setTranslationX(x);
+        if (pill.getTranslationY() != y) pill.setTranslationY(y);
+        if (gc == null) {
+            if (pill.getClipBounds() != null) pill.setClipBounds(null);
+        } else {
+            Rect c = new Rect(0, Math.round(gc.top - y), pill.getWidth(), Math.round(gc.bottom - y));
+            if (!c.equals(pill.getClipBounds())) pill.setClipBounds(c);
+        }
+    }
+
+    private void hidePills() {
+        if (contPill != null && contPill.getAlpha() != 0f) contPill.setAlpha(0f);
+        if (appsPill != null && appsPill.getAlpha() != 0f) appsPill.setAlpha(0f);
+        if (pillsRunning) {
+            pillsRunning = false;
+            contPillIcon.setFocused(false);
+            appsPillIcon.setFocused(false);
+        }
     }
 
     private View cardAt(int position) {
@@ -1776,9 +1965,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         RecyclerView.ViewHolder vh = grid.findViewHolderForAdapterPosition(COLUMNS);
         if (vh == null) return;
         int rowTop = vh.itemView.getTop() - continueGapPx;
-        int air = (int) (CONT_TOP_AIR_DP * density);
-        if (entering) scrollGridBy(rowTop - air - allTopPx());
-        else ensureVisible(rowTop - air, rowTop + continueRowPx);
+        int pillTop = rowTop - contPillBlockPx();
+        if (entering) scrollGridBy(pillTop - allTopPx());
+        else ensureVisible(pillTop, rowTop + continueRowPx);
     }
 
     @Override
@@ -2295,6 +2484,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             handler.removeCallbacks(musicCycle);
             widgets.clearNowPlaying();
         }
+        tintPills(musicColor);
         positionWidgets();
         if (changed && heroShown) animateAmbient(ambientFor(lastFocused), 4500);   // slow, soft fade
     }

@@ -347,4 +347,117 @@ abstract class PillIcon extends Drawable {
             invalidateSelf();
         }
     }
+
+    // ================================================================================================
+    // Section pills (small, looping while visible): a screen with a play button and a progress bar that
+    // fills, and a 2 x 2 grid whose tiles pop one after another.
+    // ================================================================================================
+    abstract static class Looping extends PillIcon {
+        float t;                       // 0..1 position in the loop
+        private ValueAnimator loop;
+        private final long period;
+
+        Looping(float density, ColorStateList colors, long period) {
+            super(density, colors);
+            this.period = period;
+        }
+
+        @Override
+        void setFocused(boolean on) {          // "on" = the pill is on screen: run the loop
+            if (on == focused) return;
+            focused = on;
+            if (loop != null) loop.cancel();
+            loop = null;
+            if (on) {
+                loop = ValueAnimator.ofFloat(0f, 1f);
+                loop.setDuration(period);
+                loop.setInterpolator(new LinearInterpolator());
+                loop.setRepeatCount(ValueAnimator.INFINITE);
+                loop.addUpdateListener(a -> {
+                    t = (Float) a.getAnimatedValue();
+                    invalidateSelf();
+                });
+                loop.start();
+            } else {
+                t = 0f;
+                invalidateSelf();
+            }
+        }
+
+        @Override
+        void rest() {
+            focused = false;
+            if (loop != null) loop.cancel();
+            loop = null;
+            t = 0f;
+            invalidateSelf();
+        }
+    }
+
+    static final class Film extends Looping {
+        private final Path tri = new Path();
+
+        Film(float density, ColorStateList colors) {
+            super(density, colors, 3200);
+        }
+
+        @Override
+        void drawIcon(Canvas c) {
+            ink(1f);
+            c.drawRoundRect(2.5f, 3f, 21.5f, 16f, 3.2f, 3.2f, paint);
+            // play triangle with a small pop at the start of every loop
+            float pop = t < 0.18f ? 1f + 0.16f * (float) Math.sin(Math.PI * t / 0.18f) : 1f;
+            c.save();
+            c.scale(pop, pop, 12.4f, 9.5f);
+            tri.reset();
+            tri.moveTo(10.4f, 6.4f);
+            tri.lineTo(10.4f, 12.6f);
+            tri.lineTo(15.4f, 9.5f);
+            tri.close();
+            ink(1f);
+            c.drawPath(tri, paint);
+            c.restore();
+            // progress: faint track, bright part fills left to right
+            ink(0.30f);
+            c.drawLine(4f, 20f, 20f, 20f, paint);
+            float q = Math.max(0f, Math.min(1f, (t - 0.12f) / 0.62f));
+            float fade = t > 0.88f ? 1f - (t - 0.88f) / 0.12f : 1f;
+            if (q > 0f) {
+                ink(fade);
+                c.drawLine(4f, 20f, 4f + 16f * q, 20f, paint);
+            }
+        }
+    }
+
+    static final class Apps extends Looping {
+        private static final float[][] CELL = {{3.5f, 3.5f}, {13.5f, 3.5f}, {3.5f, 13.5f}, {13.5f, 13.5f}};
+        private static final int[] ORDER = {0, 1, 3, 2};          // clockwise
+
+        Apps(float density, ColorStateList colors) {
+            super(density, colors, 3400);
+        }
+
+        @Override
+        void drawIcon(Canvas c) {
+            for (int n = 0; n < 4; n++) {
+                int i = ORDER[n];
+                float start = 0.04f + n * 0.12f;
+                float q = (t - start) / 0.30f;
+                float k = q > 0f && q < 1f ? (float) Math.sin(Math.PI * q) : 0f;
+                float s = 1f + 0.20f * k;
+                float cx = CELL[i][0] + 3.5f, cy = CELL[i][1] + 3.5f;
+                c.save();
+                c.scale(s, s, cx, cy);
+                ink(1f);
+                c.drawRoundRect(CELL[i][0], CELL[i][1], CELL[i][0] + 7f, CELL[i][1] + 7f, 2.2f, 2.2f, paint);
+                if (k > 0f) {
+                    paint.setStyle(Paint.Style.FILL);
+                    ink(0.55f * k);
+                    c.drawRoundRect(CELL[i][0], CELL[i][1], CELL[i][0] + 7f, CELL[i][1] + 7f, 2.2f, 2.2f, paint);
+                    paint.setStyle(Paint.Style.STROKE);
+                }
+                c.restore();
+            }
+        }
+    }
 }

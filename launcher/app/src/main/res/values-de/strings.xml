@@ -2,6 +2,8 @@
 <resources>
     <string name="app_name">Home</string>
     <string name="inputs">Quellen</string>
+    <string name="continue_watching">Weiterschauen</string>
+    <string name="all_apps_title">Alle Apps</string>
     <string name="bluetooth">Bluetooth</string>
     <string name="settings">Einstellungen</string>
     <string name="choose_input">Quellen</string>
@@ -88,5 +90,5 @@
     <string name="library_open_sub">Its own home page has more</string>
     <string name="library_empty">Nothing here yet. Play something in Nuvio and it shows up here.</string>
     <string name="library_setup">One-time setup: Settings, then %1$s. It lets the launcher see what Nuvio plays.</string>
-    <string name="library_no_nuvio">Nuvio is not installed on this TV.</string>
+    <string name="library_no_nuvio">Diese App ist auf diesem Fernseher nicht installiert.</string>
 </resources>

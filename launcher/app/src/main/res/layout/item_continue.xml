@@ -18,10 +18,26 @@
         android:clickable="true">
 
         <ImageView
+            android:id="@+id/posterBg"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="centerCrop"
+            android:contentDescription="@null" />
+
+        <ImageView
             android:id="@+id/poster"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:scaleType="centerCrop"
+            android:contentDescription="@null" />
+
+        <ImageView
+            android:id="@+id/badge"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_gravity="top|start"
+            android:layout_margin="8dp"
+            android:scaleType="fitCenter"
             android:contentDescription="@null" />
 
         <View
@@ -50,7 +66,11 @@
         android:paddingStart="4dp"
         android:singleLine="true"
         android:ellipsize="end"
-        android:alpha="0.7"
+        android:alpha="1"
+        android:shadowColor="#99000000"
+        android:shadowDx="0"
+        android:shadowDy="1"
+        android:shadowRadius="3"
         android:textColor="#FFFFFFFF"
         android:textSize="14sp"
         android:fontFamily="@font/outfit"
