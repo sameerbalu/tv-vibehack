@@ -58,6 +58,9 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
     private final android.util.LruCache<String, Bitmap> blurs = new android.util.LruCache<>(32);
     private static final float POSTER_FOCUS_SCALE = 1.07f;
     private String signature = "";
+    /** The wallpaper, used as the thumbnail when an app gives no real picture (VLC only offers its own icon). */
+    private Bitmap wallpaperBmp;
+    private long wallpaperStamp;
     private String nuvioPkg;
     private int cardW, cardH, gapPx;
 
@@ -86,6 +89,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
                     .append('|').append(e.duration).append(';');
         }
         nuvioPkg = findNuvio();
+        sig.append("w").append(wallpaperFile() != null ? wallpaperFile().lastModified() : 0L);
         if (sig.toString().equals(signature)) return false;
         signature = sig.toString();
         entries.clear();
@@ -241,6 +245,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
                 if (bmp != null) posters.put(e.poster, bmp);
             }
         }
+        if (bmp != null && isIconLike(bmp)) bmp = null;   // an app icon is not a thumbnail: use the wallpaper
         if (bmp != null) {
             float ratio = bmp.getWidth() / (float) bmp.getHeight();
             if (ratio >= 1.5f || ratio < 0.8f) {
@@ -263,6 +268,15 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
                 }
                 h.posterBg.setImageBitmap(bl);
             }
+        } else if (wallpaper(w) != null) {
+            // No real thumbnail: the wallpaper, a different part of it for each title so the cards differ.
+            Bitmap wp = wallpaper(w);
+            int hash = Math.abs(e.title.hashCode());
+            h.posterBg.setImageDrawable(null);
+            h.poster.setScaleType(ImageView.ScaleType.MATRIX);
+            h.poster.setImageBitmap(wp);
+            h.poster.setImageMatrix(wallpaperMatrix(wp.getWidth(), wp.getHeight(), w, ht,
+                    (hash % 100) / 99f, ((hash / 100) % 100) / 99f));
         } else {
             h.posterBg.setImageDrawable(null);
             h.poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
@@ -281,6 +295,57 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
             h.progress.setVisibility(View.GONE);
             h.scrim.setVisibility(View.GONE);
         }
+    }
+
+    /** Square-ish pictures (about 1:1) are app icons, not video thumbnails. Posters (tall) and stills (wide) are not. */
+    private static boolean isIconLike(Bitmap b) {
+        float ratio = b.getWidth() / (float) b.getHeight();
+        return ratio >= 0.85f && ratio <= 1.2f;
+    }
+
+    private File wallpaperFile() {
+        if (!WallpaperStore.exists(ctx)) return null;
+        String path = WallpaperStore.uri(ctx).getPath();
+        return path == null ? null : new File(path);
+    }
+
+    /** The chosen wallpaper, decoded once at a size that suits the cards; null when none is set. */
+    private Bitmap wallpaper(int cardWidth) {
+        File f = wallpaperFile();
+        if (f == null) {
+            wallpaperBmp = null;
+            wallpaperStamp = 0L;
+            return null;
+        }
+        long stamp = f.lastModified();
+        if (wallpaperBmp != null && stamp == wallpaperStamp) return wallpaperBmp;
+        try {
+            BitmapFactory.Options o = new BitmapFactory.Options();
+            o.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(f.getPath(), o);
+            int target = Math.max(960, (int) (cardWidth * 2.2f));
+            int sample = 1;
+            while (o.outWidth / (sample * 2) >= target) sample *= 2;
+            o = new BitmapFactory.Options();
+            o.inSampleSize = sample;
+            o.inPreferredConfig = Bitmap.Config.RGB_565;
+            wallpaperBmp = BitmapFactory.decodeFile(f.getPath(), o);
+            wallpaperStamp = stamp;
+        } catch (Exception | OutOfMemoryError ex) {
+            wallpaperBmp = null;
+        }
+        return wallpaperBmp;
+    }
+
+    /** Covers the card with the wallpaper, slightly zoomed, panned to (px, py) = 0..1 across the spare picture. */
+    private static android.graphics.Matrix wallpaperMatrix(int bw, int bh, int vw, int vh, float px, float py) {
+        float scale = Math.max(vw / (float) bw, vh / (float) bh) * 1.25f;
+        float dx = -(bw * scale - vw) * px;
+        float dy = -(bh * scale - vh) * py;
+        android.graphics.Matrix m = new android.graphics.Matrix();
+        m.setScale(scale, scale);
+        m.postTranslate(dx, dy);
+        return m;
     }
 
     /** Scales the artwork to cover the card completely. Tall artwork keeps its upper part in view. */
