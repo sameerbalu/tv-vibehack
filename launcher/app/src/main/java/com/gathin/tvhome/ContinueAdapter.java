@@ -447,6 +447,12 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
             }
         } catch (RuntimeException ignored) {
         }
+        // Nuvio: open exactly this movie / episode (its own "continue watching" launch). The app's player shortcut
+        // is never used for it: that one just reopens whatever was playing last, the same for every card.
+        if (DeepLinks.isNuvioFamily(pkg)) {
+            resumeNuvio(pkg, e);
+            return;
+        }
         // 2) A link that opens this one video in the app.
         Intent link = DeepLinks.build(ctx, pkg, e);
         if (link != null) {
@@ -477,5 +483,55 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
             }
         }
         launch(pkg);
+    }
+
+    private void resumeNuvio(final String pkg, final NuvioHistory.Entry e) {
+        if (e.imdb != null && !e.imdb.isEmpty()) {
+            openNuvio(pkg, e, e.imdb, e.kind);
+            return;
+        }
+        // The id was not known yet (or the first lookup missed): look it up now, then open.
+        final android.os.Handler ui = new android.os.Handler(android.os.Looper.getMainLooper());
+        new Thread(() -> {
+            final String[] hit = DeepLinks.lookupImdb(e.title, e.subtitle, "series".equals(e.kind));
+            ui.post(() -> {
+                if (hit == null) {
+                    launch(pkg);
+                    return;
+                }
+                NuvioHistory.setLink(ctx, e.title, e.subtitle.isEmpty() ? null : e.subtitle, hit[0], hit[1]);
+                openNuvio(pkg, e, hit[0], hit[1]);
+            });
+        }, "nuvio-lookup").start();
+    }
+
+    private void openNuvio(String pkg, NuvioHistory.Entry e, String imdb, String kind) {
+        Intent play = DeepLinks.nuvioPlay(ctx, pkg, e, imdb, kind);
+        if (play != null) {
+            try {
+                ctx.startActivity(play);
+                return;
+            } catch (Exception ignored) {
+            }
+        }
+        // Episode unknown: the title's own page.
+        Entry2.fill(e, imdb, kind);
+        Intent link = DeepLinks.build(ctx, pkg, e);
+        if (link != null) {
+            link.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            try {
+                ctx.startActivity(link);
+                return;
+            } catch (Exception ignored) {
+            }
+        }
+        launch(pkg);
+    }
+
+    private static final class Entry2 {
+        static void fill(NuvioHistory.Entry e, String imdb, String kind) {
+            e.imdb = imdb;
+            e.kind = kind == null ? "" : kind;
+        }
     }
 }

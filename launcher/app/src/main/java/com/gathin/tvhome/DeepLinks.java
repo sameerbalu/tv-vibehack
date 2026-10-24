@@ -21,6 +21,128 @@ final class DeepLinks {
     private DeepLinks() {
     }
 
+    static boolean isNuvioFamily(String pkg) {
+        if (pkg == null) return false;
+        String p = pkg.toLowerCase(Locale.ROOT);
+        return p.contains("nuvio");
+    }
+
+    private static final Pattern SEASON_EP = Pattern.compile(
+            "(?i)\\bs(?:eason)?\\s*(\\d{1,2})\\s*[:.\\-\\u00b7x, ]*\\s*e(?:p(?:isode)?)?\\s*(\\d{1,3})\\b|\\b(\\d{1,2})x(\\d{1,3})\\b");
+
+    /** {season, episode} found in the title / subtitle text, or null. */
+    static int[] seasonEpisode(NuvioHistory.Entry e) {
+        for (String t : new String[]{e.subtitle, e.title}) {
+            if (t == null) continue;
+            Matcher m = SEASON_EP.matcher(t);
+            if (m.find()) {
+                String a = m.group(1) != null ? m.group(1) : m.group(3);
+                String b = m.group(2) != null ? m.group(2) : m.group(4);
+                try {
+                    return new int[]{Integer.parseInt(a), Integer.parseInt(b)};
+                } catch (NumberFormatException ignored) {
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Nuvio's own "continue watching" launch: its main screen reads these extras and goes straight to the
+     * stream list of that exact movie / episode. Without a season and episode it opens the title's page instead.
+     */
+    static Intent nuvioPlay(Context ctx, String pkg, NuvioHistory.Entry e, String imdb, String kind) {
+        PackageManager pm = ctx.getPackageManager();
+        // The activity that handles nuvio:// links is the app's main screen.
+        Intent probe = new Intent(Intent.ACTION_VIEW, Uri.parse("nuvio://detail/movie/" + imdb));
+        probe.setPackage(pkg);
+        android.content.pm.ResolveInfo ri = pm.resolveActivity(probe, 0);
+        if (ri == null || ri.activityInfo == null) return null;
+        int[] se = seasonEpisode(e);
+        boolean series = "series".equals(kind) || (kind == null || kind.isEmpty()) && se != null;
+        Intent i = new Intent();
+        i.setComponent(new android.content.ComponentName(ri.activityInfo.packageName, ri.activityInfo.name));
+        i.putExtra("contentId", imdb);
+        i.putExtra("contentType", series ? "series" : "movie");
+        i.putExtra("name", e.title);
+        if (series && se == null) return null;               // cannot name the episode: caller opens the title page
+        i.putExtra("launchMode", "stream");
+        i.putExtra("videoId", series ? imdb + ":" + se[0] + ":" + se[1] : imdb);
+        if (series) {
+            i.putExtra("season", se[0]);
+            i.putExtra("episode", se[1]);
+            if (e.subtitle != null && !e.subtitle.isEmpty()) i.putExtra("episodeTitle", e.subtitle);
+        }
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        return i;
+    }
+
+    private static String normName(String s) {
+        return s == null ? "" : s.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "");
+    }
+
+    private static String httpGet(String url) throws Exception {
+        java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+        c.setConnectTimeout(7000);
+        c.setReadTimeout(7000);
+        try (java.io.InputStream in = c.getInputStream()) {
+            java.io.ByteArrayOutputStream b = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) b.write(buf, 0, n);
+            return b.toString("UTF-8");
+        } finally {
+            c.disconnect();
+        }
+    }
+
+    /** IMDb id and type ({id, kind}) of a title, from the public Cinemeta catalogue; blocking, call off the main thread. */
+    static String[] lookupImdb(String title, String sub, boolean preferSeries) {
+        if (title == null) return null;
+        String base = title.replaceAll("\\(\\d{4}\\)\\s*$", "");
+        java.util.List<String> cands = new java.util.ArrayList<>();
+        cands.add(base.trim());
+        for (String sep : new String[]{" - ", " \u2013 ", ": ", " | "}) {
+            int k = base.indexOf(sep);
+            if (k > 2) cands.add(base.substring(0, k).trim());
+        }
+        String noSe = SEASON_EP.matcher(base).replaceAll("").trim();
+        if (noSe.length() > 2) cands.add(noSe);
+        boolean series = preferSeries || seasonEpisode(fake(title, sub)) != null;
+        String[] types = series ? new String[]{"series", "movie"} : new String[]{"movie", "series"};
+        for (int pass = 0; pass < 2; pass++) {              // pass 0: exact name, pass 1: one name inside the other
+            for (String cand : cands) {
+                if (cand.length() < 2) continue;
+                String want = normName(cand);
+                for (String type : types) {
+                    try {
+                        String json = httpGet("https://v3-cinemeta.strem.io/catalog/" + type + "/top/search="
+                                + Uri.encode(cand) + ".json");
+                        org.json.JSONArray metas = new org.json.JSONObject(json).optJSONArray("metas");
+                        for (int i = 0; metas != null && i < metas.length(); i++) {
+                            org.json.JSONObject m = metas.getJSONObject(i);
+                            String id = m.optString("imdb_id", m.optString("id", ""));
+                            String name = normName(m.optString("name", ""));
+                            if (!id.startsWith("tt") || name.isEmpty()) continue;
+                            boolean ok = pass == 0 ? name.equals(want)
+                                    : want.length() >= 5 && (name.contains(want) || want.contains(name)) && name.length() >= 4;
+                            if (ok) return new String[]{id, type};
+                        }
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private static NuvioHistory.Entry fake(String title, String sub) {
+        NuvioHistory.Entry e = new NuvioHistory.Entry();
+        e.title = title == null ? "" : title;
+        e.subtitle = sub == null ? "" : sub;
+        return e;
+    }
+
     static Intent build(Context ctx, String pkg, NuvioHistory.Entry e) {
         if (pkg == null || e == null) return null;
         String p = pkg.toLowerCase(Locale.ROOT);
