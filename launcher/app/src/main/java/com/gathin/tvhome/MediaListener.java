@@ -218,15 +218,37 @@ public class MediaListener extends NotificationListenerService {
             if (state == PlaybackState.STATE_PLAYING) {
                 pos += (long) ((SystemClock.elapsedRealtime() - st.getLastPositionUpdateTime()) * st.getPlaybackSpeed());
             }
-            Bitmap art = SongColors.artOf(m);
-            NuvioHistory.record(this, c.getPackageName(), title, sub, art, pos, dur);
-            if (art == null && !NuvioHistory.hasPoster(this, title, sub)) {
-                String uri = first(m, MediaMetadata.METADATA_KEY_ART_URI, MediaMetadata.METADATA_KEY_ALBUM_ART_URI,
-                        MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI);
+            Bitmap art = landscapeArt(m);
+            // A wide picture saved earlier must not be overwritten by this session's portrait poster.
+            Bitmap toSave = (art != null && (isWide(art) || !NuvioHistory.hasPoster(this, title, sub))) ? art : null;
+            NuvioHistory.record(this, c.getPackageName(), title, sub, toSave, pos, dur);
+            // Only a portrait poster (or nothing) so far: look for a wide picture (the episode still) by link.
+            if ((art == null || !isWide(art)) && triedArt.add(title + "|" + sub)) {
+                String uri = first(m, MediaMetadata.METADATA_KEY_ART_URI, MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI,
+                        MediaMetadata.METADATA_KEY_ALBUM_ART_URI);
                 if (uri != null) fetchPoster(title, sub, uri);
             }
         } catch (RuntimeException ignored) {
         }
+    }
+
+    private final Set<String> triedArt = new HashSet<>();
+
+    private static boolean isWide(Bitmap b) {
+        return b != null && b.getHeight() > 0 && b.getWidth() >= b.getHeight() * 1.3f;
+    }
+
+    /** The picture the app gives us that is wide (an episode thumbnail) if there is one, else any picture. */
+    private static Bitmap landscapeArt(MediaMetadata m) {
+        Bitmap[] all = {m.getBitmap(MediaMetadata.METADATA_KEY_ART), m.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON),
+                m.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)};
+        Bitmap fallback = null;
+        for (Bitmap b : all) {
+            if (b == null || b.getWidth() <= 0 || b.getHeight() <= 0) continue;
+            if (isWide(b)) return b;
+            if (fallback == null) fallback = b;
+        }
+        return fallback;
     }
 
     /** Artwork given only as a link: fetched once in the background. */
@@ -242,7 +264,10 @@ public class MediaListener extends NotificationListenerService {
             final Bitmap result = b;
             handler.post(() -> {
                 fetching.remove(key);
-                if (result != null) NuvioHistory.setPoster(MediaListener.this, title, sub, result);
+                // A downloaded wide picture replaces a portrait poster; anything else only fills an empty slot.
+                if (result != null && (isWide(result) || !NuvioHistory.hasPoster(MediaListener.this, title, sub))) {
+                    NuvioHistory.setPoster(MediaListener.this, title, sub, result);
+                }
             });
         });
     }

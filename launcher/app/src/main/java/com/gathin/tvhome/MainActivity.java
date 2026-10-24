@@ -109,6 +109,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private AppAdapter adapter;
     private RecyclerView grid;
     private DockDecoration dockDecoration;
+    private Bitmap menuBackdrop;            // blurred wallpaper, for the frosted pop-up menus
     private FrameLayout root;
     private View header;
     private WidgetPanel widgets;
@@ -1493,6 +1494,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         wallpaperView.setVisibility(View.GONE);
         wallpaperBlurView.setImageDrawable(null);
         wallpaperBlurView.setVisibility(View.GONE);
+        menuBackdrop = null;
         if (dockDecoration != null) dockDecoration.setBackdrop(null);
         if (allAppsPanel != null) allAppsPanel.setBackdrop(null);
         if (grid != null) grid.invalidate();
@@ -1607,6 +1609,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             Bitmap blurred = BlurUtil.blur(bitmap, 256, 8);
             wallpaperBlurView.setImageBitmap(blurred);
             wallpaperBlurView.setVisibility(View.VISIBLE);
+            menuBackdrop = blurred;
             if (dockDecoration != null) dockDecoration.setBackdrop(blurred);
             if (allAppsPanel != null) allAppsPanel.setBackdrop(blurred);
             if (grid != null) grid.invalidate();
@@ -1876,8 +1879,40 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         if (changed) grid.invalidate();
     }
 
+    private boolean rowsFaded;
+
+    /**
+     * In All apps a row that only partly fits inside the glass panel fades with the amount that is inside,
+     * so a second row never sticks out of (or gets sliced by) the panel border. Fully visible rows stay at 1.
+     */
+    private void syncRowFade() {
+        if (grid == null) return;
+        boolean on = allAppsMode && allUiApplied && !arranging && sectionsActive();
+        if (!on && !rowsFaded) return;
+        float bottomLimit = grid.getHeight() - (PANEL_BOTTOM_DP + 8) * density;
+        float topLimit = panelTopPx() + 6 * density;
+        boolean any = false;
+        for (int i = 0; i < grid.getChildCount(); i++) {
+            View c = grid.getChildAt(i);
+            int p = grid.getChildAdapterPosition(c);
+            if (p < COLUMNS) continue;
+            float a = 1f;
+            if (on) {
+                float h = Math.max(1f, c.getHeight());
+                float below = (bottomLimit - (c.getTop() + grid.getTranslationY())) / h;       // 1 = fully inside
+                float above = ((c.getBottom() + grid.getTranslationY()) - topLimit) / h;
+                float f = Math.max(0f, Math.min(1f, Math.min(below, above)));
+                a = f * f * (3f - 2f * f);
+            }
+            if (a != 1f) any = true;
+            if (c.getAlpha() != a) c.setAlpha(a);
+        }
+        rowsFaded = on && any;
+    }
+
     private void syncContinueRow() {
         syncDock();
+        syncRowFade();
         if (continueRow == null) return;
         boolean active = continueActive();
         // In dock state the row is invisible but overlaps the dock's neighbourhood, so keys like Up must not find it.
@@ -2000,34 +2035,47 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         showPosterMenu(index, card);
     }
 
-    /** Menu for a poster (hold OK): resume, open the app, remove it, clear the list. */
+    /** Menu for a poster (hold OK): resume, open the app, remove it, clear the list. Small, on frosted glass. */
     private void showPosterMenu(final int index, View card) {
         if (arranging) return;
         final NuvioHistory.Entry e = continueAdapter.entryAt(index);
         if (e == null) return;
-        View panel = getLayoutInflater().inflate(R.layout.popup_apps, root, false);
+        View panel = getLayoutInflater().inflate(R.layout.popup_menu, root, false);
+        panel.setBackground(new BlurPanelDrawable(density, menuBackdrop, root, panel));
         ((TextView) panel.findViewById(R.id.title)).setText(e.title);
         LinearLayout rows = panel.findViewById(R.id.rows);
-        int minWidth = (int) (300 * density);
+        int minWidth = (int) (230 * density);
         final PopupWindow popup = newDropdown(panel, minWidth);
-        addInputRow(rows, popup, R.drawable.ic_play_circle, getString(R.string.poster_resume), -1,
+        addMenuRow(rows, popup, R.drawable.ic_play_circle, getString(R.string.poster_resume),
                 () -> continueAdapter.resume(e));
         String app = continueAdapter.appLabel(e);
         if (app != null) {
-            addInputRow(rows, popup, R.drawable.ic_av, getString(R.string.poster_open_app, app), -1,
+            addMenuRow(rows, popup, R.drawable.ic_av, getString(R.string.poster_open_app, app),
                     () -> continueAdapter.openApp(e));
         }
         addSeparator(rows);
-        addInputRow(rows, popup, R.drawable.ic_hide, getString(R.string.poster_remove), -1, () -> {
+        addMenuRow(rows, popup, R.drawable.ic_hide, getString(R.string.poster_remove), () -> {
             NuvioHistory.remove(this, e);
             postersChanged(index);
         });
-        addInputRow(rows, popup, R.drawable.ic_reset, getString(R.string.poster_clear), -1, () -> {
+        addMenuRow(rows, popup, R.drawable.ic_reset, getString(R.string.poster_clear), () -> {
             NuvioHistory.clear(this);
             postersChanged(0);
         });
-        fitScroll(panel);
         showDropdown(popup, panel, card, minWidth, false);
+    }
+
+    private void addMenuRow(LinearLayout rows, PopupWindow popup, int iconRes, String title, Runnable action) {
+        View row = getLayoutInflater().inflate(R.layout.item_menu, rows, false);
+        ImageView icon = row.findViewById(R.id.icon);
+        icon.setImageResource(iconRes);
+        icon.setTag(IconFx.styleFor(iconRes));
+        ((TextView) row.findViewById(R.id.title)).setText(title);
+        row.setOnClickListener(v -> {
+            popup.dismiss();
+            handler.postDelayed(action, 160);
+        });
+        rows.addView(row);
     }
 
     /** The poster list changed (removed / cleared): rebuild the row and put the focus somewhere sensible. */
@@ -2667,6 +2715,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         // Rows ease in one after the other.
         for (int i = 0; i < rows.getChildCount(); i++) {
             View r = rows.getChildAt(i);
+            IconFx.attach(r, r.findViewById(R.id.icon));
             r.setAlpha(0f);
             r.setTranslationY(-6 * density);
             r.animate().alpha(1f).translationY(0f).setStartDelay(40L + i * 28L).setDuration(220)
@@ -2706,7 +2755,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
 
     private void addInputRow(LinearLayout rows, PopupWindow popup, int iconRes, String title, int state, Runnable action) {
         View row = getLayoutInflater().inflate(R.layout.item_input, rows, false);
-        ((ImageView) row.findViewById(R.id.icon)).setImageResource(iconRes);
+        ImageView rowIcon = row.findViewById(R.id.icon);
+        rowIcon.setImageResource(iconRes);
+        rowIcon.setTag(IconFx.styleFor(iconRes));
         ((TextView) row.findViewById(R.id.title)).setText(title);
         TextView status = row.findViewById(R.id.status);
         View dot = row.findViewById(R.id.dot);
