@@ -27,16 +27,33 @@ final class DeepLinks {
         PackageManager pm = ctx.getPackageManager();
         long sec = Math.max(0L, e.position / 1000L);
 
-        if (p.contains("youtube")) {
+        if (isYoutubeFamily(p)) {
             String id = firstMatch(YT_ID, e.mediaUri, e.mediaId, e.artUri);
+            if (id == null && "yt".equals(e.kind) && e.imdb != null && e.imdb.matches("[A-Za-z0-9_-]{11}")) id = e.imdb;
             if (id == null && e.mediaId != null && e.mediaId.matches("[A-Za-z0-9_-]{11}")) id = e.mediaId;
             if (id != null) {
-                Intent i = new Intent(Intent.ACTION_VIEW,
-                        Uri.parse("https://www.youtube.com/watch?v=" + id + (sec > 5 ? "&t=" + sec : "")));
-                i.setPackage(pkg);
-                if (handles(pm, i)) return i;
+                String t = sec > 5 ? "&t=" + sec : "";
+                String[] links = {
+                        "https://www.youtube.com/watch?v=" + id + t,
+                        "https://youtu.be/" + id + (sec > 5 ? "?t=" + sec : ""),
+                        "https://www.youtube.com/tv?v=" + id,
+                        "vnd.youtube://" + id,
+                        "vnd.youtube:" + id};
+                for (String l : links) {
+                    Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(l));
+                    i.setPackage(pkg);
+                    if (handles(pm, i)) return i;
+                }
+                // Modified YouTube apps (TizenTube, ...) may not list a video link in their filters: hand the
+                // link straight to their main screen, which is where they read a start link from.
+                Intent main = pm.getLeanbackLaunchIntentForPackage(pkg);
+                if (main == null) main = pm.getLaunchIntentForPackage(pkg);
+                if (main != null && main.getComponent() != null) {
+                    Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(links[0]));
+                    i.setComponent(main.getComponent());
+                    return i;
+                }
             }
-            return null;
         }
 
         if (p.contains("nuvio") || p.contains("stremio")) {
@@ -56,17 +73,54 @@ final class DeepLinks {
             return null;
         }
 
-        // Players that take a link and a start position (VLC and MX Player style).
-        if (e.mediaUri != null && (e.mediaUri.startsWith("http://") || e.mediaUri.startsWith("https://"))
-                && (p.contains("vlc") || p.contains("mxtech") || p.contains("mxplayer"))) {
-            Intent i = new Intent(Intent.ACTION_VIEW);
-            i.setDataAndType(Uri.parse(e.mediaUri), "video/*");
-            i.setPackage(pkg);
-            i.putExtra("position", e.position);
-            i.putExtra("from_start", false);
-            if (handles(pm, i)) return i;
+        // A link the app itself reported for this video (its own scheme, or a web address).
+        for (String l : new String[]{e.mediaUri, e.mediaId}) {
+            if (l == null || !l.contains("://")) continue;
+            Uri u;
+            try {
+                u = Uri.parse(l);
+            } catch (RuntimeException ex) {
+                continue;
+            }
+            Intent plain = new Intent(Intent.ACTION_VIEW, u);
+            plain.setPackage(pkg);
+            plain.putExtra("position", e.position);
+            if (handles(pm, plain)) return plain;
+            if (l.startsWith("http://") || l.startsWith("https://")) {
+                Intent video = new Intent(Intent.ACTION_VIEW);
+                video.setDataAndType(u, "video/*");
+                video.setPackage(pkg);
+                video.putExtra("position", e.position);
+                video.putExtra("from_start", false);
+                if (handles(pm, video)) return video;
+            }
         }
         return null;
+    }
+
+    /**
+     * Last resort before just opening the app: ask it to play the title by name (the same request a voice
+     * search makes). Apps that support it jump to that title; others do not resolve and are skipped.
+     */
+    static Intent searchIntent(Context ctx, String pkg, NuvioHistory.Entry e) {
+        if (pkg == null || e == null || e.title == null || e.title.isEmpty()) return null;
+        PackageManager pm = ctx.getPackageManager();
+        Intent i = new Intent("android.media.action.MEDIA_PLAY_FROM_SEARCH");
+        i.setPackage(pkg);
+        i.putExtra(android.app.SearchManager.QUERY, e.title);
+        i.putExtra("android.intent.extra.title", e.title);
+        i.putExtra("android.intent.extra.focus", "vnd.android.cursor.item/video");
+        return handles(pm, i) ? i : null;
+    }
+
+    /** YouTube and its look-alikes: the official TV app, TizenTube, SmartTube, ReVanced, NewPipe. */
+    static boolean isYoutubeFamily(String pkgLower) {
+        if (pkgLower == null) return false;
+        if (pkgLower.contains("youtube") && pkgLower.contains("music")) return false;
+        String[] names = {"youtube", "tizentube", "smarttube", "teamsmart", "liskovsoft", "revanced", "vanced",
+                "newpipe", "cobalt"};
+        for (String n : names) if (pkgLower.contains(n)) return true;
+        return false;
     }
 
     private static boolean handles(PackageManager pm, Intent i) {

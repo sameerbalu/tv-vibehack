@@ -2,6 +2,7 @@ package com.gathin.tvhome;
 
 import android.animation.ValueAnimator;
 import android.graphics.LinearGradient;
+import android.graphics.Matrix;
 import android.graphics.Shader;
 import android.view.animation.AccelerateDecelerateInterpolator;
 import android.view.animation.DecelerateInterpolator;
@@ -111,5 +112,56 @@ final class TextFx {
         });
         a.start();
         return a;
+    }
+
+    /**
+     * Lines inside the letters: the digits are drawn as thin horizontal lines that grow thicker until the
+     * letters are solid, rest a moment, then shrink back to thin lines. Only the text itself changes; nothing
+     * is drawn behind it. The lines also drift slowly upward so it never looks frozen.
+     */
+    static ValueAnimator linesLoop(final TextView tv, long periodMs) {
+        final int base = tv.getCurrentTextColor() | 0xFF000000;
+        final int clear = base & 0x00FFFFFF;
+        final float d = tv.getResources().getDisplayMetrics().density;
+        final float period = Math.max(4f, 4.6f * d);         // one line plus its gap, in pixels
+        final Matrix drift = new Matrix();
+        final ValueAnimator a = ValueAnimator.ofFloat(0f, 1f);
+        a.setDuration(periodMs);
+        a.setRepeatCount(ValueAnimator.INFINITE);
+        a.setRepeatMode(ValueAnimator.RESTART);
+        a.setInterpolator(new android.view.animation.LinearInterpolator());
+        a.addUpdateListener(v -> {
+            float p = (Float) v.getAnimatedValue();
+            float grow;                                       // 0 = thin lines, 1 = solid letters
+            if (p < 0.42f) grow = smooth(p / 0.42f);
+            else if (p < 0.60f) grow = 1f;
+            else grow = 1f - smooth((p - 0.60f) / 0.40f);
+            float duty = 0.24f + 0.76f * grow;               // share of each line period that is drawn
+            if (duty >= 0.995f) {
+                tv.getPaint().setShader(null);
+            } else {
+                LinearGradient lines = new LinearGradient(0, 0, 0, period,
+                        new int[]{base, base, clear, clear},
+                        new float[]{0f, duty, Math.min(1f, duty + 0.002f), 1f}, Shader.TileMode.REPEAT);
+                drift.setTranslate(0f, -p * period);
+                lines.setLocalMatrix(drift);
+                tv.getPaint().setShader(lines);
+            }
+            tv.invalidate();
+        });
+        a.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationCancel(android.animation.Animator an) {
+                tv.getPaint().setShader(null);
+                tv.invalidate();
+            }
+        });
+        a.start();
+        return a;
+    }
+
+    private static float smooth(float t) {
+        t = Math.max(0f, Math.min(1f, t));
+        return t * t * (3f - 2f * t);
     }
 }

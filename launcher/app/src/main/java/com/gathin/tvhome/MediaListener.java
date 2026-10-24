@@ -75,6 +75,7 @@ public class MediaListener extends NotificationListenerService {
     private void start() {
         stop();
         io = Executors.newSingleThreadExecutor();
+        backfillYoutube();
         try {
             sessionManager = (MediaSessionManager) getSystemService(Context.MEDIA_SESSION_SERVICE);
             ComponentName me = new ComponentName(this, MediaListener.class);
@@ -114,7 +115,8 @@ public class MediaListener extends NotificationListenerService {
             "apple.atve", "com.apple.tv", "sonyliv", "com.graymatrix.did", "zee5", "voot", "mxtech", "mxplayer",
             "vlc", "justwatch", "crunchyroll", "tubi", "pluto", "twitch", "discovery", "starz", "showtime",
             "viki", "curiosity", "mubi", "sunnxt", "erosnow", "altbalaji", "lionsgate", "bbc.iplayer",
-            "itvx", "channel4", "canalplus", "rakuten", "kinopoisk", "hbomax"};
+            "itvx", "channel4", "canalplus", "rakuten", "kinopoisk", "hbomax",
+            "youtube", "tizentube", "smarttube", "teamsmart", "liskovsoft", "revanced", "vanced", "newpipe", "cobalt"};
     /** Music, podcast and other audio apps: never listed, whatever they report. */
     private static final String[] AUDIO_APPS = {
             "spotify", "music", "deezer", "tidal", "soundcloud", "pandora", "shazam", "audible", "podcast",
@@ -124,6 +126,7 @@ public class MediaListener extends NotificationListenerService {
     static boolean isVideoApp(String pkg, long durationMs) {
         if (pkg == null) return false;
         String p = pkg.toLowerCase(Locale.ROOT);
+        if (p.contains("youtube") && p.contains("music")) return durationMs >= 8 * 60_000L;   // songs are not "watching"
         for (String a : AUDIO_APPS) if (p.contains(a) && !p.contains("youtube")) return false;
         for (String v : VIDEO_APPS) if (p.contains(v)) return true;
         // Any other app that plays something long, like a film or an episode.
@@ -235,6 +238,11 @@ public class MediaListener extends NotificationListenerService {
                     && lookedUp.add(title + "|" + (sub == null ? "" : sub))) {
                 lookupImdb(title, sub);
             }
+            // YouTube-style apps: find the video id by searching its title once, so the card opens that video.
+            if (DeepLinks.isYoutubeFamily(c.getPackageName().toLowerCase(Locale.ROOT))
+                    && !NuvioHistory.hasImdb(this, title, sub) && lookedUp.add("yt:" + title + "|" + (sub == null ? "" : sub))) {
+                lookupYoutube(title, sub);
+            }
             // Only a portrait poster (or nothing) so far: look for a wide picture (the episode still) by link.
             if ((art == null || !isWide(art)) && triedArt.add(title + "|" + sub)) {
                 String uri = first(m, MediaMetadata.METADATA_KEY_ART_URI, MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI,
@@ -285,6 +293,101 @@ public class MediaListener extends NotificationListenerService {
             final String fid = id, fkind = kind;
             if (fid != null) handler.post(() -> NuvioHistory.setLink(MediaListener.this, title, sub, fid, fkind));
         });
+    }
+
+    /** History saved before video ids were looked up: find them now so those cards open the video too. */
+    private void backfillYoutube() {
+        int n = 0;
+        for (NuvioHistory.Entry e : NuvioHistory.load(this)) {
+            if (n >= 12) break;
+            if (e.pkg == null || !DeepLinks.isYoutubeFamily(e.pkg.toLowerCase(Locale.ROOT))) continue;
+            if (!e.imdb.isEmpty() || e.mediaUri.contains("watch") || e.artUri.contains("ytimg")) continue;
+            String sub = e.subtitle.isEmpty() ? null : e.subtitle;
+            if (lookedUp.add("yt:" + e.title + "|" + (sub == null ? "" : sub))) {
+                lookupYoutube(e.title, sub);
+                n++;
+            }
+        }
+    }
+
+    /**
+     * Finds the YouTube video id for a title (and channel) by reading YouTube's public search page, and only
+     * accepts a result whose title matches, so a wrong video is never opened.
+     */
+    private void lookupYoutube(final String title, final String sub) {
+        if (io == null) return;
+        io.execute(() -> {
+            String id = null;
+            try {
+                String q = Uri.encode((title + (sub == null ? "" : " " + sub)).trim());
+                String html = httpPage("https://www.youtube.com/results?search_query=" + q + "&sp=EgIQAQ%253D%253D");
+                id = pickVideoId(html, title);
+                if (id == null && sub != null) {          // the channel name can confuse the search: try the title alone
+                    html = httpPage("https://www.youtube.com/results?search_query=" + Uri.encode(title) + "&sp=EgIQAQ%253D%253D");
+                    id = pickVideoId(html, title);
+                }
+            } catch (Exception ignored) {
+            }
+            final String fid = id;
+            if (fid != null) handler.post(() -> NuvioHistory.setLink(MediaListener.this, title, sub, fid, "yt"));
+        });
+    }
+
+    private static final java.util.regex.Pattern VIDEO_RENDERER =
+            java.util.regex.Pattern.compile("\"videoRenderer\":\\{\"videoId\":\"([A-Za-z0-9_-]{11})\"");
+    private static final java.util.regex.Pattern RUN_TEXT =
+            java.util.regex.Pattern.compile("\"title\":\\{\"runs\":\\[\\{\"text\":\"((?:[^\"\\\\]|\\\\.)*)\"");
+
+    private static String pickVideoId(String html, String title) {
+        String want = normU(title);
+        if (want.isEmpty()) return null;
+        java.util.regex.Matcher m = VIDEO_RENDERER.matcher(html);
+        int seen = 0;
+        while (m.find() && seen++ < 8) {
+            int from = m.end();
+            String chunk = html.substring(from, Math.min(html.length(), from + 1800));
+            java.util.regex.Matcher t = RUN_TEXT.matcher(chunk);
+            if (!t.find()) continue;
+            String raw = t.group(1);
+            try {
+                raw = String.valueOf(new org.json.JSONTokener("\"" + raw + "\"").nextValue());
+            } catch (Exception ignored) {
+            }
+            String got = normU(raw);
+            if (!got.isEmpty() && (got.equals(want) || got.contains(want) || want.contains(got))) return m.group(1);
+        }
+        return null;
+    }
+
+    /** Letters and digits of any language, lower case: so Hindi and other titles can be compared too. */
+    private static String normU(String s) {
+        return s == null ? "" : s.toLowerCase(Locale.ROOT).replaceAll("[^\\p{L}\\p{N}]", "");
+    }
+
+    /** A web page read like a browser would (some sites answer unknown clients with a stripped page). */
+    private static String httpPage(String url) throws Exception {
+        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+        try {
+            conn.setConnectTimeout(8000);
+            conn.setReadTimeout(12000);
+            conn.setRequestProperty("User-Agent",
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36");
+            conn.setRequestProperty("Accept-Language", "en-US,en;q=0.9");
+            conn.setRequestProperty("Cookie", "CONSENT=YES+1; SOCS=CAI");
+            if (conn.getResponseCode() != 200) throw new java.io.IOException("HTTP " + conn.getResponseCode());
+            try (InputStream in = conn.getInputStream()) {
+                java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+                byte[] chunk = new byte[16 * 1024];
+                int n;
+                while ((n = in.read(chunk)) > 0) {
+                    buf.write(chunk, 0, n);
+                    if (buf.size() > 4 * 1024 * 1024) break;      // the first results are near the top
+                }
+                return new String(buf.toByteArray(), "UTF-8");
+            }
+        } finally {
+            conn.disconnect();
+        }
     }
 
     private static String norm(String s) {

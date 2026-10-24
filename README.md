@@ -338,3 +338,11 @@ MIT, see [`LICENSE`](LICENSE). The Outfit typeface is under the SIL Open Font Li
   It lists what Nuvio reported while playing (title, artwork, position) with rounded posters.
   Needs the notification access that Settings > "Music glow access" opens (the launcher reads Nuvio's media session).
 - Picking a card brings Nuvio forward and, if Nuvio still holds that title paused, presses play.
+
+## v32 notes
+
+- Corner clock: the old shimmer and divider pulse are gone. The digits now animate on their own: lines inside
+  the numbers grow until the digits are solid, rest, then shrink back (nothing is drawn behind the text).
+- Continue watching, YouTube-style apps (YouTube, TizenTube, SmartTube, ReVanced, NewPipe): the video id is found
+  by searching the title, and the card opens that video. Other apps: links the app reported are tried first, then a
+  "play <title>" request, then the app itself.

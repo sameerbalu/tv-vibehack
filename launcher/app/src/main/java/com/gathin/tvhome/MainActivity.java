@@ -155,7 +155,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private final List<MediaController> watched = new ArrayList<>();
     private static boolean btPermissionAsked;
     private boolean heroShown;
-    /** Always-running shimmer on the corner clock (see startClockLoop). */
+    /** Always-running line animation inside the corner clock's digits (see startClockLoop). */
     private ValueAnimator clockLoop;
     private ObjectAnimator dividerPulse;
     private TextView greeting;
@@ -1087,25 +1087,17 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     // ---- clock in the corner: always running -----------------------------------------------------------
 
     /**
-     * The corner clock never sits still: a band of light with slowly changing pastel colours sweeps over the
-     * digits again and again, and the thin divider breathes. Stopped while the clock is hidden.
+     * The corner clock's own animation: lines inside the digits grow until the digits are solid and then shrink
+     * back (see TextFx.linesLoop). Only the digits animate: no glow, no divider, nothing behind the text.
+     * Stopped while the clock is hidden.
      */
     private void startClockLoop() {
         stopClockLoop();
         View c = findViewById(R.id.clock);
         if (c instanceof TextView) {
             final TextView tv = (TextView) c;
-            tv.setShadowLayer(12 * density, 0f, 0f, 0x40FFFFFF);
-            clockLoop = TextFx.shimmerLoop(tv, 6500L);
-        }
-        View dv = findViewById(R.id.clockDivider);
-        if (dv != null) {
-            dividerPulse = ObjectAnimator.ofFloat(dv, View.ALPHA, 0.35f, 1f);
-            dividerPulse.setDuration(2400);
-            dividerPulse.setRepeatCount(ValueAnimator.INFINITE);
-            dividerPulse.setRepeatMode(ValueAnimator.REVERSE);
-            dividerPulse.setInterpolator(new AccelerateDecelerateInterpolator());
-            dividerPulse.start();
+            tv.setShadowLayer(0f, 0f, 0f, 0);
+            clockLoop = TextFx.linesLoop(tv, 5600L);
         }
     }
 

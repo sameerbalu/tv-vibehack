@@ -466,6 +466,16 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
             } catch (android.app.PendingIntent.CanceledException ignored) {
             }
         }
+        // 4) Ask the app to play the title by name, like a voice search does.
+        Intent search = DeepLinks.searchIntent(ctx, pkg, e);
+        if (search != null) {
+            search.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            try {
+                ctx.startActivity(search);
+                return;
+            } catch (Exception ignored) {
+            }
+        }
         launch(pkg);
     }
 }
