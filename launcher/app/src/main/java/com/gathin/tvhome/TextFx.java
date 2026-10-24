@@ -82,4 +82,34 @@ final class TextFx {
         a.start();
         return a;
     }
+
+    /**
+     * Never-ending shimmer: a soft band of light crosses the text, rests a moment, and crosses again. The light's
+     * colour slowly travels around the colour wheel in pale tones, so it always looks a little different.
+     */
+    static ValueAnimator shimmerLoop(final TextView tv, long periodMs) {
+        final int base = tv.getCurrentTextColor() | 0xFF000000;
+        final long t0 = System.currentTimeMillis();
+        final float[] hsv = {0f, 0.38f, 1f};
+        final ValueAnimator a = ValueAnimator.ofFloat(0f, 1f);
+        a.setDuration(periodMs);
+        a.setRepeatCount(ValueAnimator.INFINITE);
+        a.setInterpolator(new android.view.animation.LinearInterpolator());
+        a.addUpdateListener(v -> {
+            float w = tv.getWidth();
+            if (w <= 0) return;
+            float p = (Float) v.getAnimatedValue();
+            float sweep = Math.min(1f, p / 0.62f);                    // the last part of each cycle is a rest
+            float eased = sweep * sweep * (3f - 2f * sweep);
+            float band = Math.max(w * 0.55f, 40f);
+            float x = -band + eased * (w + band * 2f);
+            hsv[0] = ((System.currentTimeMillis() - t0) / 45f) % 360f;   // a full turn about every 16 seconds
+            int shine = android.graphics.Color.HSVToColor(hsv);
+            tv.getPaint().setShader(new LinearGradient(x, 0, x + band, 0,
+                    new int[]{base, shine, base}, new float[]{0f, 0.5f, 1f}, Shader.TileMode.CLAMP));
+            tv.invalidate();
+        });
+        a.start();
+        return a;
+    }
 }
