@@ -9,6 +9,7 @@ import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.Shader;
+import android.view.View;
 
 /**
  * Frosted-glass look shared by the dock band and the all-apps panel: a blurred copy of the wallpaper
