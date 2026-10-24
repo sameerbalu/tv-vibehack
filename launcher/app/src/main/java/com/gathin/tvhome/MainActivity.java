@@ -62,8 +62,8 @@ import androidx.annotation.NonNull;
 import androidx.dynamicanimation.animation.DynamicAnimation;
 import androidx.dynamicanimation.animation.SpringAnimation;
 import androidx.dynamicanimation.animation.SpringForce;
-import androidx.recyclerview.widget.ConcatAdapter;
 import androidx.recyclerview.widget.GridLayoutManager;
+import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.ArrayList;
@@ -322,30 +322,25 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         grid.setItemAnimator(null);
         dockDecoration = new DockDecoration(COLUMNS, density);
         grid.addItemDecoration(dockDecoration);
-        grid.addItemDecoration(new ContinueDecoration(
-                () -> continueAdapter != null && continueAdapter.posterCount() > 0 ? adapter.getItemCount() : -1,
-                density));
+        // Room above the first row of apps for the Continue watching row (which floats over that gap).
+        grid.addItemDecoration(new RecyclerView.ItemDecoration() {
+            @Override
+            public void getItemOffsets(@NonNull Rect outRect, @NonNull View view, @NonNull RecyclerView parent,
+                                       @NonNull RecyclerView.State state) {
+                int pos = parent.getChildAdapterPosition(view);
+                if (pos >= COLUMNS && pos < 2 * COLUMNS && continueActive()) outRect.top = continueGapPx;
+            }
+        });
         grid.setLayoutAnimation(new LayoutAnimationController(
                 AnimationUtils.loadAnimation(this, R.anim.tile_enter), 0.06f));
         adapter = new AppAdapter(this, this, COLUMNS);
         if (!adapter.iconPackPackage().isEmpty()) adapter.setIconPack("");   // icon packs were removed in v6
-        continueAdapter = new ContinueAdapter(this, this);
-        grid.setAdapter(new ConcatAdapter(new ConcatAdapter.Config.Builder()
-                .setIsolateViewTypes(true)
-                .setStableIdMode(ConcatAdapter.Config.StableIdMode.ISOLATED_STABLE_IDS)
-                .build(), adapter, continueAdapter));
-        ((GridLayoutManager) grid.getLayoutManager()).setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
-            @Override
-            public int getSpanSize(int position) {
-                // The "Continue watching" heading sits right after the last app and takes a whole row.
-                int apps = adapter.getItemCount();
-                if (position < apps) return 1;
-                return continueAdapter.isHeader(position - apps) ? COLUMNS : posterSpan();
-            }
-        });
+        grid.setAdapter(adapter);
+        setupContinueRow();
 
         // tvOS layout: the dock row sits at the bottom of the screen; the app list is below it, out of sight.
         grid.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            layoutContinue();
             updateGridPadding();
             if (!overlayApplied) clipRunnable.run();
         });
@@ -358,7 +353,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
                 if (newState != RecyclerView.SCROLL_STATE_IDLE || !glassShown || snapActive) return;
                 View f = getCurrentFocus();
                 if (f != null && f.getId() == R.id.card && f.getParent() instanceof View
-                        && ((View) f.getParent()).getParent() == grid) {
+                        && (((View) f.getParent()).getParent() == grid
+                        || ((View) f.getParent()).getParent() == continueRow)) {
                     moveGlassTo(f, true);
                 }
             }
@@ -494,6 +490,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             if (adapter.reloadIfChanged()) grid.scheduleLayoutAnimation();
         }
         continueAdapter.refresh();
+        layoutContinue();
+        grid.invalidateItemDecorations();
         updateGreeting();
         updateBluetoothLabel();
         handler.postDelayed(minuteTick, MINUTE_MS);
@@ -570,7 +568,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             resumeInAll = allAppsMode && !arranging && lastFocused >= COLUMNS;
             if (resumeInAll) {
                 RecyclerView.ViewHolder vh = grid.findViewHolderForAdapterPosition(lastFocused);
-                if (vh != null) resumeTileTop = vh.itemView.getTop();
+                if (vh != null) resumeTileTop = vh.itemView.getTop() - firstRowGap(lastFocused);
             }
         }
         paused = true;
@@ -714,7 +712,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         refreshChrome();
         if (adapter.getItemCount() > COLUMNS) {
             RecyclerView.ViewHolder vh = grid.findViewHolderForAdapterPosition(COLUMNS);
-            if (vh != null) scrollGridBy(vh.itemView.getTop() - allTopPx());
+            if (vh != null) scrollGridBy(vh.itemView.getTop() - firstRowGap(COLUMNS) - allTopPx());
         }
     }
 
@@ -908,9 +906,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             if (entering) {
                 // The list opens with its first row just inside the glass panel (unless we are returning
                 // from an app and the list is already where it was).
-                if (!keepScroll) scrollGridBy(item.getTop() - allTopPx());
+                if (!keepScroll) scrollGridBy(item.getTop() - firstRowGap(position) - allTopPx());
             } else {
-                ensureVisible(item);
+                ensureVisible(item.getTop() - firstRowGap(position), item.getBottom());
             }
         }
     }
@@ -1110,15 +1108,18 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         int target;
         if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
             if (position < COLUMNS) return false;          // dock row: let focus move to the top bar
-            target = position - COLUMNS;
-        } else {
-            int lastRowStart = ((count - 1) / COLUMNS) * COLUMNS;
-            if (position >= lastRowStart) {                // already on the last row
-                // ... Down goes on into the Continue watching section below the apps
-                int n = continueAdapter.posterCount();
-                if (position >= COLUMNS && n > 0) focusPoster(Math.min((position % COLUMNS) / posterSpan(), n - 1));
+            if (position < 2 * COLUMNS && continueActive()) {   // first row of apps: up to Continue watching
+                focusPoster(nearestPoster(centerX(cardAt(position))));
                 return true;
             }
+            target = position - COLUMNS;
+        } else {
+            if (position < COLUMNS && continueActive()) {   // dock: down to Continue watching first
+                focusPoster(nearestPoster(centerX(cardAt(position))));
+                return true;
+            }
+            int lastRowStart = ((count - 1) / COLUMNS) * COLUMNS;
+            if (position >= lastRowStart) return true;     // already on the last row
             target = Math.min(position + COLUMNS, count - 1);
         }
         focusTile(target);
@@ -1169,6 +1170,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private void beginArrange(int position) {
         if (arranging || adapter.getItemCount() == 0) return;
         arranging = true;
+        grid.invalidateItemDecorations();
         arrangeBackup = adapter.orderSnapshot();
         Toast.makeText(this, R.string.arrange_help, Toast.LENGTH_LONG).show();
         hideHero();
@@ -1182,6 +1184,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private void finishArrange(boolean save) {
         if (!arranging) return;
         arranging = false;
+        grid.invalidateItemDecorations();
         if (save) {
             adapter.saveOrder();
             Toast.makeText(this, R.string.order_saved, Toast.LENGTH_SHORT).show();
@@ -1601,74 +1604,201 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         }
     }
 
-    // ---- Continue watching (posters at the end of All apps) -------------------------------------
+    // ---- Continue watching (row above the apps in All apps) ---------------------------------------
+
+    private RecyclerView continueRow;
+    private int continueGapPx, continueRowPx;
+
+    /** True while the row is part of the layout: there is something to show and we are not arranging. */
+    private boolean continueActive() {
+        return continueAdapter != null && continueAdapter.getItemCount() > 0 && !arranging
+                && adapter != null && adapter.getItemCount() > COLUMNS;
+    }
+
+    /** Extra space above this app position (only the first row of apps has any). */
+    private int firstRowGap(int position) {
+        return position >= COLUMNS && position < 2 * COLUMNS && continueActive() ? continueGapPx : 0;
+    }
+
+    private void setupContinueRow() {
+        continueAdapter = new ContinueAdapter(this, this);
+        continueRow = new RecyclerView(this);
+        continueRow.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false));
+        continueRow.setClipChildren(false);
+        continueRow.setClipToPadding(false);
+        continueRow.setItemAnimator(null);
+        continueRow.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        continueRow.setHorizontalScrollBarEnabled(false);
+        continueRow.setAdapter(continueAdapter);
+        continueRow.setAlpha(0f);
+        continueRow.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        continueRow.setPadding((int) (56 * density), 0, (int) (56 * density), 0);
+        root.addView(continueRow, root.indexOfChild(grid) + 1,
+                new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (200 * density)));
+        // The row floats over the gap above the first row of apps and follows the grid (scroll, fades, clip).
+        grid.getViewTreeObserver().addOnPreDrawListener(() -> {
+            syncContinueRow();
+            return true;
+        });
+        continueRow.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override
+            public void onScrollStateChanged(@NonNull RecyclerView rv, int newState) {
+                if (newState != RecyclerView.SCROLL_STATE_IDLE || !glassShown) return;
+                View f = getCurrentFocus();
+                if (f != null && f.getId() == R.id.card && ((View) f.getParent()).getParent() == continueRow) {
+                    moveGlassTo(f, true);
+                }
+            }
+
+            @Override
+            public void onScrolled(@NonNull RecyclerView rv, int dx, int dy) {
+                if (!glassShown || dx == 0) return;
+                View f = getCurrentFocus();
+                if (f == null || f.getId() != R.id.card || ((View) f.getParent()).getParent() != continueRow) return;
+                glassTargetX -= dx;
+                if (springX.isRunning()) springX.animateToFinalPosition(glassTargetX);
+                else glass.setTranslationX(glassTargetX);
+            }
+        });
+    }
+
+    /** Poster size: three full posters and a peek of the next one fit across the screen. */
+    private void layoutContinue() {
+        if (continueRow == null || grid == null || grid.getWidth() == 0) return;
+        int contentW = grid.getWidth() - grid.getPaddingLeft() - grid.getPaddingRight();
+        int gap = (int) (18 * density);
+        int w = (int) ((contentW - 2 * gap) / 3.2f);
+        int h = Math.round(w * 9f / 16f);
+        continueAdapter.setSize(w, h, gap);
+        int block = h + (int) (44 * density);                  // 8 air + poster + title line + 8 air
+        continueGapPx = block + (int) (6 * density);
+        if (continueRowPx != block) {
+            continueRowPx = block;
+            ViewGroup.LayoutParams lp = continueRow.getLayoutParams();
+            lp.height = block;
+            continueRow.setLayoutParams(lp);
+            grid.invalidateItemDecorations();
+        }
+    }
+
+    /** Keeps the row glued to the gap above the first row of apps. Only draw properties change here. */
+    private void syncContinueRow() {
+        if (continueRow == null) return;
+        boolean active = continueActive();
+        int want = active ? ViewGroup.FOCUS_AFTER_DESCENDANTS : ViewGroup.FOCUS_BLOCK_DESCENDANTS;
+        if (continueRow.getDescendantFocusability() != want) continueRow.setDescendantFocusability(want);
+        RecyclerView.ViewHolder vh = active ? grid.findViewHolderForAdapterPosition(COLUMNS) : null;
+        if (vh == null) {
+            if (continueRow.getAlpha() != 0f) continueRow.setAlpha(0f);
+            return;
+        }
+        float y = grid.getTop() + grid.getTranslationY() + vh.itemView.getTop() - continueGapPx;
+        if (continueRow.getTranslationY() != y) continueRow.setTranslationY(y);
+        float alpha = grid.getAlpha() * (allAppsPanel != null ? allAppsPanel.getAlpha() : 1f);
+        if (continueRow.getAlpha() != alpha) continueRow.setAlpha(alpha);
+        Rect gc = grid.getClipBounds();
+        Rect want2 = gc == null ? null : new Rect(gc.left, Math.round(gc.top - y), gc.right, Math.round(gc.bottom - y));
+        Rect have = continueRow.getClipBounds();
+        if (want2 == null ? have != null : !want2.equals(have)) continueRow.setClipBounds(want2);
+    }
+
+    private View cardAt(int position) {
+        RecyclerView.ViewHolder vh = grid.findViewHolderForAdapterPosition(position);
+        return vh == null ? null : vh.itemView.findViewById(R.id.card);
+    }
+
+    private float centerX(View v) {
+        if (v == null) return root.getWidth() / 2f;
+        Rect r = new Rect(0, 0, v.getWidth(), v.getHeight());
+        root.offsetDescendantRectToMyCoords(v, r);
+        return r.exactCenterX();
+    }
+
+    /** The poster whose centre is closest to this x position. */
+    private int nearestPoster(float cx) {
+        int best = 0;
+        float bestDist = Float.MAX_VALUE;
+        for (int i = 0; i < continueRow.getChildCount(); i++) {
+            View ch = continueRow.getChildAt(i);
+            int pos = continueRow.getChildAdapterPosition(ch);
+            View card = ch.findViewById(R.id.card);
+            if (pos < 0 || card == null) continue;
+            float dist = Math.abs(centerX(card) - cx);
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = pos;
+            }
+        }
+        return best;
+    }
 
     @Override
     public void onPosterFocused(int index, View card, int color) {
-        if (restorePending) return;
+        if (restorePending || arranging) return;
         if (snapActive) endSnap();
-        glass.setColor(0xFFE50914, glassShown);        // red cursor on the posters
+        glass.setColor(color, glassShown);                 // red cursor on the posters
         moveGlassTo(card, true);
-        View item = (View) card.getParent();
-        if (arranging) return;
+        boolean entering = !allAppsMode;
         allAppsMode = true;
         refreshChrome();
         hideHero();
-        int top = item.getTop();
-        if (index < perRow()) {
-            // First row of posters: keep the section's top edge in view too.
-            RecyclerView.ViewHolder hv = grid.findViewHolderForAdapterPosition(adapter.getItemCount());
-            if (hv != null) top = Math.min(top, hv.itemView.getTop());
-        }
-        ensureVisible(top, item.getBottom());
+        RecyclerView.ViewHolder vh = grid.findViewHolderForAdapterPosition(COLUMNS);
+        if (vh == null) return;
+        int rowTop = vh.itemView.getTop() - continueGapPx;
+        if (entering) scrollGridBy(rowTop - allTopPx());
+        else ensureVisible(rowTop, rowTop + continueRowPx);
     }
 
     @Override
     public boolean onPosterKey(int index, int keyCode) {
         if (arranging) return true;
-        int n = continueAdapter.posterCount();
-        int per = perRow();
+        View card = continueRow.findViewHolderForAdapterPosition(index) == null ? null
+                : continueRow.findViewHolderForAdapterPosition(index).itemView.findViewById(R.id.card);
+        float cx = centerX(card);
         if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-            if (index - per >= 0) {
-                focusPoster(index - per);
-            } else {
-                int count = adapter.getItemCount();
-                int lastRowStart = ((count - 1) / COLUMNS) * COLUMNS;
-                focusTile(Math.min(lastRowStart + (index % per) * posterSpan(), count - 1));
+            // Back up to the dock tile above.
+            int best = 0;
+            float bestDist = Float.MAX_VALUE;
+            for (int i = 0; i < Math.min(COLUMNS, adapter.getItemCount()); i++) {
+                View c = cardAt(i);
+                if (c == null) continue;
+                float dist = Math.abs(centerX(c) - cx);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    best = i;
+                }
             }
-            return true;
+            focusTile(best);
+        } else {
+            // Down into the first row of apps, the one nearest below.
+            int best = COLUMNS;
+            float bestDist = Float.MAX_VALUE;
+            for (int i = COLUMNS; i < Math.min(2 * COLUMNS, adapter.getItemCount()); i++) {
+                View c = cardAt(i);
+                if (c == null) continue;
+                float dist = Math.abs(centerX(c) - cx);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    best = i;
+                }
+            }
+            focusTile(best);
         }
-        if (index + per < n) focusPoster(index + per);
-        else if (index < ((n - 1) / per) * per) focusPoster(n - 1);
         return true;
     }
 
-    /** Posters are big (two per row on a four column grid), so each takes half the columns. */
-    private int posterSpan() {
-        return Math.max(1, COLUMNS / 2);
-    }
-
-    private int perRow() {
-        return Math.max(1, COLUMNS / posterSpan());
-    }
-
-    private void focusPoster(int index) {
-        final int pos = adapter.getItemCount() + 1 + Math.max(0, Math.min(index, continueAdapter.posterCount() - 1));
-        RecyclerView.ViewHolder vh = grid.findViewHolderForAdapterPosition(pos);
+    private void focusPoster(final int index) {
+        final int i = Math.max(0, Math.min(index, continueAdapter.posterCount() - 1));
+        RecyclerView.ViewHolder vh = continueRow.findViewHolderForAdapterPosition(i);
         if (vh != null) {
             vh.itemView.findViewById(R.id.card).requestFocus();
             return;
         }
-        grid.addOnScrollListener(new RecyclerView.OnScrollListener() {
-            @Override
-            public void onScrollStateChanged(@NonNull RecyclerView rv, int newState) {
-                if (newState != RecyclerView.SCROLL_STATE_IDLE) return;
-                rv.removeOnScrollListener(this);
-                RecyclerView.ViewHolder h = rv.findViewHolderForAdapterPosition(pos);
-                if (h != null) h.itemView.findViewById(R.id.card).requestFocus();
-            }
+        continueRow.scrollToPosition(i);
+        continueRow.post(() -> {
+            RecyclerView.ViewHolder h = continueRow.findViewHolderForAdapterPosition(i);
+            if (h != null) h.itemView.findViewById(R.id.card).requestFocus();
         });
-        grid.smoothScrollToPosition(pos);
     }
 
     private void focusTile(int position) {

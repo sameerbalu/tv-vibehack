@@ -33,8 +33,8 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * The "Continue watching" section at the end of the All apps grid: a heading followed by poster tiles
- * (same size and focus look as the app tiles) with a progress bar for how much was watched.
+ * The "Continue watching" row at the top of All apps: big 16:9 posters in a sideways list
+ * with a progress bar for how much was watched.
  * Items come from NuvioHistory (filled by MediaListener).
  */
 final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
@@ -45,17 +45,16 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         boolean onPosterKey(int index, int keyCode);
     }
 
-    private static final int TYPE_HEADER = 1, TYPE_POSTER = 2;
-    private static final int CARD_W_DP = 280, CARD_H_DP = 158;
+    private static final float RADIUS_DP = 18f;
 
     private final Context ctx;
     private final Host host;
     private final float d;
     private final List<NuvioHistory.Entry> entries = new ArrayList<>();
-    private final android.util.LruCache<String, Bitmap> posters = new android.util.LruCache<>(24);
-    private final android.util.SparseIntArray colors = new android.util.SparseIntArray();
+    private final android.util.LruCache<String, Bitmap> posters = new android.util.LruCache<>(32);
     private String signature = "";
     private String nuvioPkg;
+    private int cardW, cardH, gapPx;
 
     ContinueAdapter(Context ctx, Host host) {
         this.ctx = ctx;
@@ -64,8 +63,17 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         setHasStableIds(true);
     }
 
-    /** Reloads the list from disk. Only rebinds when something changed. */
-    void refresh() {
+    /** Poster size in px (16:9) and the space after each poster. Rebinds only when it changed. */
+    void setSize(int w, int h, int gap) {
+        if (w == cardW && h == cardH && gap == gapPx) return;
+        cardW = w;
+        cardH = h;
+        gapPx = gap;
+        notifyDataSetChanged();
+    }
+
+    /** Reloads the list from disk. Only rebinds when something changed. Returns true when it did. */
+    boolean refresh() {
         List<NuvioHistory.Entry> fresh = NuvioHistory.load(ctx);
         StringBuilder sig = new StringBuilder();
         for (NuvioHistory.Entry e : fresh) {
@@ -73,12 +81,12 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
                     .append('|').append(e.duration).append(';');
         }
         nuvioPkg = findNuvio();
-        if (sig.toString().equals(signature)) return;
+        if (sig.toString().equals(signature)) return false;
         signature = sig.toString();
         entries.clear();
         entries.addAll(fresh);
-        colors.clear();
         notifyDataSetChanged();
+        return true;
     }
 
     int posterCount() {
@@ -87,31 +95,15 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
 
     @Override
     public int getItemCount() {
-        return entries.isEmpty() ? 0 : entries.size() + 1;
-    }
-
-    @Override
-    public int getItemViewType(int position) {
-        return position == 0 ? TYPE_HEADER : TYPE_POSTER;
+        return entries.size();
     }
 
     @Override
     public long getItemId(int position) {
-        return position == 0 ? -7L : entries.get(position - 1).key.hashCode();
-    }
-
-    /** True for the heading row (it takes the full width of the grid). */
-    boolean isHeader(int position) {
-        return position == 0 && !entries.isEmpty();
+        return entries.get(position).key.hashCode();
     }
 
     // ---- views ---------------------------------------------------------------------------------------
-
-    private static final class HeaderHolder extends RecyclerView.ViewHolder {
-        HeaderHolder(View v) {
-            super(v);
-        }
-    }
 
     private static final class PosterHolder extends RecyclerView.ViewHolder {
         final View card, scrim;
@@ -132,14 +124,9 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
     @NonNull
     @Override
     public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-        if (viewType == TYPE_HEADER) {
-            View t = new View(ctx);      // just a gap that starts the posters on a fresh row
-            t.setLayoutParams(new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (26 * d)));
-            return new HeaderHolder(t);
-        }
         View v = LayoutInflater.from(ctx).inflate(R.layout.item_continue, parent, false);
         final PosterHolder h = new PosterHolder(v);
-        final float radius = 16f * d;
+        final float radius = RADIUS_DP * d;
         h.card.setOutlineProvider(new ViewOutlineProvider() {
             @Override
             public void getOutline(View view, Outline outline) {
@@ -148,15 +135,22 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         });
         h.card.setClipToOutline(true);
         h.scrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{0x00000000, 0xCC000000}));
+                new int[]{0x00000000, 0xB8000000}));
         h.card.setOnKeyListener((view, keyCode, event) -> {
             if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
             int p = h.getBindingAdapterPosition();
             if (p == RecyclerView.NO_POSITION) return false;
-            if (keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-                return host.onPosterKey(p - 1, keyCode);
+            switch (keyCode) {
+                case KeyEvent.KEYCODE_DPAD_UP:
+                case KeyEvent.KEYCODE_DPAD_DOWN:
+                    return host.onPosterKey(p, keyCode);
+                case KeyEvent.KEYCODE_DPAD_LEFT:
+                    return p == 0;                               // end of the row: stay put
+                case KeyEvent.KEYCODE_DPAD_RIGHT:
+                    return p == entries.size() - 1;
+                default:
+                    return false;
             }
-            return false;
         });
         h.card.setOnFocusChangeListener((view, focused) -> {
             float s = focused ? AppAdapter.FOCUS_SCALE : 1f;
@@ -164,53 +158,57 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
                     .setDuration(focused ? 260 : 180)
                     .setInterpolator(new OvershootInterpolator(focused ? 1.6f : 0f))
                     .start();
-            h.name.animate().alpha(focused ? 1f : 0f)
-                    .translationY(focused ? d * 4f : -d * 6f)
-                    .setDuration(220).start();
+            h.name.animate().alpha(focused ? 1f : 0.7f).setDuration(200).start();
             int p = h.getBindingAdapterPosition();
-            if (focused && p != RecyclerView.NO_POSITION) {
-                host.onPosterFocused(p - 1, view, colors.get(p, 0xFF666666));
-            }
+            if (focused && p != RecyclerView.NO_POSITION) host.onPosterFocused(p, view, 0xFFE50914);
         });
         h.card.setOnClickListener(view -> {
             int p = h.getBindingAdapterPosition();
-            if (p != RecyclerView.NO_POSITION && p - 1 < entries.size()) resume(entries.get(p - 1));
+            if (p != RecyclerView.NO_POSITION && p < entries.size()) resume(entries.get(p));
         });
         return h;
     }
 
     @Override
     public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
-        if (!(holder instanceof PosterHolder)) return;
         PosterHolder h = (PosterHolder) holder;
-        NuvioHistory.Entry e = entries.get(position - 1);
+        NuvioHistory.Entry e = entries.get(position);
+
+        // Item = 8dp air, the poster, a title line, 8dp air. Width is poster + the gap to the next one.
+        int w = cardW > 0 ? cardW : (int) (260 * d), ht = cardH > 0 ? cardH : (int) (146 * d);
+        RecyclerView.LayoutParams ilp = new RecyclerView.LayoutParams(w, ViewGroup.LayoutParams.WRAP_CONTENT);
+        ilp.setMarginEnd(gapPx > 0 ? gapPx : (int) (18 * d));
+        h.itemView.setLayoutParams(ilp);
+        ViewGroup.LayoutParams cp = h.card.getLayoutParams();
+        cp.width = w;
+        cp.height = ht;
+        h.card.setLayoutParams(cp);
+        FrameLayout.LayoutParams np = (FrameLayout.LayoutParams) h.name.getLayoutParams();
+        np.width = w;
+        np.topMargin = ht + (int) (14 * d);       // 8dp padding + 6dp below the poster
+        h.name.setLayoutParams(np);
 
         Bitmap bmp = null;
         if (!e.poster.isEmpty()) {
             bmp = posters.get(e.poster);
             if (bmp == null) {
-                bmp = decode(e);
+                bmp = decode(e, w);
                 if (bmp != null) posters.put(e.poster, bmp);
             }
         }
-        int color;
         if (bmp != null) {
             h.poster.setImageBitmap(bmp);
-            color = AppAdapter.vividColor(Bitmap.createScaledBitmap(bmp, 12, 12, true));
         } else {
             float hue = Math.abs(e.title.hashCode()) % 360;
-            int c1 = Color.HSVToColor(new float[]{hue, 0.55f, 0.55f});
-            int c2 = Color.HSVToColor(new float[]{(hue + 40f) % 360f, 0.7f, 0.22f});
+            int c1 = Color.HSVToColor(new float[]{hue, 0.55f, 0.50f});
+            int c2 = Color.HSVToColor(new float[]{(hue + 40f) % 360f, 0.7f, 0.16f});
             h.poster.setImageDrawable(new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{c1, c2}));
-            color = c1;
         }
-        colors.put(position, color);
-
         h.name.setText(e.title);
-        h.name.setTextColor(Color.WHITE);
+        h.name.setAlpha(h.card.isFocused() ? 1f : 0.7f);
         if (e.duration > 0) {
             h.progress.setVisibility(View.VISIBLE);
-            h.progress.set(e.position / (float) e.duration, 0xFFE50914, 0xFFFFFFFF);
+            h.progress.set(e.position / (float) e.duration, 0xFFE50914, 0xFFFF4D4D);
             h.scrim.setVisibility(View.VISIBLE);
         } else {
             h.progress.setVisibility(View.GONE);
@@ -218,13 +216,13 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         }
     }
 
-    private Bitmap decode(NuvioHistory.Entry e) {
+    private Bitmap decode(NuvioHistory.Entry e, int targetW) {
         try {
             File f = new File(new File(ctx.getFilesDir(), "nuvio_posters"), e.poster);
             BitmapFactory.Options o = new BitmapFactory.Options();
             o.inJustDecodeBounds = true;
             BitmapFactory.decodeFile(f.getPath(), o);
-            int target = (int) (CARD_W_DP * d * 1.5f);
+            int target = Math.max(1, (int) (targetW * 1.3f));
             int sample = 1;
             while (o.outWidth / (sample * 2) >= target) sample *= 2;
             o = new BitmapFactory.Options();

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- One Continue watching tile: same footprint and focus look as an app tile, but a poster with a progress bar. -->
+<!-- One Continue watching poster: 16:9 artwork, a red progress bar and the title underneath. Sizes are set in code. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
+    android:layout_width="wrap_content"
     android:layout_height="wrap_content"
     android:paddingTop="8dp"
     android:paddingBottom="8dp"
@@ -10,9 +10,9 @@
 
     <FrameLayout
         android:id="@+id/card"
-        android:layout_width="280dp"
-        android:layout_height="158dp"
-        android:layout_gravity="center_horizontal|top"
+        android:layout_width="260dp"
+        android:layout_height="146dp"
+        android:layout_gravity="start|top"
         android:background="@drawable/tile_bg"
         android:focusable="true"
         android:clickable="true">
@@ -27,7 +27,7 @@
         <View
             android:id="@+id/scrim"
             android:layout_width="match_parent"
-            android:layout_height="64dp"
+            android:layout_height="60dp"
             android:layout_gravity="bottom" />
 
         <com.gathin.tvhome.ColorBar
@@ -42,16 +42,16 @@
 
     <TextView
         android:id="@+id/name"
-        android:layout_width="280dp"
+        android:layout_width="260dp"
         android:layout_height="22dp"
-        android:layout_gravity="center_horizontal|top"
-        android:layout_marginTop="165dp"
-        android:gravity="center"
+        android:layout_gravity="start|top"
+        android:layout_marginTop="160dp"
+        android:gravity="start|center_vertical"
+        android:paddingStart="4dp"
         android:singleLine="true"
         android:ellipsize="end"
-        android:alpha="0"
-        android:translationY="-6dp"
-        android:textColor="#F2FFFFFF"
+        android:alpha="0.7"
+        android:textColor="#FFFFFFFF"
         android:textSize="14sp"
         android:fontFamily="@font/outfit"
         android:fontVariationSettings="'wght' 500"
