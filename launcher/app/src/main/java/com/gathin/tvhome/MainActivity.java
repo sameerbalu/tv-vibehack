@@ -1685,7 +1685,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private void syncContinueRow() {
         if (continueRow == null) return;
         boolean active = continueActive();
-        int want = active ? ViewGroup.FOCUS_AFTER_DESCENDANTS : ViewGroup.FOCUS_BLOCK_DESCENDANTS;
+        // In dock state the row is invisible but overlaps the dock's neighbourhood, so keys like Up must not find it.
+        int want = active && allAppsMode ? ViewGroup.FOCUS_AFTER_DESCENDANTS : ViewGroup.FOCUS_BLOCK_DESCENDANTS;
         if (continueRow.getDescendantFocusability() != want) continueRow.setDescendantFocusability(want);
         RecyclerView.ViewHolder vh = active ? grid.findViewHolderForAdapterPosition(COLUMNS) : null;
         if (vh == null) {
@@ -1736,10 +1737,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     public void onPosterFocused(int index, View card, int color) {
         if (restorePending || arranging) return;
         if (snapActive) endSnap();
-        glass.setColor(color, glassShown);                 // red cursor on the posters
-        moveGlassTo(card, true);
         boolean entering = !allAppsMode;
         allAppsMode = true;
+        syncContinueRow();                                 // the row must be in place before the cursor is measured against it
+        glass.setColor(color, glassShown);                 // red cursor on the posters
+        moveGlassTo(card, true);
         refreshChrome();
         hideHero();
         RecyclerView.ViewHolder vh = grid.findViewHolderForAdapterPosition(COLUMNS);
@@ -1789,6 +1791,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
 
     private void focusPoster(final int index) {
         final int i = Math.max(0, Math.min(index, continueAdapter.posterCount() - 1));
+        continueRow.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);   // we are going there on purpose
         RecyclerView.ViewHolder vh = continueRow.findViewHolderForAdapterPosition(i);
         if (vh != null) {
             vh.itemView.findViewById(R.id.card).requestFocus();
@@ -1796,6 +1799,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         }
         continueRow.scrollToPosition(i);
         continueRow.post(() -> {
+            continueRow.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
             RecyclerView.ViewHolder h = continueRow.findViewHolderForAdapterPosition(i);
             if (h != null) h.itemView.findViewById(R.id.card).requestFocus();
         });
