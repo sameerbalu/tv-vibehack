@@ -264,8 +264,7 @@ final class SaverController {
         if (id.equals(songId)) return;
         songId = id;
         int[] palette = SongColors.palette(meta);
-        aurora.setPalette(palette);
-        accent = palette != null && palette.length > 0 ? palette[0] : 0xFFB3121B;
+        accent = 0xFFFFFFFF;              // cover art and playback only: the background keeps its own look
         String title = meta.getString(MediaMetadata.METADATA_KEY_TITLE);
         String artist = meta.getString(MediaMetadata.METADATA_KEY_ARTIST);
         nowTitle.setText(title == null ? "Spotify" : title);
@@ -278,14 +277,9 @@ final class SaverController {
         }
         nowEq.setColor(accent);
         nowEq.setActive(true);
-        int rgb = accent & 0x00FFFFFF;
-        glowDrawable.setColors(new int[]{0x70000000 | rgb, 0x28000000 | rgb, rgb});
         nowRow.setVisibility(View.VISIBLE);
         nowRow.setAlpha(0f);
         nowRow.animate().alpha(1f).setDuration(900).start();
-        musicGlow.animate().cancel();
-        musicGlow.animate().alpha(1f).setDuration(1800).start();
-        startGlowPulse();
         updateProgress();
     }
 

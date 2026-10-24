@@ -178,6 +178,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
             }
         });
         h.card.setClipToOutline(true);
+        GlassStyle.shadow(h.card, d);
         h.scrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[]{0x00000000, 0xB8000000}));
         h.card.setOnKeyListener((view, keyCode, event) -> {
@@ -198,7 +199,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         });
         h.card.setOnFocusChangeListener((view, focused) -> {
             float s = focused ? POSTER_FOCUS_SCALE : 1f;
-            view.animate().scaleX(s).scaleY(s)
+            view.animate().scaleX(s).scaleY(s).translationZ(focused ? 8f * d : 0f)
                     .setDuration(focused ? 260 : 180)
                     .setInterpolator(new OvershootInterpolator(focused ? 1.6f : 0f))
                     .start();

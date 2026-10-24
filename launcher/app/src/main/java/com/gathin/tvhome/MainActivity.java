@@ -1241,26 +1241,39 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     }
 
     private void showLauncherSettings() {
-        View anchor = findViewById(R.id.btnSettings);
-        View panel = getLayoutInflater().inflate(R.layout.popup_apps, root, false);
-        panel.findViewById(R.id.title).setVisibility(View.GONE);
-        LinearLayout rows = panel.findViewById(R.id.rows);
-        int minWidth = (int) (230 * density);
-        final PopupWindow popup = newDropdown(panel, minWidth);
-        addInputRow(rows, popup, MenuIcons.WALLPAPER, getString(R.string.wallpaper_tab), -1, this::showWallpaperMenu);
-        addInputRow(rows, popup, MenuIcons.EYE, getString(R.string.hide_apps), -1, this::showHideApps);
-        addInputRow(rows, popup, MenuIcons.WIDGETS, getString(R.string.widgets), -1, this::showWidgets);
-        addInputRow(rows, popup, MenuIcons.SPARKLE, getString(R.string.fx_title), -1, this::showEffects);
+        dismissOpenPopup();
+        java.util.List<ControlCenter.Tile> tiles = new ArrayList<>();
+        tiles.add(new ControlCenter.Tile(MenuIcons.WALLPAPER, getString(R.string.wallpaper_tab), this::showWallpaperMenu));
+        tiles.add(new ControlCenter.Tile(MenuIcons.EYE, getString(R.string.hide_apps), this::showHideApps));
+        tiles.add(new ControlCenter.Tile(MenuIcons.WIDGETS, getString(R.string.widgets), this::showWidgets));
+        tiles.add(new ControlCenter.Tile(MenuIcons.SPARKLE, getString(R.string.fx_title), this::showEffects));
+        tiles.add(new ControlCenter.Tile(MenuIcons.MOON, getString(R.string.screen_saver),
+                () -> startActivity(new Intent(this, ScreensaverActivity.class))));
         if (!hasListenerAccess()) {
-            addInputRow(rows, popup, MenuIcons.BELL, getString(R.string.music_access), -1, this::openMusicAccess);
+            tiles.add(new ControlCenter.Tile(MenuIcons.BELL, getString(R.string.music_access), this::openMusicAccess));
         }
-        addInputRow(rows, popup, MenuIcons.MOON, getString(R.string.screen_saver), -1,
-                () -> startActivity(new Intent(this, ScreensaverActivity.class)));
-        addSeparator(rows);
-        addInputRow(rows, popup, MenuIcons.GEAR, getString(R.string.system_settings), -1,
-                () -> open(new Intent(Settings.ACTION_SETTINGS)));
-        fitScroll(panel);
-        showDropdown(popup, panel, anchor, minWidth, true);
+        tiles.add(new ControlCenter.Tile(MenuIcons.GEAR, getString(R.string.system_settings),
+                () -> open(new Intent(Settings.ACTION_SETTINGS))));
+        controlCenter = new ControlCenter(this, menuBackdrop);
+        controlCenter.show(getString(R.string.settings), tiles,
+                getString(R.string.tc_storage), TvTools.storage(), this::quickClearCache,
+                getString(R.string.tc_memory), TvTools.memory(this), this::quickStopApps);
+    }
+
+    private ControlCenter controlCenter;
+
+    /** Memory module of the settings screen: stop the apps running in the background. */
+    private void quickStopApps() {
+        Toast.makeText(this, R.string.tc_working, Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            int n = 0;
+            try {
+                n = TvTools.stopBackground(this);
+            } catch (Exception ignored) {
+            }
+            final int count = n;
+            runOnUiThread(() -> Toast.makeText(this, getString(R.string.tc_stopped, count), Toast.LENGTH_LONG).show());
+        }).start();
     }
 
     // ---- double tap on the settings icon: clear cache -----------------------------------------------
@@ -2743,6 +2756,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     /** Fits the popup to its widest row, drops it in under the anchor (unfolding from the top) and focuses row one. */
     private void showDropdown(PopupWindow popup, View panel, View anchor, int minWidth, boolean alignEnd) {
         LinearLayout rows = panel.findViewById(R.id.rows);
+        if (menuBackdrop != null && panel.getId() == R.id.panel && !(panel.getBackground() instanceof BlurPanelDrawable)) {
+            panel.setBackground(new BlurPanelDrawable(density, menuBackdrop, root, panel));
+        }
         panel.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
         int width = Math.max(minWidth, panel.getMeasuredWidth());
         popup.setWidth(width);
@@ -2771,6 +2787,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
 
     /** Closes the open dropdown, if any. Returns true when there was one. */
     private boolean dismissOpenPopup() {
+        if (controlCenter != null && controlCenter.isShowing()) {
+            controlCenter.dismiss();
+            return true;
+        }
         PopupWindow p = openPopup;
         openPopup = null;
         if (p != null && p.isShowing()) {

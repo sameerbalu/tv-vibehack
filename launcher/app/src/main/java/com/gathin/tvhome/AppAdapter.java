@@ -498,6 +498,7 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
                 }
             });
             card.setClipToOutline(true);
+            GlassStyle.shadow(card, density);
             card.setOnKeyListener((view, keyCode, event) -> {
                 if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
                 int pos = getBindingAdapterPosition();
@@ -512,7 +513,7 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
             });
             card.setOnFocusChangeListener((view, focused) -> {
                 float s = focused ? FOCUS_SCALE : 1.0f;
-                view.animate().scaleX(s).scaleY(s)
+                view.animate().scaleX(s).scaleY(s).translationZ(focused ? 8f * density : 0f)
                         .setDuration(focused ? 260 : 180)
                         .setInterpolator(new OvershootInterpolator(focused ? 1.6f : 0f))
                         .start();
