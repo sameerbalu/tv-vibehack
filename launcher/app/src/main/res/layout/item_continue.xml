@@ -18,26 +18,10 @@
         android:clickable="true">
 
         <ImageView
-            android:id="@+id/posterBg"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:scaleType="centerCrop"
-            android:contentDescription="@null" />
-
-        <ImageView
             android:id="@+id/poster"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:scaleType="centerCrop"
-            android:contentDescription="@null" />
-
-        <ImageView
-            android:id="@+id/badge"
-            android:layout_width="24dp"
-            android:layout_height="24dp"
-            android:layout_gravity="top|start"
-            android:layout_margin="8dp"
-            android:scaleType="fitCenter"
             android:contentDescription="@null" />
 
         <View

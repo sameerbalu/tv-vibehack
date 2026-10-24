@@ -91,4 +91,8 @@
     <string name="library_empty">Nothing here yet. Play something in Nuvio and it shows up here.</string>
     <string name="library_setup">One-time setup: Settings, then %1$s. It lets the launcher see what Nuvio plays.</string>
     <string name="library_no_nuvio">Diese App ist auf diesem Fernseher nicht installiert.</string>
+    <string name="poster_resume">Fortsetzen</string>
+    <string name="poster_open_app">%1$s öffnen</string>
+    <string name="poster_remove">Aus „Weiterschauen“ entfernen</string>
+    <string name="poster_clear">„Weiterschauen“ leeren</string>
 </resources>

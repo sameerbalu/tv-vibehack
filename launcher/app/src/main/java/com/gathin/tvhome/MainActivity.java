@@ -1852,7 +1852,32 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     }
 
     /** Keeps the row and the pills glued to the gap above the first row of apps. Only draw properties change here. */
+    private float dockFade = 1f;          // 1 = the dock row is shown, 0 = hidden
+    private boolean dockTouched;
+
+    /**
+     * The dock belongs to the dock state only. In the All apps section (pills, posters, apps) it fades away
+     * instead of sliding up behind the posters. Only draw properties change here.
+     */
+    private void syncDock() {
+        if (grid == null || dockDecoration == null) return;
+        float target = allAppsMode && !arranging && !snapRising && sectionsActive() ? 0f : 1f;
+        if (dockFade == target && !dockTouched) return;
+        float next = target > dockFade ? Math.min(target, dockFade + 0.25f) : Math.max(target, dockFade - 0.2f);
+        boolean changed = next != dockFade;
+        dockFade = next;
+        dockTouched = dockFade != 1f;
+        dockDecoration.setAlpha(dockFade);
+        for (int i = 0; i < grid.getChildCount(); i++) {
+            View c = grid.getChildAt(i);
+            int p = grid.getChildAdapterPosition(c);
+            if (p >= 0 && p < COLUMNS && c.getAlpha() != dockFade) c.setAlpha(dockFade);
+        }
+        if (changed) grid.invalidate();
+    }
+
     private void syncContinueRow() {
+        syncDock();
         if (continueRow == null) return;
         boolean active = continueActive();
         // In dock state the row is invisible but overlaps the dock's neighbourhood, so keys like Up must not find it.
@@ -1968,6 +1993,54 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         int pillTop = rowTop - contPillBlockPx();
         if (entering) scrollGridBy(pillTop - allTopPx());
         else ensureVisible(pillTop, rowTop + continueRowPx);
+    }
+
+    @Override
+    public void onPosterLongPressed(int index, View card) {
+        showPosterMenu(index, card);
+    }
+
+    /** Menu for a poster (hold OK): resume, open the app, remove it, clear the list. */
+    private void showPosterMenu(final int index, View card) {
+        if (arranging) return;
+        final NuvioHistory.Entry e = continueAdapter.entryAt(index);
+        if (e == null) return;
+        View panel = getLayoutInflater().inflate(R.layout.popup_apps, root, false);
+        ((TextView) panel.findViewById(R.id.title)).setText(e.title);
+        LinearLayout rows = panel.findViewById(R.id.rows);
+        int minWidth = (int) (300 * density);
+        final PopupWindow popup = newDropdown(panel, minWidth);
+        addInputRow(rows, popup, R.drawable.ic_play_circle, getString(R.string.poster_resume), -1,
+                () -> continueAdapter.resume(e));
+        String app = continueAdapter.appLabel(e);
+        if (app != null) {
+            addInputRow(rows, popup, R.drawable.ic_av, getString(R.string.poster_open_app, app), -1,
+                    () -> continueAdapter.openApp(e));
+        }
+        addSeparator(rows);
+        addInputRow(rows, popup, R.drawable.ic_hide, getString(R.string.poster_remove), -1, () -> {
+            NuvioHistory.remove(this, e);
+            postersChanged(index);
+        });
+        addInputRow(rows, popup, R.drawable.ic_reset, getString(R.string.poster_clear), -1, () -> {
+            NuvioHistory.clear(this);
+            postersChanged(0);
+        });
+        fitScroll(panel);
+        showDropdown(popup, panel, card, minWidth, false);
+    }
+
+    /** The poster list changed (removed / cleared): rebuild the row and put the focus somewhere sensible. */
+    private void postersChanged(final int focusIndex) {
+        continueAdapter.refresh();
+        layoutContinue();
+        grid.invalidateItemDecorations();      // the gap above the apps grows or shrinks with the row
+        syncContinueRow();
+        grid.post(() -> {
+            int n = continueAdapter.posterCount();
+            if (n > 0) focusPoster(Math.min(focusIndex, n - 1));
+            else focusTile(COLUMNS);
+        });
     }
 
     @Override

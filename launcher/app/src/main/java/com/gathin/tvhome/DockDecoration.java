@@ -16,6 +16,12 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
     private final float density;
     private final GlassStyle style;
     private final RectF rect = new RectF();
+    private float alpha = 1f;
+
+    /** 1 = dock band shown, 0 = hidden (the All apps section must never show the dock). */
+    void setAlpha(float a) {
+        alpha = a;
+    }
 
     DockDecoration(int dockSize, float density) {
         this.dockSize = dockSize;
@@ -58,9 +64,15 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
                 rect.union(l, t, r, b);
             }
         }
-        if (!any) return;
+        if (!any || alpha <= 0.01f) return;
         float pad = 18 * density;
         rect.inset(-pad, -pad);
+        int save = -1;
+        if (alpha < 0.99f) {
+            float m = 10 * density;
+            save = c.saveLayerAlpha(rect.left - m, rect.top - m, rect.right + m, rect.bottom + m, Math.round(alpha * 255));
+        }
         style.draw(c, rect, 26 * density, parent.getWidth(), parent.getHeight(), 0f, 0f);
+        if (save >= 0) c.restoreToCount(save);
     }
 }

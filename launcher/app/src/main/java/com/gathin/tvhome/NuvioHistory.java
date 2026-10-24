@@ -161,6 +161,14 @@ final class NuvioHistory {
         }
     }
 
+    /** Empties the whole Continue watching list (and deletes the saved artwork). */
+    static synchronized void clear(Context c) {
+        List<Entry> list = load(c);
+        for (Entry e : list) deletePoster(c, e);
+        list.clear();
+        save(c, list);
+    }
+
     static synchronized void remove(Context c, Entry target) {
         List<Entry> list = load(c);
         for (Entry e : list) {

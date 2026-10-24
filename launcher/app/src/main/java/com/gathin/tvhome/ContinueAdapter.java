@@ -43,6 +43,9 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         void onPosterFocused(int index, View card, int color);
 
         boolean onPosterKey(int index, int keyCode);
+
+        /** OK held on a poster. */
+        void onPosterLongPressed(int index, View card);
     }
 
     private static final float RADIUS_DP = 18f;
@@ -52,8 +55,6 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
     private final float d;
     private final List<NuvioHistory.Entry> entries = new ArrayList<>();
     private final android.util.LruCache<String, Bitmap> posters = new android.util.LruCache<>(32);
-    private final android.util.LruCache<String, Bitmap> blurs = new android.util.LruCache<>(32);
-    private final android.util.LruCache<String, android.graphics.drawable.Drawable> badges = new android.util.LruCache<>(12);
     private static final float POSTER_FOCUS_SCALE = 1.07f;
     private String signature = "";
     private String nuvioPkg;
@@ -96,6 +97,40 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         return entries.size();
     }
 
+    NuvioHistory.Entry entryAt(int index) {
+        return index >= 0 && index < entries.size() ? entries.get(index) : null;
+    }
+
+    /** The app this title belongs to (falls back to Nuvio), or null when it is not installed. */
+    private String resolvePkg(NuvioHistory.Entry e) {
+        PackageManager pm = ctx.getPackageManager();
+        boolean ok = e.pkg != null && !e.pkg.isEmpty()
+                && (pm.getLaunchIntentForPackage(e.pkg) != null || pm.getLeanbackLaunchIntentForPackage(e.pkg) != null);
+        return ok ? e.pkg : nuvioPkg;
+    }
+
+    /** Name of the app for the "Open ..." menu row. */
+    String appLabel(NuvioHistory.Entry e) {
+        String pkg = resolvePkg(e);
+        if (pkg == null) return null;
+        try {
+            PackageManager pm = ctx.getPackageManager();
+            return String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)));
+        } catch (PackageManager.NameNotFoundException | RuntimeException ex) {
+            return null;
+        }
+    }
+
+    /** Just opens the app, without telling it to play. */
+    void openApp(NuvioHistory.Entry e) {
+        String pkg = resolvePkg(e);
+        if (pkg == null) {
+            Toast.makeText(ctx, R.string.library_no_nuvio, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        launch(pkg);
+    }
+
     @Override
     public int getItemCount() {
         return entries.size();
@@ -110,7 +145,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
 
     private static final class PosterHolder extends RecyclerView.ViewHolder {
         final View card, scrim;
-        final ImageView poster, posterBg, badge;
+        final ImageView poster;
         final TextView name;
         final ColorBar progress;
 
@@ -119,8 +154,6 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
             card = v.findViewById(R.id.card);
             scrim = v.findViewById(R.id.scrim);
             poster = v.findViewById(R.id.poster);
-            posterBg = v.findViewById(R.id.posterBg);
-            badge = v.findViewById(R.id.badge);
             name = v.findViewById(R.id.name);
             progress = v.findViewById(R.id.progress);
         }
@@ -167,6 +200,11 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
             int p = h.getBindingAdapterPosition();
             if (focused && p != RecyclerView.NO_POSITION) host.onPosterFocused(p, view, 0xFFE50914);
         });
+        h.card.setOnLongClickListener(view -> {
+            int p = h.getBindingAdapterPosition();
+            if (p != RecyclerView.NO_POSITION && p < entries.size()) host.onPosterLongPressed(p, view);
+            return true;
+        });
         h.card.setOnClickListener(view -> {
             int p = h.getBindingAdapterPosition();
             if (p != RecyclerView.NO_POSITION && p < entries.size()) resume(entries.get(p));
@@ -202,27 +240,12 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
             }
         }
         if (bmp != null) {
-            // Artwork that is not 16:9 (posters, squares) is shown whole over a soft blurred copy of itself,
-            // instead of being cropped and blown up.
-            float ratio = bmp.getWidth() / (float) bmp.getHeight();
-            boolean wide = Math.abs(ratio - 16f / 9f) < 0.28f;
-            h.poster.setScaleType(wide ? ImageView.ScaleType.CENTER_CROP : ImageView.ScaleType.FIT_CENTER);
+            // Always landscape and always edge to edge: the artwork fills the whole card. Tall artwork (posters)
+            // is cropped to the upper part, where the faces and the title art usually are.
+            h.poster.setScaleType(ImageView.ScaleType.MATRIX);
             h.poster.setImageBitmap(bmp);
-            if (wide) {
-                h.posterBg.setImageDrawable(null);
-            } else {
-                Bitmap bl = blurs.get(e.poster);
-                if (bl == null) {
-                    try {
-                        bl = Bitmap.createScaledBitmap(bmp, 16, 9, true);
-                        blurs.put(e.poster, bl);
-                    } catch (RuntimeException | OutOfMemoryError ignored) {
-                    }
-                }
-                h.posterBg.setImageBitmap(bl);
-            }
+            h.poster.setImageMatrix(coverMatrix(bmp.getWidth(), bmp.getHeight(), w, ht));
         } else {
-            h.posterBg.setImageDrawable(null);
             h.poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
             float hue = Math.abs(e.title.hashCode()) % 360;
             int c1 = Color.HSVToColor(new float[]{hue, 0.55f, 0.50f});
@@ -231,7 +254,6 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         }
         h.name.setText(e.title);
         h.name.setAlpha(1f);
-        h.badge.setImageDrawable(badgeFor(e.pkg));
         if (e.duration > 0) {
             h.progress.setVisibility(View.VISIBLE);
             h.progress.set(e.position / (float) e.duration, 0xFFE50914, 0xFFFF4D4D);
@@ -242,23 +264,16 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         }
     }
 
-    /** Small icon of the app this title was playing in. */
-    private android.graphics.drawable.Drawable badgeFor(String pkg) {
-        if (pkg == null || pkg.isEmpty()) return null;
-        android.graphics.drawable.Drawable d = badges.get(pkg);
-        if (d != null) {
-            android.graphics.drawable.Drawable.ConstantState c0 = d.getConstantState();
-            return c0 == null ? d : c0.newDrawable().mutate();
-        }
-        try {
-            d = ctx.getPackageManager().getApplicationIcon(pkg);
-            android.graphics.drawable.Drawable.ConstantState cs = d.getConstantState();
-            if (cs != null) d = cs.newDrawable().mutate();
-            badges.put(pkg, d);
-            return cs == null ? d : cs.newDrawable().mutate();
-        } catch (PackageManager.NameNotFoundException | RuntimeException ex) {
-            return null;
-        }
+    /** Scales the artwork to cover the card completely. Tall artwork keeps its upper part in view. */
+    private static android.graphics.Matrix coverMatrix(int bw, int bh, int vw, int vh) {
+        float scale = Math.max(vw / (float) bw, vh / (float) bh);
+        float dx = (vw - bw * scale) / 2f;
+        float spare = bh * scale - vh;                     // how much taller than the card the artwork is
+        float bias = bw / (float) bh < 1.2f ? 0.22f : 0.5f;  // 0 = top edge, 0.5 = centre
+        android.graphics.Matrix m = new android.graphics.Matrix();
+        m.setScale(scale, scale);
+        m.postTranslate(dx, -spare * bias);
+        return m;
     }
 
     private Bitmap decode(NuvioHistory.Entry e, int targetW) {
@@ -311,7 +326,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
     }
 
     /** If Nuvio still holds this title (paused) tell it to play, then bring Nuvio to the front. */
-    private void resume(NuvioHistory.Entry e) {
+    void resume(NuvioHistory.Entry e) {
         PackageManager pm = ctx.getPackageManager();
         String pkg = (e.pkg == null || e.pkg.isEmpty() || pm.getLaunchIntentForPackage(e.pkg) == null
                 && pm.getLeanbackLaunchIntentForPackage(e.pkg) == null) ? nuvioPkg : e.pkg;
