@@ -1779,6 +1779,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
 
     private void setupContinueRow() {
         continueAdapter = new ContinueAdapter(this, this);
+        continueAdapter.setAppSource(adapter);
         continueRow = new RecyclerView(this);
         continueRow.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false));
         continueRow.setClipChildren(false);

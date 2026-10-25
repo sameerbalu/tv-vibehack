@@ -39,9 +39,18 @@ public class GlassView extends View {
         density = getResources().getDisplayMetrics().density;
         radius = 16f * density;
         rim.setStyle(Paint.Style.STROKE);
-        rim.setStrokeWidth(1.8f * density);
+        rim.setStrokeWidth(1.4f * density);
         glow.setStyle(Paint.Style.STROKE);
-        glow.setStrokeWidth(1.7f * density);
+        glow.setStrokeWidth(1.5f * density);
+    }
+
+    /** White / very light neutral colours are toned down to a soft grey so the cursor never glares. */
+    private static int soften(int c) {
+        float[] hsv = new float[3];
+        android.graphics.Color.colorToHSV(c, hsv);
+        if (hsv[1] < 0.25f) hsv[2] = Math.min(hsv[2], 0.68f);
+        else hsv[2] = Math.min(hsv[2], 0.92f);
+        return android.graphics.Color.HSVToColor(hsv);
     }
 
     void setRadius(float px) {
@@ -70,7 +79,7 @@ public class GlassView extends View {
     protected void onDraw(Canvas canvas) {
         float inset = PAD_DP * density;
         rect.set(inset, inset, getWidth() - inset, getHeight() - inset);
-        int rgb = color & 0x00FFFFFF;
+        int rgb = soften(color) & 0x00FFFFFF;
 
         // Glow: thin rings that fade out away from the tile, clipped so nothing lands on the icon.
         canvas.save();
@@ -82,7 +91,7 @@ public class GlassView extends View {
         float step = 1.5f * density;
         for (int i = 0; i < GLOW_LAYERS; i++) {
             float t = 1f - i / (float) GLOW_LAYERS;
-            int a = (int) (0x40 * t * t);
+            int a = (int) (0x22 * t * t);
             glow.setColor((a << 24) | rgb);
             float o = gap + rim.getStrokeWidth() + (i + 0.5f) * step;
             canvas.drawRoundRect(rect.left - o, rect.top - o, rect.right + o, rect.bottom + o,
@@ -91,7 +100,7 @@ public class GlassView extends View {
         canvas.restore();
 
         // Border in the app colour, just outside the icon edge.
-        rim.setColor(0xF2000000 | rgb);
+        rim.setColor(0xB0000000 | rgb);
         float h = gap + rim.getStrokeWidth() / 2f;
         canvas.drawRoundRect(rect.left - h, rect.top - h, rect.right + h, rect.bottom + h,
                 radius + h, radius + h, rim);

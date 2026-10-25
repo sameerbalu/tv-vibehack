@@ -34,10 +34,10 @@ final class RimLight extends Drawable {
     @Override
     protected void onBoundsChange(Rect b) {
         rim.setShader(new LinearGradient(0, b.top, 0, b.top + b.height() * 0.72f,
-                new int[]{0xCCFFFFFF, 0x66FFFFFF, 0x00FFFFFF},
+                new int[]{0x7AFFFFFF, 0x30FFFFFF, 0x00FFFFFF},
                 new float[]{0f, 0.32f, 1f}, Shader.TileMode.CLAMP));
         sheen.setShader(new LinearGradient(0, b.top, 0, b.top + b.height() * 0.5f,
-                new int[]{0x2EFFFFFF, 0x00FFFFFF}, null, Shader.TileMode.CLAMP));
+                new int[]{0x16FFFFFF, 0x00FFFFFF}, null, Shader.TileMode.CLAMP));
     }
 
     @Override

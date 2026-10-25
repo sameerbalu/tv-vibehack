@@ -9,6 +9,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Outline;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.media.MediaMetadata;
 import android.media.session.MediaController;
@@ -62,6 +63,12 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
     private Bitmap wallpaperBmp;
     private long wallpaperStamp;
     private String nuvioPkg;
+    private AppAdapter apps;
+
+    /** Where the apps' tile art comes from (used when a title has no thumbnail of its own). */
+    void setAppSource(AppAdapter apps) {
+        this.apps = apps;
+    }
     private int cardW, cardH, gapPx;
 
     ContinueAdapter(Context ctx, Host host) {
@@ -238,6 +245,8 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         np.topMargin = ht + (int) (14 * d);       // 8dp padding + 6dp below the poster
         h.name.setLayoutParams(np);
 
+        h.poster.setPadding(0, 0, 0, 0);
+        h.poster.setImageMatrix(null);
         Bitmap bmp = null;
         if (!e.poster.isEmpty()) {
             bmp = posters.get(e.poster);
@@ -246,7 +255,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
                 if (bmp != null) posters.put(e.poster, bmp);
             }
         }
-        if (bmp != null && isIconLike(bmp)) bmp = null;   // an app icon is not a thumbnail: use the wallpaper
+        if (bmp != null && isIconLike(bmp)) bmp = null;   // an app icon is not a thumbnail: use the app's own tile
         if (bmp != null) {
             float ratio = bmp.getWidth() / (float) bmp.getHeight();
             if (ratio >= 1.5f || ratio < 0.8f) {
@@ -267,17 +276,11 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
                     } catch (RuntimeException | OutOfMemoryError ignored) {
                     }
                 }
+                h.posterBg.setScaleType(ImageView.ScaleType.CENTER_CROP);
                 h.posterBg.setImageBitmap(bl);
             }
-        } else if (wallpaper(w) != null) {
-            // No real thumbnail: the wallpaper, a different part of it for each title so the cards differ.
-            Bitmap wp = wallpaper(w);
-            int hash = Math.abs(e.title.hashCode());
-            h.posterBg.setImageDrawable(null);
-            h.poster.setScaleType(ImageView.ScaleType.MATRIX);
-            h.poster.setImageBitmap(wp);
-            h.poster.setImageMatrix(wallpaperMatrix(wp.getWidth(), wp.getHeight(), w, ht,
-                    (hash % 100) / 99f, ((hash / 100) % 100) / 99f));
+        } else if (applyAppTile(h, e, w, ht)) {
+            // The app's own thumbnail, exactly as the apps list shows it.
         } else {
             h.posterBg.setImageDrawable(null);
             h.poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
@@ -296,6 +299,41 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
             h.progress.setVisibility(View.GONE);
             h.scrim.setVisibility(View.GONE);
         }
+    }
+
+    /** A copy of the drawable, so the tile in the apps list and this poster never fight over its bounds. */
+    private Drawable copyOf(Drawable dr) {
+        if (dr == null) return null;
+        Drawable.ConstantState cs = dr.getConstantState();
+        return cs != null ? cs.newDrawable(ctx.getResources()).mutate() : dr;
+    }
+
+    /**
+     * No real thumbnail for this title: show what the app's tile in the apps list shows. A banner fills the card;
+     * an icon-only app gets the same colour gradient with its icon in the middle. False if the app is unknown.
+     */
+    private boolean applyAppTile(PosterHolder h, NuvioHistory.Entry e, int w, int ht) {
+        if (apps == null) return false;
+        AppAdapter.Entry ae = apps.entryFor(resolvePkg(e));
+        if (ae == null) return false;
+        if (ae.packIcon == null && ae.banner != null) {
+            h.posterBg.setImageDrawable(null);
+            h.poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            h.poster.setImageDrawable(copyOf(ae.banner));
+            return true;
+        }
+        Drawable icon = copyOf(ae.packIcon != null ? ae.packIcon : ae.icon);
+        if (icon == null) return false;
+        int color = apps.ambientOf(ae);
+        h.posterBg.setScaleType(ImageView.ScaleType.FIT_XY);
+        h.posterBg.setImageDrawable(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[]{AppAdapter.mixBlack(color, 0.42f), AppAdapter.mixBlack(color, 0.78f)}));
+        int size = Math.round(ht * 0.46f);
+        int padX = Math.max(0, (w - size) / 2), padY = Math.max(0, (ht - size) / 2);
+        h.poster.setPadding(padX, padY, padX, padY);
+        h.poster.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        h.poster.setImageDrawable(icon);
+        return true;
     }
 
     /** Square-ish pictures (about 1:1) are app icons, not video thumbnails. Posters (tall) and stills (wide) are not. */

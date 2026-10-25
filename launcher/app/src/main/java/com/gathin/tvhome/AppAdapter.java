@@ -420,6 +420,18 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         return position >= 0 && position < items.size() ? items.get(position).label : "";
     }
 
+    /** The list entry of this app (the same art its tile shows), or null when it is not in the list. */
+    Entry entryFor(String pkg) {
+        if (pkg == null) return null;
+        for (Entry e : items) if (pkg.equals(e.pkg)) return e;
+        return null;
+    }
+
+    int ambientOf(Entry e) {
+        if (e.ambient == 0) e.ambient = vividColor(e.packIcon != null ? e.packIcon : (e.banner != null ? e.banner : e.icon));
+        return e.ambient;
+    }
+
     int ambientColorAt(int position) {
         if (position < 0 || position >= items.size()) return 0xFF444444;
         Entry e = items.get(position);
@@ -442,7 +454,7 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         return Color.HSVToColor(hsv);
     }
 
-    private static int vividColor(Drawable live) {
+    static int vividColor(Drawable live) {
         if (live == null) return 0xFF444444;
         Drawable d = live.getConstantState() != null ? live.getConstantState().newDrawable().mutate() : live;
         Rect saved = new Rect(d.getBounds());
