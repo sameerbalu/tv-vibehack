@@ -137,7 +137,7 @@ final class ControlCenter {
         int pad = (int) (18 * d);
         card.setPadding(pad, pad, pad, pad);
         card.setBackground(cardBackground());
-        card.setElevation(18 * d);
+        // (no elevation: a big translucent shadow is expensive to animate on a TV GPU)
         // Never wider than the screen allows (small or scaled-up displays).
         int screenW = ctx.getResources().getDisplayMetrics().widthPixels;
         int cardW = Math.min((int) (452 * d), screenW - (int) (48 * d));
@@ -629,18 +629,22 @@ final class ControlCenter {
             // bar
             float bx = padL + labelW + 8 * d;
             float bw = Math.max(20 * d, w - bx - padR - valueW - 12 * d);
-            float bh = 7 * d, by = h / 2f - bh / 2f;
+            float bh = 9 * d, by = h / 2f - bh / 2f;
             p.setTextAlign(Paint.Align.LEFT);
-            p.setColor(0x33FFFFFF);
+            p.setColor(0x24FFFFFF);                      // quiet track, so the red is what you see
             r.set(bx, by, bx + bw, by + bh);
             c.drawRoundRect(r, bh / 2f, bh / 2f, p);
             if (shader == null || shaderX != bx || shaderW != bw) {
-                shader = new LinearGradient(bx, 0, bx + bw, 0, 0xFF7A0C14, 0xFFC8202C, Shader.TileMode.CLAMP);
+                shader = new LinearGradient(bx, 0, bx + bw, 0, 0xFFB10F1C, 0xFFE8283A, Shader.TileMode.CLAMP);
                 shaderX = bx;
                 shaderW = bw;
             }
+            float fillW = Math.max(bh, bw * frac * shown);
+            p.setColor(0x33E8283A);                      // faint red glow around the bar
+            r.set(bx - 2 * d, by - 2 * d, bx + fillW + 2 * d, by + bh + 2 * d);
+            c.drawRoundRect(r, bh / 2f + 2 * d, bh / 2f + 2 * d, p);
             p.setShader(shader);
-            r.set(bx, by, bx + Math.max(bh, bw * frac * shown), by + bh);
+            r.set(bx, by, bx + fillW, by + bh);
             c.drawRoundRect(r, bh / 2f, bh / 2f, p);
             p.setShader(null);
         }

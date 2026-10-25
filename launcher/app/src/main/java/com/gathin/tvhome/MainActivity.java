@@ -1302,7 +1302,17 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         menuVeil.animate().alpha(0f).setDuration(240).withEndAction(() -> menuVeil.setVisibility(View.GONE)).start();
     };
 
+    private View menuVeilDark;
+
     private void showVeil() {
+        showVeil(false);
+    }
+
+    /**
+     * light = false: the wallpaper, lightly blurred and dark, hides the screen behind (big menus).
+     * light = true: only a gentle dark tint, so the screen stays visible (Inputs, Bluetooth, poster options).
+     */
+    private void showVeil(boolean light) {
         handler.removeCallbacks(hideVeilRunnable);
         if (menuVeil == null) {
             menuVeil = new FrameLayout(this);
@@ -1313,13 +1323,14 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             menuVeilImg.setScaleType(ImageView.ScaleType.CENTER_CROP);
             menuVeil.addView(menuVeilImg, new FrameLayout.LayoutParams(-1, -1));
             View dark = new View(this);
-            dark.setBackgroundColor(0xB8000000);          // dark, so the menu stands out
+            menuVeilDark = dark;
             menuVeil.addView(dark, new FrameLayout.LayoutParams(-1, -1));
             menuVeil.setVisibility(View.GONE);
             root.addView(menuVeil, new FrameLayout.LayoutParams(-1, -1));
         }
-        menuVeilImg.setImageBitmap(veilBackdrop);
-        menuVeilImg.setAlpha(veilBackdrop != null ? 1f : 0f);
+        menuVeilDark.setBackgroundColor(light ? 0x59000000 : 0xB8000000);
+        menuVeilImg.setImageBitmap(light ? null : veilBackdrop);
+        menuVeilImg.setAlpha(!light && veilBackdrop != null ? 1f : 0f);
         menuVeil.animate().cancel();
         if (menuVeil.getVisibility() != View.VISIBLE) {
             menuVeil.setAlpha(0f);
@@ -1550,7 +1561,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         slp.height = Math.min(rows.getMeasuredHeight(), (int) (root.getHeight() * 0.6f));
         scroll.setLayoutParams(slp);
         popup.setOnDismissListener(() -> {
-            if (changed[0]) adapter.reload();
+            if (changed[0]) adapter.reloadAsync();
         });
         showDropdown(popup, panel, anchor, minWidth, true);
     }
@@ -1703,7 +1714,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             wallpaperBlurView.setImageBitmap(blurred);
             wallpaperBlurView.setVisibility(View.VISIBLE);
             menuBackdrop = blurred;
-            veilBackdrop = BlurUtil.blur(bitmap, 360, 4);       // a gentle blur: the picture stays recognisable
+            final Bitmap src = bitmap;                          // a gentle blur for the menu veil, made off the main thread
+            new Thread(() -> {
+                final Bitmap v = BlurUtil.blur(src, 360, 4);
+                runOnUiThread(() -> veilBackdrop = v);
+            }).start();
             if (dockDecoration != null) dockDecoration.setBackdrop(blurred);
             if (allAppsPanel != null) allAppsPanel.setBackdrop(blurred);
             if (grid != null) grid.invalidate();
@@ -2004,6 +2019,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         rowsFaded = on && any;
     }
 
+    private final Rect contClip = new Rect();
+    private boolean contClipSet;
+
     private void syncContinueRow() {
         syncDock();
         syncRowFade();
@@ -2031,9 +2049,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         int cr = Math.min(gc == null ? root.getWidth() : gc.right, root.getWidth() - side);
         int ct = gc == null ? Math.round(-y) : Math.round(gc.top - y);
         int cb = gc == null ? continueRow.getHeight() : Math.round(gc.bottom - y);
-        Rect want2 = new Rect(cl, ct, cr, cb);
-        Rect have = continueRow.getClipBounds();
-        if (!want2.equals(have)) continueRow.setClipBounds(want2);
+        if (!contClipSet || contClip.left != cl || contClip.top != ct || contClip.right != cr || contClip.bottom != cb) {
+            contClip.set(cl, ct, cr, cb);
+            contClipSet = true;
+            continueRow.setClipBounds(new Rect(contClip));
+        }
 
         // Pills: "Continue watching" above the posters, "All apps" above the first row of apps.
         float pillAlpha = grid.getAlpha() * (allAppsPanel != null ? allAppsPanel.getAlpha() : 1f);
@@ -2156,7 +2176,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             NuvioHistory.clear(this);
             postersChanged(0);
         });
-        showDropdown(popup, panel, card, minWidth, false);
+        showDropdown(popup, panel, card, minWidth, false, true);
     }
 
     private void addMenuRow(LinearLayout rows, PopupWindow popup, int iconRes, String title, Runnable action) {
@@ -2531,7 +2551,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         addSeparator(rows);
         addInputRow(rows, popup, MenuIcons.BLUETOOTH, getString(R.string.bt_settings), -1, this::openRemotesAndAccessories);
         fitScroll(panel);
-        showDropdown(popup, panel, anchor, minWidth, false);
+        showDropdown(popup, panel, anchor, minWidth, false, true);
     }
 
     private View addBtRow(LinearLayout rows, PopupWindow popup, String title, String status, boolean connected, float alpha) {
@@ -2800,7 +2820,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             return;
         }
 
-        showDropdown(popup, panel, anchor, width, false);
+        showDropdown(popup, panel, anchor, width, false, true);
     }
 
     /** A popup that fades and folds back up when it closes, the mirror of how showDropdown opens it. */
@@ -2853,6 +2873,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
 
     /** Fits the popup to its widest row, drops it in under the anchor (unfolding from the top) and focuses row one. */
     private void showDropdown(PopupWindow popup, View panel, View anchor, int minWidth, boolean alignEnd) {
+        showDropdown(popup, panel, anchor, minWidth, alignEnd, false);
+    }
+
+    private void showDropdown(PopupWindow popup, View panel, View anchor, int minWidth, boolean alignEnd, boolean lightVeil) {
         LinearLayout rows = panel.findViewById(R.id.rows);
         panel.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
         int width = Math.max(minWidth, panel.getMeasuredWidth());
@@ -2875,7 +2899,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
                     .setInterpolator(new DecelerateInterpolator(1.6f)).start();
         }
         openPopup = popup;
-        showVeil();
+        showVeil(lightVeil);
         // Keep a listener the caller already set (Hide apps reloads the list when it closes).
         final PopupWindow.OnDismissListener prev = popup instanceof AnimPopup ? ((AnimPopup) popup).user : null;
         popup.setOnDismissListener(() -> {

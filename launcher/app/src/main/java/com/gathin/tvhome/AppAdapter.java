@@ -154,7 +154,19 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         return true;
     }
 
+    /** Same as reload(), but the slow part (loading every icon) runs off the main thread so the screen never stalls. */
+    void reloadAsync() {
+        new Thread(() -> {
+            final List<Entry> fresh = buildEntries();
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> applyEntries(fresh));
+        }).start();
+    }
+
     void reload() {
+        applyEntries(buildEntries());
+    }
+
+    private List<Entry> buildEntries() {
         PackageManager pm = ctx.getPackageManager();
         Intent probe = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
         List<ResolveInfo> found = pm.queryIntentActivities(probe, 0);
@@ -199,6 +211,10 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
             }
             return a.label.compareToIgnoreCase(b.label);
         });
+        return fresh;
+    }
+
+    private void applyEntries(List<Entry> fresh) {
         items.clear();
         items.addAll(fresh);
         notifyDataSetChanged();
@@ -500,8 +516,8 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
             card.setClipToOutline(true);
             // Rim light that follows the rounded corners, on top of the sheen from the XML.
             Drawable sheen = card.getForeground();
-            card.setForeground(sheen == null ? new RimLight(density, 16f)
-                    : new android.graphics.drawable.LayerDrawable(new Drawable[]{sheen, new RimLight(density, 16f)}));
+            card.setForeground(sheen == null ? new RimLight(density, 16f, false)
+                    : new android.graphics.drawable.LayerDrawable(new Drawable[]{sheen, new RimLight(density, 16f, false)}));
             card.setOnKeyListener((view, keyCode, event) -> {
                 if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
                 int pos = getBindingAdapterPosition();

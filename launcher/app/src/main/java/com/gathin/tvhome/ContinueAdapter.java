@@ -178,7 +178,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
             }
         });
         h.card.setClipToOutline(true);
-        h.card.setForeground(new RimLight(d, RADIUS_DP));
+        h.card.setForeground(new RimLight(d, RADIUS_DP, true));
         h.scrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[]{0x00000000, 0xB8000000}));
         h.card.setOnKeyListener((view, keyCode, event) -> {
