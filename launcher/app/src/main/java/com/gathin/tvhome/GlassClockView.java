@@ -26,38 +26,136 @@ import java.util.Calendar;
  */
 public class GlassClockView extends View {
 
-    // glyph units: stroke 0.17, digit box 0.415 x 0.83 (centre lines), so a digit is 0.585 x 1.0 overall
-    private static final float W = 0.17f, R = 0.2075f, X1 = 0.415f, YB = 0.83f;
-    private static final float CX = 0.2075f, CYT = 0.2075f, CYB = 0.6225f;
-    private static final float GAP = 0.13f, COLON = 0.22f;
-    private static final float HEIGHT_UNITS = YB + W;
+    // glyph units: digit height = 1, digit box 0.64 wide, stroke 0.19
+    private static final float S = 0.19f, DW = 0.64f, GAP = 0.09f, COLON = 0.20f;
+    private static final float XL = 0.095f, XR = 0.545f, YT = 0.095f, YB = 0.905f, CX = 0.32f, CUT = 0.034f;
+    private static final float HEIGHT_UNITS = 1f;
 
-    private static float[] L(float x1, float y1, float x2, float y2) { return new float[]{0, x1, y1, x2, y2}; }
-    private static float[] A(float cx, float cy, float r, float s, float sw) { return new float[]{1, cx, cy, r, s, sw}; }
+    private final Paint probe = new Paint(Paint.ANTI_ALIAS_FLAG);
 
-    private static float[][] rot180(float[][] src) {
-        float[][] o = new float[src.length][];
-        for (int i = 0; i < src.length; i++) {
-            float[] p = src[i];
-            o[i] = p[0] == 0 ? L(X1 - p[1], YB - p[2], X1 - p[3], YB - p[4])
-                    : A(X1 - p[1], YB - p[2], p[3], p[4] + 180f, p[5]);
-        }
-        return o;
+    private Path stroked(Path centre) {
+        Path out = new Path();
+        probe.setStyle(Paint.Style.STROKE);
+        probe.setStrokeWidth(S);
+        probe.setStrokeCap(Paint.Cap.BUTT);
+        probe.setStrokeJoin(Paint.Join.MITER);
+        probe.getFillPath(centre, out);
+        return out;
     }
 
-    private static final float[][][] DIGITS = new float[10][][];
-    static {
-        DIGITS[0] = new float[][]{L(0, CYT, 0, CYB), L(X1, CYT, X1, CYB),
-                A(CX, CYT, R, 180, 78), A(CX, CYT, R, 282, 78), A(CX, CYB, R, 0, 78), A(CX, CYB, R, 102, 78)};
-        DIGITS[1] = new float[][]{L(.30f, 0, .30f, YB), L(0, .19f, .2f, .04f)};
-        DIGITS[2] = new float[][]{A(CX, CYT, R, 185, 205), L(.36f, .36f, .075f, .74f), L(.15f, YB, X1, YB)};
-        DIGITS[3] = new float[][]{A(CX, CYT, R, 205, 235), A(CX, CYB, R, 280, 240)};
-        DIGITS[4] = new float[][]{L(.30f, 0, .30f, YB), L(0, .58f, X1, .58f), L(.17f, .04f, 0, .5f)};
-        DIGITS[5] = new float[][]{L(X1 - .03f, 0, .07f, 0), L(.07f, 0, .07f, .36f), A(CX, CYB, R, 238, 262)};
-        DIGITS[6] = new float[][]{A(CX, CYT, R, 325, -122), L(0, .275f, 0, CYB), A(CX, CYB, R, 180, -330)};
-        DIGITS[7] = new float[][]{L(0, 0, .34f, 0), L(.39f, .1f, .13f, YB)};
-        DIGITS[8] = new float[][]{A(CX, CYT, R, 200, 320), A(CX, CYB, R, 20, 320)};
-        DIGITS[9] = rot180(DIGITS[6]);
+    private static Path rect(float l, float t, float r, float b) {
+        Path p = new Path();
+        p.addRect(l, t, r, b, Path.Direction.CW);
+        return p;
+    }
+
+    private static Path cut(Path glyph, Path... cuts) {
+        for (Path c : cuts) glyph.op(c, Path.Op.DIFFERENCE);
+        return glyph;
+    }
+
+    private static Path union(Path a, Path b) {
+        a.op(b, Path.Op.UNION);
+        return a;
+    }
+
+    private static void rotate180(Path p) {
+        Matrix m = new Matrix();
+        m.setRotate(180f, DW / 2f, 0.5f);
+        p.transform(m);
+    }
+
+    private Path six() {
+        Path hook = new Path();
+        hook.arcTo(new RectF(XL, YT, XR, YT + 1.01f), 180f, 125f, true);
+        Path bowl = new Path();
+        bowl.addOval(new RectF(XL, 0.45f, XR, YB), Path.Direction.CW);
+        Path g = union(stroked(hook), stroked(bowl));
+        return cut(g, rect(0f, 0.43f, 0.2f, 0.43f + CUT));
+    }
+
+    private Path glyph(char ch) {
+        Path c = new Path();
+        switch (ch) {
+            case '0': {
+                c.moveTo(XL, YT + 0.225f);
+                c.arcTo(new RectF(XL, YT, XR, YT + 0.45f), 180f, 180f);
+                c.lineTo(XR, YB - 0.225f);
+                c.arcTo(new RectF(XL, YB - 0.45f, XR, YB), 0f, 180f);
+                c.close();
+                return cut(stroked(c), rect(CX - CUT / 2, 0f, CX + CUT / 2, 0.2f),
+                        rect(CX - CUT / 2, 0.8f, CX + CUT / 2, 1f));
+            }
+            case '1': {
+                Path stem = rect(0.375f, 0f, 0.565f, 1f);
+                Path flag = new Path();
+                flag.moveTo(0f, 0.27f);
+                flag.lineTo(0.25f, 0f);
+                flag.lineTo(0.32f, 0f);
+                flag.lineTo(0.32f, 0.30f);
+                flag.close();
+                return union(stem, flag);
+            }
+            case '2': {
+                c.arcTo(new RectF(XL, YT, XR, 0.53f), 180f, 215f, true);
+                c.lineTo(XL + 0.01f, YB);
+                c.lineTo(DW, YB);
+                return cut(stroked(c), rect(0.18f, 0.55f, DW, 0.55f + CUT));
+            }
+            case '3': {
+                c.arcTo(new RectF(XL, YT, XR, 0.5f), 200f, 250f, true);
+                c.arcTo(new RectF(XL - 0.01f, 0.5f, XR + 0.01f, YB), 270f, 250f, true);
+                return cut(stroked(c), rect(0f, 0.5f - CUT / 2, DW, 0.5f + CUT / 2));
+            }
+            case '4': {
+                c.moveTo(0.46f, 0f);
+                c.lineTo(0.46f, 1f);
+                Path g = stroked(c);
+                Path bar = new Path();
+                bar.moveTo(0f, 0.70f);
+                bar.lineTo(DW, 0.70f);
+                union(g, stroked(bar));
+                Path diag = new Path();
+                diag.moveTo(0.30f, 0.0f);
+                diag.lineTo(0.05f, 0.70f);
+                union(g, stroked(diag));
+                return cut(g, rect(0.31f, 0f, 0.31f + CUT, 0.62f));
+            }
+            case '5': {
+                c.moveTo(0.60f, YT);
+                c.lineTo(XL, YT);
+                c.lineTo(XL, 0.46f);
+                Path g = stroked(c);
+                Path bowl = new Path();
+                bowl.arcTo(new RectF(XL, 0.40f, XR, YB), 230f, 270f, true);
+                union(g, stroked(bowl));
+                return cut(g, rect(0f, 0.41f, 0.32f, 0.41f + CUT));
+            }
+            case '6':
+                return six();
+            case '7': {
+                Path g = rect(0f, 0f, DW, S);
+                Path d = new Path();
+                d.moveTo(0.52f, 0.1f);
+                d.lineTo(0.24f, 1f);
+                union(g, stroked(d));
+                return cut(g, rect(0f, S, DW, S + CUT));
+            }
+            case '8': {
+                c.addOval(new RectF(0.12f, YT, 0.52f, 0.52f), Path.Direction.CW);
+                Path b = new Path();
+                b.addOval(new RectF(XL, 0.47f, XR, YB), Path.Direction.CW);
+                Path g = union(stroked(c), stroked(b));
+                return cut(g, rect(0f, 0.475f, 0.17f, 0.475f + CUT));
+            }
+            case '9': {
+                Path g = six();
+                rotate180(g);
+                return g;
+            }
+            default:
+                return c;
+        }
     }
 
     private final float density;
@@ -84,14 +182,14 @@ public class GlassClockView extends View {
     public GlassClockView(Context context, AttributeSet attrs) {
         super(context, attrs);
         density = context.getResources().getDisplayMetrics().density;
-        unit = 66f * density;             // digit height in px
+        unit = 46f * density;             // digit height in px
         strokeProbe.setStyle(Paint.Style.STROKE);
         strokeProbe.setStrokeCap(Paint.Cap.BUTT);
         base.setStyle(Paint.Style.FILL);
         glass.setStyle(Paint.Style.FILL);
         veil.setStyle(Paint.Style.FILL);
         rim.setStyle(Paint.Style.STROKE);
-        rim.setStrokeWidth(1.3f * density);
+        rim.setStrokeWidth(0.9f * density);
         rim.setStrokeJoin(Paint.Join.ROUND);
         build(currentText());
     }
@@ -128,40 +226,26 @@ public class GlassClockView extends View {
     /** Builds the filled outline of all glyphs in unit space (digit height = 1). */
     private void build(String text) {
         shown = text;
-        Path stroke = new Path();
-        Path dots = new Path();
-        float x = W / 2f;
-        float y = W / 2f;
-        textWidthUnits = 0;
+        glyphs.reset();
+        float x = 0f;
         for (int i = 0; i < text.length(); i++) {
             char ch = text.charAt(i);
+            Path g;
+            float adv;
             if (ch == ':') {
-                float cx = x + COLON / 2f - W / 2f;
-                dots.addCircle(cx, y + .27f, .088f, Path.Direction.CW);
-                dots.addCircle(cx, y + .58f, .088f, Path.Direction.CW);
-                x += COLON + GAP;
-                continue;
+                g = new Path();
+                g.addCircle(COLON / 2f, 0.31f, 0.1f, Path.Direction.CW);
+                g.addCircle(COLON / 2f, 0.69f, 0.1f, Path.Direction.CW);
+                adv = COLON;
+            } else {
+                g = glyph(ch);
+                adv = ch == '1' ? 0.565f : DW;
             }
-            float[][] d = DIGITS[ch - '0'];
-            for (float[] p : d) {
-                if (p[0] == 0) {
-                    stroke.moveTo(x + p[1], y + p[2]);
-                    stroke.lineTo(x + p[3], y + p[4]);
-                } else {
-                    RectF oval = new RectF(x + p[1] - p[3], y + p[2] - p[3], x + p[1] + p[3], y + p[2] + p[3]);
-                    stroke.arcTo(oval, p[4], p[5], true);
-                }
-            }
-            x += X1 + W + GAP;
+            g.offset(x, 0f);
+            glyphs.addPath(g);
+            x += adv + GAP;
         }
         textWidthUnits = x - GAP;
-        // turn the centre lines into filled shapes (so the glass fill and rim follow the real outline)
-        Path fill = new Path();
-        strokeProbe.setStrokeWidth(W);
-        strokeProbe.getFillPath(stroke, fill);
-        glyphs.reset();
-        glyphs.addPath(fill);
-        glyphs.addPath(dots);
     }
 
     @Override
@@ -210,7 +294,7 @@ public class GlassClockView extends View {
         Path p = glyphs;
 
         // 1) soft body so the glass reads on any wallpaper
-        base.setColor(backdropShader != null ? 0x30000000 : 0x26FFFFFF);
+        base.setColor(backdropShader != null ? 0x28000000 : 0x30FFFFFF);
         canvas.drawPath(p, base);
 
         // 2) blurred wallpaper showing through the glyphs
@@ -231,7 +315,7 @@ public class GlassClockView extends View {
         }
 
         // 3) lavender-white veil, brighter at the top like light on glass
-        veil.setShader(new LinearGradient(0, 0, 0, HEIGHT_UNITS, 0x78F3EEFF, 0x30D9D4FF, Shader.TileMode.CLAMP));
+        veil.setShader(new LinearGradient(0, 0, 0, HEIGHT_UNITS, 0x80D4D0FF, 0x5CB8B4F0, Shader.TileMode.CLAMP));
         canvas.drawPath(p, veil);
         canvas.restore();
 
@@ -242,7 +326,7 @@ public class GlassClockView extends View {
         Matrix s = new Matrix();
         s.setScale(unit, unit);
         p.transform(s, px);
-        rim.setShader(new LinearGradient(0, 0, 0, h, 0xCCFFFFFF, 0x55FFFFFF, Shader.TileMode.CLAMP));
+        rim.setShader(new LinearGradient(0, 0, 0, h, 0x88FFFFFF, 0x33FFFFFF, Shader.TileMode.CLAMP));
         canvas.drawPath(px, rim);
         canvas.restore();
     }
