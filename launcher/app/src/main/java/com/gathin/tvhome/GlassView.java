@@ -27,6 +27,7 @@ public class GlassView extends View {
 
     private final Paint rim = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint glow = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint casing = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF rect = new RectF();
     private final Path inner = new Path();
     private final float density;
@@ -40,6 +41,9 @@ public class GlassView extends View {
         radius = 16f * density;
         rim.setStyle(Paint.Style.STROKE);
         rim.setStrokeWidth(1.4f * density);
+        casing.setStyle(Paint.Style.STROKE);
+        casing.setStrokeWidth(3.2f * density);
+        casing.setColor(0x4D000000);
         glow.setStyle(Paint.Style.STROKE);
         glow.setStrokeWidth(1.5f * density);
     }
@@ -99,9 +103,11 @@ public class GlassView extends View {
         }
         canvas.restore();
 
-        // Border in the app colour, just outside the icon edge.
+        // Border in the app colour, just outside the icon edge, on a thin dark casing so it never melts into the background.
         rim.setColor(0xB0000000 | rgb);
         float h = gap + rim.getStrokeWidth() / 2f;
+        canvas.drawRoundRect(rect.left - h, rect.top - h, rect.right + h, rect.bottom + h,
+                radius + h, radius + h, casing);
         canvas.drawRoundRect(rect.left - h, rect.top - h, rect.right + h, rect.bottom + h,
                 radius + h, radius + h, rim);
     }

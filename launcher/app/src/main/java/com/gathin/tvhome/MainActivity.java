@@ -2126,6 +2126,35 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         return best;
     }
 
+    private Bitmap cursorBgFor;
+    private int cursorBgAvg;
+
+    /** Netflix red, unless the wallpaper behind is close to that red: then the cursor would vanish, so use light grey. */
+    private int posterCursorColor() {
+        final int red = 0xFFE50914;
+        Bitmap b = menuBackdrop;
+        if (b == null || b.isRecycled()) return red;
+        if (b != cursorBgFor) {
+            long r = 0, g = 0, bl = 0;
+            int n = 0;
+            for (int yy = 1; yy < 8; yy++) {
+                for (int xx = 1; xx < 8; xx++) {
+                    int p = b.getPixel(xx * b.getWidth() / 8, yy * b.getHeight() / 8);
+                    r += Color.red(p);
+                    g += Color.green(p);
+                    bl += Color.blue(p);
+                    n++;
+                }
+            }
+            cursorBgAvg = Color.rgb((int) (r / n), (int) (g / n), (int) (bl / n));
+            cursorBgFor = b;
+        }
+        float dr = Color.red(cursorBgAvg) - Color.red(red);
+        float dg = Color.green(cursorBgAvg) - Color.green(red);
+        float db = Color.blue(cursorBgAvg) - Color.blue(red);
+        return Math.sqrt(dr * dr + dg * dg + db * db) < 150 ? 0xFFF0F0F0 : red;
+    }
+
     @Override
     public void onPosterFocused(int index, View card, int color) {
         if (restorePending || arranging) return;
@@ -2133,7 +2162,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         boolean entering = !allAppsMode;
         allAppsMode = true;
         syncContinueRow();                                 // the row must be in place before the cursor is measured against it
-        glass.setColor(color, glassShown);                 // red cursor on the posters
+        glass.setColor(posterCursorColor(), glassShown);   // red cursor on the posters (light when the wallpaper is red too)
         moveGlassTo(card, true);
         refreshChrome();
         hideHero();
@@ -2177,7 +2206,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             NuvioHistory.clear(this);
             postersChanged(0);
         });
-        showDropdown(popup, panel, card, minWidth, false, true);
+        showDropdown(popup, panel, card, minWidth, false, true, true);   // same space left and right of the poster
     }
 
     private void addMenuRow(LinearLayout rows, PopupWindow popup, int iconRes, String title, Runnable action) {
@@ -2878,6 +2907,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     }
 
     private void showDropdown(PopupWindow popup, View panel, View anchor, int minWidth, boolean alignEnd, boolean lightVeil) {
+        showDropdown(popup, panel, anchor, minWidth, alignEnd, lightVeil, false);
+    }
+
+    private void showDropdown(PopupWindow popup, View panel, View anchor, int minWidth, boolean alignEnd,
+                              boolean lightVeil, boolean centered) {
         LinearLayout rows = panel.findViewById(R.id.rows);
         panel.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
         int width = Math.max(minWidth, panel.getMeasuredWidth());
@@ -2887,7 +2921,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         panel.setPivotY(0f);
         panel.setScaleY(0.92f);
         panel.setTranslationY(-8 * density);
-        int xOff = alignEnd ? anchor.getWidth() - width : 0;
+        int xOff = centered ? (anchor.getWidth() - width) / 2 : (alignEnd ? anchor.getWidth() - width : 0);
         popup.showAsDropDown(anchor, xOff, (int) (10 * density), Gravity.START);
         panel.animate().alpha(1f).scaleY(1f).translationY(0f).setDuration(220)
                 .setInterpolator(new DecelerateInterpolator(1.6f)).start();
