@@ -401,7 +401,11 @@ final class ControlCenter {
     private void focusFx(final View v, final PillIcon icon, final float focusScale) {
         v.setOnFocusChangeListener((view, f) -> {
             scaleTo(view, f ? focusScale : 1f, f, f ? 240 : 170);
-            if (icon != null) icon.setFocused(f);
+            if (icon != null) {
+                icon.setFocused(f);
+                // The icon is a child, so tell it directly (dark on the bright focused circle, white otherwise).
+                icon.setState(f ? new int[]{android.R.attr.state_focused} : new int[0]);
+            }
         });
         pressFx(v, focusScale);
     }
@@ -432,7 +436,6 @@ final class ControlCenter {
         v.setFocusable(true);
         v.setClickable(true);
         ImageView iv = new ImageView(ctx);
-        iv.setDuplicateParentState(true);                  // so the icon knows when the button is focused
         // White at rest, dark while the button is the bright focused circle.
         PillIcon icon = MenuIcons.make(iconKind, d, new ColorStateList(
                 new int[][]{{android.R.attr.state_focused}, {}}, new int[]{INK, 0xFFFFFFFF}));
