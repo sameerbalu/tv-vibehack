@@ -95,4 +95,19 @@
     <string name="poster_open_app">%1$s öffnen</string>
     <string name="poster_remove">Aus „Weiterschauen“ entfernen</string>
     <string name="poster_clear">„Weiterschauen“ leeren</string>
+    <string name="cc_wifi">WLAN</string>
+    <string name="cc_connected">Verbunden</string>
+    <string name="cc_ethernet">Ethernet</string>
+    <string name="cc_offline">Offline</string>
+    <string name="cc_on">An</string>
+    <string name="cc_off">Aus</string>
+    <string name="cc_manage">Verwalten</string>
+    <string name="cc_custom">Eigenes</string>
+    <string name="cc_default">Standard</string>
+    <string name="cc_system">System</string>
+    <string name="cc_now_playing">Wiedergabe</string>
+    <string name="cc_idle">Keine Wiedergabe</string>
+    <string name="cc_sound">Ton</string>
+    <string name="cc_about">Info</string>
+    <string name="cc_title">Kontrollzentrum</string>
 </resources>

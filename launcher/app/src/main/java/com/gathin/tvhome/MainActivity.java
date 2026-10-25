@@ -574,6 +574,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         handler.removeCallbacks(minuteTick);
         stopClockLoop();
         handler.removeCallbacks(idleSaver);
+        if (controlCenter != null) controlCenter.dismiss();
+        if (menuVeil != null) {
+            menuVeil.animate().cancel();
+            menuVeil.setVisibility(View.GONE);
+        }
         if (inputsIcon != null) inputsIcon.rest();
         if (bluetoothIcon != null) bluetoothIcon.rest();
         if (!restorePending) {
@@ -1238,26 +1243,91 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     }
 
     private void showLauncherSettings() {
-        View anchor = findViewById(R.id.btnSettings);
-        View panel = getLayoutInflater().inflate(R.layout.popup_apps, root, false);
-        panel.findViewById(R.id.title).setVisibility(View.GONE);
-        LinearLayout rows = panel.findViewById(R.id.rows);
-        int minWidth = (int) (230 * density);
-        final PopupWindow popup = newDropdown(panel, minWidth);
-        addInputRow(rows, popup, MenuIcons.WALLPAPER, getString(R.string.wallpaper_tab), -1, this::showWallpaperMenu);
-        addInputRow(rows, popup, MenuIcons.EYE, getString(R.string.hide_apps), -1, this::showHideApps);
-        addInputRow(rows, popup, MenuIcons.WIDGETS, getString(R.string.widgets), -1, this::showWidgets);
-        addInputRow(rows, popup, MenuIcons.SPARKLE, getString(R.string.fx_title), -1, this::showEffects);
-        if (!hasListenerAccess()) {
-            addInputRow(rows, popup, MenuIcons.BELL, getString(R.string.music_access), -1, this::openMusicAccess);
+        dismissOpenPopup();
+        ControlCenter.Actions a = new ControlCenter.Actions();
+        a.wallpaper = this::showWallpaperMenu;
+        a.hideApps = this::showHideApps;
+        a.effects = this::showEffects;
+        a.widgets = this::showWidgets;
+        a.saver = () -> startActivity(new Intent(this, ScreensaverActivity.class));
+        a.bluetooth = () -> open(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS));
+        a.wifi = () -> open(new Intent(Settings.ACTION_WIFI_SETTINGS));
+        a.sound = () -> open(new Intent(Settings.ACTION_SOUND_SETTINGS));
+        a.about = () -> open(new Intent(Settings.ACTION_DEVICE_INFO_SETTINGS));
+        a.system = () -> open(new Intent(Settings.ACTION_SETTINGS));
+        a.clearCache = this::quickClearCache;
+        a.stopApps = this::quickStopApps;
+        if (!hasListenerAccess()) a.musicAccess = this::openMusicAccess;
+        ControlCenter.Info info = new ControlCenter.Info();
+        info.effectsOn = fxGlowOn;
+        info.effectsValue = getString(fxGlowOn ? STYLE_NAMES[fxStyle] : R.string.cc_off);
+        info.wallpaperOn = WallpaperStore.exists(this);
+        info.wallpaperValue = getString(info.wallpaperOn ? R.string.cc_custom : R.string.cc_default);
+        info.storage = TvTools.storage();
+        info.memory = TvTools.memory(this);
+        showVeil();
+        controlCenter = new ControlCenter(this);
+        controlCenter.setOnDismiss(this::scheduleHideVeil);
+        controlCenter.show(a, info);
+    }
+
+    private ControlCenter controlCenter;
+
+    /** Memory row of the settings screen: stop the apps running in the background. */
+    private void quickStopApps() {
+        Toast.makeText(this, R.string.tc_working, Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            int n = 0;
+            try {
+                n = TvTools.stopBackground(this);
+            } catch (Exception ignored) {
+            }
+            final int count = n;
+            runOnUiThread(() -> Toast.makeText(this, getString(R.string.tc_stopped, count), Toast.LENGTH_LONG).show());
+        }).start();
+    }
+
+    // ---- blurred, slightly dark veil behind every menu --------------------------------------------------------
+
+    private FrameLayout menuVeil;
+    private ImageView menuVeilImg;
+    private final Runnable hideVeilRunnable = () -> {
+        if (menuVeil == null) return;
+        boolean open = (this.openPopup != null && this.openPopup.isShowing()) || (controlCenter != null && controlCenter.isShowing());
+        if (open) return;
+        menuVeil.animate().cancel();
+        menuVeil.animate().alpha(0f).setDuration(240).withEndAction(() -> menuVeil.setVisibility(View.GONE)).start();
+    };
+
+    private void showVeil() {
+        handler.removeCallbacks(hideVeilRunnable);
+        if (menuVeil == null) {
+            menuVeil = new FrameLayout(this);
+            menuVeil.setFocusable(false);
+            menuVeil.setClickable(false);
+            menuVeil.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            menuVeilImg = new ImageView(this);
+            menuVeilImg.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            menuVeil.addView(menuVeilImg, new FrameLayout.LayoutParams(-1, -1));
+            View dark = new View(this);
+            dark.setBackgroundColor(0x80000000);
+            menuVeil.addView(dark, new FrameLayout.LayoutParams(-1, -1));
+            menuVeil.setVisibility(View.GONE);
+            root.addView(menuVeil, new FrameLayout.LayoutParams(-1, -1));
         }
-        addInputRow(rows, popup, MenuIcons.MOON, getString(R.string.screen_saver), -1,
-                () -> startActivity(new Intent(this, ScreensaverActivity.class)));
-        addSeparator(rows);
-        addInputRow(rows, popup, MenuIcons.GEAR, getString(R.string.system_settings), -1,
-                () -> open(new Intent(Settings.ACTION_SETTINGS)));
-        fitScroll(panel);
-        showDropdown(popup, panel, anchor, minWidth, true);
+        menuVeilImg.setImageBitmap(menuBackdrop);
+        menuVeilImg.setAlpha(menuBackdrop != null ? 0.92f : 0f);
+        menuVeil.animate().cancel();
+        if (menuVeil.getVisibility() != View.VISIBLE) {
+            menuVeil.setAlpha(0f);
+            menuVeil.setVisibility(View.VISIBLE);
+        }
+        menuVeil.animate().alpha(1f).setDuration(240).start();
+    }
+
+    private void scheduleHideVeil() {
+        handler.removeCallbacks(hideVeilRunnable);
+        handler.postDelayed(hideVeilRunnable, 320);
     }
 
     // ---- double tap on the settings icon: clear cache -----------------------------------------------
@@ -2761,6 +2831,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
                     .setInterpolator(new DecelerateInterpolator(1.6f)).start();
         }
         openPopup = popup;
+        showVeil();
+        popup.setOnDismissListener(this::scheduleHideVeil);
         if (rows.getChildCount() > 0) rows.getChildAt(0).requestFocus();
     }
 
@@ -2768,6 +2840,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
 
     /** Closes the open dropdown, if any. Returns true when there was one. */
     private boolean dismissOpenPopup() {
+        if (controlCenter != null && controlCenter.isShowing()) {
+            controlCenter.dismiss();
+            return true;
+        }
         PopupWindow p = openPopup;
         openPopup = null;
         if (p != null && p.isShowing()) {

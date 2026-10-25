@@ -126,4 +126,19 @@
     <string name="poster_open_app">Open %1$s</string>
     <string name="poster_remove">Remove from Continue Watching</string>
     <string name="poster_clear">Clear Continue Watching</string>
+    <string name="cc_wifi">Wi-Fi</string>
+    <string name="cc_connected">Connected</string>
+    <string name="cc_ethernet">Ethernet</string>
+    <string name="cc_offline">Offline</string>
+    <string name="cc_on">On</string>
+    <string name="cc_off">Off</string>
+    <string name="cc_manage">Manage</string>
+    <string name="cc_custom">Custom</string>
+    <string name="cc_default">Default</string>
+    <string name="cc_system">System</string>
+    <string name="cc_now_playing">Now playing</string>
+    <string name="cc_idle">Nothing playing</string>
+    <string name="cc_sound">Sound</string>
+    <string name="cc_about">About</string>
+    <string name="cc_title">Control center</string>
 </resources>
