@@ -97,4 +97,12 @@
     <string name="poster_clear">„Weiterschauen“ leeren</string>
     <string name="cc_nothing_playing">Nichts wird abgespielt</string>
     <string name="cc_now_playing">Wiedergabe</string>
+    <string name="cc_volume">Lautstärke</string>
+    <string name="cc_wifi">WLAN</string>
+    <string name="cc_connected">Verbunden</string>
+    <string name="cc_ethernet">Ethernet</string>
+    <string name="cc_offline">Offline</string>
+    <string name="cc_on">An</string>
+    <string name="cc_off">Aus</string>
+    <string name="cc_idle">Keine Wiedergabe</string>
 </resources>

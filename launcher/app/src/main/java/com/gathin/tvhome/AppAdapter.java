@@ -502,6 +502,7 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
             });
             card.setClipToOutline(true);
             shadow = v.findViewById(R.id.shadow);
+            card.setForeground(new TileSheen(density, 16f));
             GlassStyle.attachShadow(card, shadow, density, 16f);
             card.setOnKeyListener((view, keyCode, event) -> {
                 if (event.getAction() != KeyEvent.ACTION_DOWN) return false;

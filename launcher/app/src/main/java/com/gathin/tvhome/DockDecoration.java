@@ -26,7 +26,8 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
     DockDecoration(int dockSize, float density) {
         this.dockSize = dockSize;
         this.density = density;
-        style = new GlassStyle(density, 0x4D000000, 0x10FFFFFF, 0x05FFFFFF, 0x2EFFFFFF);
+        style = new GlassStyle(density, 0x24000000, 0x0EFFFFFF, 0x03FFFFFF, 0x59FFFFFF);
+        style.setClarity(0x38, 96);           // clear glass: the wallpaper shows through softly
     }
 
     /** Blurred wallpaper (or null for none). Must be the same bitmap the full-screen blur uses. */
@@ -72,7 +73,7 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
             float m = 10 * density;
             save = c.saveLayerAlpha(rect.left - m, rect.top - m, rect.right + m, rect.bottom + m, Math.round(alpha * 255));
         }
-        style.draw(c, rect, 26 * density, parent.getWidth(), parent.getHeight(), 0f, 0f);
+        style.draw(c, rect, 32 * density, parent.getWidth(), parent.getHeight(), 0f, 0f);
         if (save >= 0) c.restoreToCount(save);
     }
 }

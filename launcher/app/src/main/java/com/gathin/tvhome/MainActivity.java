@@ -1249,6 +1249,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         a.widgets = this::showWidgets;
         a.saver = () -> startActivity(new Intent(this, ScreensaverActivity.class));
         a.bluetooth = () -> open(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS));
+        a.wifi = () -> open(new Intent(Settings.ACTION_WIFI_SETTINGS));
         a.system = () -> open(new Intent(Settings.ACTION_SETTINGS));
         a.clearCache = this::quickClearCache;
         a.stopApps = this::quickStopApps;
@@ -1258,7 +1259,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     }
 
     /** How strongly the blurred wallpaper covers the sharp one while the app list is open (1 = fully blurred). */
-    private static final float BLUR_ALL_APPS = 0.55f;
+    private static final float BLUR_ALL_APPS = 1f;
 
     private ControlCenter controlCenter;
 

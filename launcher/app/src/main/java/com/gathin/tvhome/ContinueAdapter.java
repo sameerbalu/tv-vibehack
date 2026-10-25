@@ -180,6 +180,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         });
         h.card.setClipToOutline(true);
         GlassStyle.attachShadow(h.card, h.shadow, d, RADIUS_DP);
+        h.card.setForeground(new TileSheen(d, RADIUS_DP));
         h.scrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[]{0x00000000, 0xB8000000}));
         h.card.setOnKeyListener((view, keyCode, event) -> {

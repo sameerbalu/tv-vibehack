@@ -52,6 +52,12 @@ final class GlassStyle {
         spec.setStyle(Paint.Style.FILL);
     }
 
+    /** How see-through the glass is: alpha of the dark base and of the blurred picture (0..255). */
+    void setClarity(int baseAlpha, int imageAlpha) {
+        base.setColor((baseAlpha << 24) | 0x0C0C0E);
+        image.setAlpha(imageAlpha);
+    }
+
     /** The blurred wallpaper (the same bitmap the full-screen blur shows), or null for none. */
     void setBackdrop(Bitmap blurred) {
         backdrop = blurred;
