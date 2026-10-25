@@ -22,8 +22,16 @@ final class RimLight extends Drawable {
     private final RectF rect = new RectF();
     private final float radius, stroke;
     private final boolean withSheen;
+    private final boolean withBottom;
 
+    /** Posters: top light plus the faint light along the bottom. */
     RimLight(float density, float radiusDp, boolean withSheen) {
+        this(density, radiusDp, withSheen, true);
+    }
+
+    /** withBottom = false: the light only fades from the top down to dark and never comes back at the bottom. */
+    RimLight(float density, float radiusDp, boolean withSheen, boolean withBottom) {
+        this.withBottom = withBottom;
         this.radius = radiusDp * density;
         this.stroke = 1.6f * density;
         this.withSheen = withSheen;
@@ -57,7 +65,7 @@ final class RimLight extends Drawable {
         float h = stroke / 2f;
         rect.set(b.left + h, b.top + h, b.right - h, b.bottom - h);
         c.drawRoundRect(rect, radius - h, radius - h, rim);
-        c.drawRoundRect(rect, radius - h, radius - h, rimBottom);
+        if (withBottom) c.drawRoundRect(rect, radius - h, radius - h, rimBottom);
     }
 
     @Override
