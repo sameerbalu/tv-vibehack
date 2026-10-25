@@ -1198,6 +1198,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         }
     }
 
+    private void setClockBackdrop(Bitmap b) {
+        View c = findViewById(R.id.clock);
+        if (c instanceof GlassClockView) ((GlassClockView) c).setBackdrop(b);
+    }
+
     private void stopClockLoop() {
         if (clockLoop != null) clockLoop.cancel();
         clockLoop = null;
@@ -1701,6 +1706,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         wallpaperBlurView.setImageDrawable(null);
         wallpaperBlurView.setVisibility(View.GONE);
         menuBackdrop = null;
+        setClockBackdrop(null);
         veilBackdrop = null;
         if (dockDecoration != null) dockDecoration.setBackdrop(null);
         if (allAppsPanel != null) allAppsPanel.setBackdrop(null);
@@ -1817,6 +1823,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             wallpaperBlurView.setImageBitmap(blurred);
             wallpaperBlurView.setVisibility(View.VISIBLE);
             menuBackdrop = blurred;
+            setClockBackdrop(blurred);
             final Bitmap src = bitmap;                          // a gentle blur for the menu veil, made off the main thread
             new Thread(() -> {
                 final Bitmap v = BlurUtil.blur(src, 360, 4);
