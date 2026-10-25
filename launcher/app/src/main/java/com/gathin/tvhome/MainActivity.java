@@ -117,6 +117,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private FrameLayout root;
     private View header;
     private WidgetPanel widgets;
+    private WidgetPanel widgetsLeft;
+    private LyricsView lyricsView;
+    private String lyricsKey = "";
+    private Lyrics lyricsData;
+    private boolean lyricsFits;
     private float lastDockTop = -1f;
     private ImageView wallpaperView;
     private ImageView wallpaperBlurView;
@@ -286,6 +291,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         root = findViewById(R.id.root);
         header = findViewById(R.id.header);
         widgets = findViewById(R.id.widgets);
+        widgetsLeft = findViewById(R.id.widgetsLeft);
+        widgets.setSide(false);
+        widgetsLeft.setSide(true);
+        widgets.setPeer(widgetsLeft);
+        widgetsLeft.setPeer(widgets);
+        lyricsView = findViewById(R.id.lyricsView);
         wallpaperView = findViewById(R.id.wallpaper);
         wallpaperBlurView = findViewById(R.id.wallpaperBlur);
         wallpaperFront = findViewById(R.id.wallpaperFront);
@@ -515,8 +526,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         widgets.animate().cancel();
         widgets.setAlpha(keepAll ? 0f : 1f);
         widgets.setVisibility(keepAll ? View.INVISIBLE : View.VISIBLE);
+        widgetsLeft.animate().cancel();
+        widgetsLeft.setAlpha(keepAll ? 0f : 1f);
+        widgetsLeft.setVisibility(keepAll ? View.INVISIBLE : View.VISIBLE);
         widgets.refresh();
         positionWidgets();
+        applyLyricsVisibility();
         IntentFilter bt = new IntentFilter();
         bt.addAction(BluetoothAdapter.ACTION_STATE_CHANGED);
         bt.addAction(BluetoothAdapter.ACTION_CONNECTION_STATE_CHANGED);
@@ -741,12 +756,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private void setHeaderShown(boolean show) {
         header.animate().cancel();
         widgets.animate().cancel();
+        widgetsLeft.animate().cancel();
         if (show) {
             header.setVisibility(View.VISIBLE);
             header.animate().alpha(1f).setDuration(300).start();
             startClockLoop();
             widgets.setVisibility(View.VISIBLE);
             widgets.animate().alpha(1f).setDuration(300).start();
+            widgetsLeft.setVisibility(View.VISIBLE);
+            widgetsLeft.animate().alpha(1f).setDuration(300).start();
         } else {
             header.animate().alpha(0f).setDuration(180).withEndAction(() -> {
                 if (overlayApplied) {
@@ -757,7 +775,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             widgets.animate().alpha(0f).setDuration(180).withEndAction(() -> {
                 if (overlayApplied) widgets.setVisibility(View.INVISIBLE);
             }).start();
+            widgetsLeft.animate().alpha(0f).setDuration(180).withEndAction(() -> {
+                if (overlayApplied) widgetsLeft.setVisibility(View.INVISIBLE);
+            }).start();
         }
+        applyLyricsVisibility();
     }
 
     @Override
@@ -780,7 +802,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         startActivity(new Intent(this, ScreensaverActivity.class));
     }
 
-    /** Puts the widget cards on the right, just above the dock, and drops the ones that do not fit. */
+    /** Puts the widget cards (right and left column) just above the dock, and drops the ones that do not fit. */
     private void positionWidgets() {
         if (widgets == null || root.getHeight() == 0) return;
         float dockTop = lastDockTop > 0 ? lastDockTop : root.getHeight() * 0.62f;
@@ -790,6 +812,72 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         int fit = (int) Math.max(0, Math.floor((bottom - top + WidgetPanel.GAP_DP * density) / step));
         widgets.setMaxCards(fit);
         widgets.setY(bottom - widgets.contentHeight());
+        widgetsLeft.setMaxCards(fit);
+        widgetsLeft.setY(bottom - widgetsLeft.contentHeight());
+        positionLyrics(top, bottom);
+    }
+
+    /**
+     * The Spotify lyrics take the free space on the side they were placed (left by default), above the dock and
+     * above any cards on the same side. They sit under the depth PNG, so the wallpaper's "character" covers them.
+     */
+    private void positionLyrics(float top, float bottom) {
+        if (lyricsView == null) return;
+        boolean onLeft = widgets.state("lyrics") != 1;
+        WidgetPanel column = onLeft ? widgetsLeft : widgets;
+        float lyricsBottom = column.contentHeight() > 0 ? column.getY() - 8 * density : bottom;
+        float h = Math.max(0f, lyricsBottom - top);
+        lyricsFits = h >= 96 * density;
+        int w = (int) Math.min(root.getWidth() * 0.5f, 620 * density);
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) lyricsView.getLayoutParams();
+        int gravity = (onLeft ? Gravity.START : Gravity.END) | Gravity.TOP;
+        int margin = (int) (56 * density);
+        if (lp.width != w || lp.height != (int) h || lp.gravity != gravity || lp.topMargin != (int) top
+                || lp.getMarginStart() != margin) {
+            lp.width = w;
+            lp.height = (int) h;
+            lp.gravity = gravity;
+            lp.topMargin = (int) top;
+            lp.setMarginStart(onLeft ? margin : 0);
+            lp.setMarginEnd(onLeft ? 0 : margin);
+            lyricsView.setLayoutParams(lp);
+        }
+        lyricsView.setSide(onLeft);
+        applyLyricsVisibility();
+    }
+
+    /** The lyrics are shown only while a song plays, they are switched on, they fit, and the dock state is showing. */
+    private void applyLyricsVisibility() {
+        if (lyricsView == null || widgets == null) return;
+        boolean show = widgets.isOn("lyrics") && lyricsData != null && lyricsFits && !overlayApplied && !arranging;
+        lyricsView.animate().alpha(show ? 1f : 0f).setDuration(show ? 500 : 250).start();
+    }
+
+    private void maybeLoadLyrics(String title, String artist, String album, long durMs) {
+        if (!widgets.isOn("lyrics") || title == null || title.trim().isEmpty()) {
+            clearLyrics();
+            return;
+        }
+        String key = Lyrics.key(artist, title);
+        if (key.equals(lyricsKey)) return;
+        lyricsKey = key;
+        lyricsData = null;
+        lyricsView.setLyrics(null);
+        applyLyricsVisibility();
+        Lyrics.fetch(this, artist, title, album, durMs, (k, l) -> {
+            if (!k.equals(lyricsKey)) return;            // the song changed while we were looking
+            lyricsData = l;
+            lyricsView.setLyrics(l);
+            applyLyricsVisibility();
+            updateNowProgress();                         // jump straight to the line being sung
+        });
+    }
+
+    private void clearLyrics() {
+        lyricsKey = "";
+        lyricsData = null;
+        if (lyricsView != null) lyricsView.setLyrics(null);
+        applyLyricsVisibility();
     }
 
     private void scrollGridBy(int dy) {
@@ -870,12 +958,16 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         Rect r = new Rect(0, 0, card.getWidth(), card.getHeight());
         root.offsetDescendantRectToMyCoords(card, r);
         // That call ignores translation, and the Continue watching row is positioned with translationY.
-        if (continueRow != null && card.getParent() instanceof View && ((View) card.getParent()).getParent() == continueRow) {
+        boolean poster = continueRow != null && card.getParent() instanceof View
+                && ((View) card.getParent()).getParent() == continueRow;
+        if (poster) {
             r.offset(Math.round(continueRow.getTranslationX()), Math.round(continueRow.getTranslationY()));
         }
+        // A poster grows less than an app tile when focused; size the cursor to the poster so the gap matches the apps.
+        float scale = poster ? ContinueAdapter.POSTER_FOCUS_SCALE : AppAdapter.FOCUS_SCALE;
         float pad = GlassView.PAD_DP * density;        // matches GlassView's glow inset
-        float w = card.getWidth() * AppAdapter.FOCUS_SCALE + 2 * pad;
-        float h = card.getHeight() * AppAdapter.FOCUS_SCALE + 2 * pad;
+        float w = card.getWidth() * scale + 2 * pad;
+        float h = card.getHeight() * scale + 2 * pad;
         float x = r.exactCenterX() - w / 2f;
         float y = r.exactCenterY() - h / 2f;
 
@@ -884,7 +976,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             lp.width = (int) w;
             lp.height = (int) h;
             glass.setLayoutParams(lp);
-            glass.setRadius(16f * density * AppAdapter.FOCUS_SCALE);
+            glass.setRadius((poster ? ContinueAdapter.RADIUS_DP : 16f) * density * scale);
         }
         glassTargetX = x;
         glassTargetY = y;
@@ -1409,12 +1501,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             final View row = getLayoutInflater().inflate(R.layout.item_input, rows, false);
             setMenuIcon(row, MenuIcons.WIDGETS);
             ((TextView) row.findViewById(R.id.title)).setText(WidgetPanel.titleRes(id));
-            updateWidgetRow(row, widgets.isOn(id));
+            updateWidgetSideRow(row, widgets.state(id));
             row.setOnClickListener(v -> {
-                boolean on = !widgets.isOn(id);
-                widgets.setOn(id, on);
-                updateWidgetRow(row, on);
+                widgets.cycle(id);                       // off -> right -> left -> off
+                updateWidgetSideRow(row, widgets.state(id));
                 positionWidgets();
+                if (id.equals("lyrics")) {
+                    lyricsKey = "";                      // look the song up again (or clear it)
+                    updateMusicGlow();
+                }
             });
             rows.addView(row);
         }
@@ -1483,6 +1578,14 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         ((TextView) row.findViewById(R.id.status)).setText(
                 fxLevel == 0 ? R.string.fx_soft : fxLevel == 2 ? R.string.fx_strong : R.string.fx_normal);
         row.findViewById(R.id.dot).setVisibility(View.VISIBLE);
+    }
+
+    private void updateWidgetSideRow(View row, int state) {
+        ((TextView) row.findViewById(R.id.status)).setText(
+                state == 0 ? R.string.widget_off : state == 1 ? R.string.widget_right : R.string.widget_left);
+        row.findViewById(R.id.dot).setVisibility(state == 0 ? View.GONE : View.VISIBLE);
+        row.findViewById(R.id.title).setAlpha(state == 0 ? 0.45f : 1f);
+        row.findViewById(R.id.icon).setAlpha(state == 0 ? 0.45f : 1f);
     }
 
     private void updateWidgetRow(View row, boolean on) {
@@ -2687,6 +2790,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         }
         if (dur > 0) pos = Math.max(0, Math.min(pos, dur));
         widgets.setNowProgress(pos, dur);
+        lyricsView.setPosition(pos, dur);
     }
 
     private void stopMusicWatch() {
@@ -2758,6 +2862,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             if (artist == null && meta != null) artist = meta.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST);
             widgets.setNowPlaying(meta == null ? null : meta.getString(MediaMetadata.METADATA_KEY_TITLE),
                     artist, SongColors.artOf(meta), color);
+            lyricsView.setAccent(color);
+            maybeLoadLyrics(meta == null ? null : meta.getString(MediaMetadata.METADATA_KEY_TITLE), artist,
+                    meta == null ? null : meta.getString(MediaMetadata.METADATA_KEY_ALBUM),
+                    meta == null ? 0L : meta.getLong(MediaMetadata.METADATA_KEY_DURATION));
             if (changed) {
                 handler.removeCallbacks(musicCycle);
                 handler.postDelayed(musicCycle, MUSIC_CYCLE_MS);
@@ -2769,6 +2877,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             musicSongId = "";
             handler.removeCallbacks(musicCycle);
             widgets.clearNowPlaying();
+            clearLyrics();
         }
         tintPills(musicColor);
         positionWidgets();

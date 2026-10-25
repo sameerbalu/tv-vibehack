@@ -49,7 +49,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         void onPosterLongPressed(int index, View card);
     }
 
-    private static final float RADIUS_DP = 18f;
+    static final float RADIUS_DP = 18f;
 
     private final Context ctx;
     private final Host host;
@@ -57,7 +57,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
     private final List<NuvioHistory.Entry> entries = new ArrayList<>();
     private final android.util.LruCache<String, Bitmap> posters = new android.util.LruCache<>(32);
     private final android.util.LruCache<String, Bitmap> blurs = new android.util.LruCache<>(32);
-    private static final float POSTER_FOCUS_SCALE = 1.07f;
+    static final float POSTER_FOCUS_SCALE = 1.07f;
     private String signature = "";
     /** The wallpaper, used as the thumbnail when an app gives no real picture (VLC only offers its own icon). */
     private Bitmap wallpaperBmp;

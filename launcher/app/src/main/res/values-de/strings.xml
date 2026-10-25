@@ -55,7 +55,7 @@
     <string name="music_access">Musik-Glow-Zugriff</string>
     <string name="music_access_help">Enable Notification access for Home in Settings, or run: adb shell cmd notification allow_listener com.gathin.tvhome/com.gathin.tvhome.MediaListener</string>
     <string name="widgets">Widgets</string>
-    <string name="widgets_hint">Tap a widget to turn it on or off</string>
+    <string name="widgets_hint">Tap to switch: Off, Right, Left</string>
     <string name="widget_now_playing">Now playing (Spotify)</string>
     <string name="widget_calendar">Date</string>
     <string name="widget_storage">Storage</string>
@@ -110,4 +110,10 @@
     <string name="cc_sound">Ton</string>
     <string name="cc_about">Info</string>
     <string name="cc_title">Kontrollzentrum</string>
+    <string name="widget_weather">Weather</string>
+    <string name="widget_week">This week</string>
+    <string name="widget_sun">Sunrise &amp; sunset</string>
+    <string name="widget_lyrics">Spotify lyrics (behind the wallpaper)</string>
+    <string name="widget_right">Right</string>
+    <string name="widget_left">Left</string>
 </resources>

@@ -44,6 +44,14 @@
         android:alpha="0"
         android:importantForAccessibility="no" />
 
+    <!-- Spotify lyrics: under the depth PNG, so the "character" of the wallpaper stands in front of the words. -->
+    <com.gathin.tvhome.LyricsView
+        android:id="@+id/lyricsView"
+        android:layout_width="400dp"
+        android:layout_height="160dp"
+        android:alpha="0"
+        android:importantForAccessibility="no" />
+
     <!-- Top shelf: the focused dock app's name, positioned above the dock in code. -->
     <TextView
         android:id="@+id/heroName"
@@ -103,6 +111,15 @@
         android:layout_height="wrap_content"
         android:layout_gravity="end|top"
         android:layout_marginEnd="56dp"
+        android:importantForAccessibility="no" />
+
+    <!-- Widget cards on the left; positioned above the dock app's name in code. -->
+    <com.gathin.tvhome.WidgetPanel
+        android:id="@+id/widgetsLeft"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="start|top"
+        android:layout_marginStart="56dp"
         android:importantForAccessibility="no" />
 
     <!-- Clock, date and top buttons. Fades out while the full app list (or arrange mode) is showing. -->

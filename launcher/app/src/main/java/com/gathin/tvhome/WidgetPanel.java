@@ -7,6 +7,9 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
+import android.location.Location;
+import android.location.LocationManager;
+import org.json.JSONObject;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Outline;
@@ -49,8 +52,8 @@ import java.util.Set;
  */
 public class WidgetPanel extends LinearLayout {
 
-    static final String[] IDS = {"now_playing", "calendar", "storage", "memory", "network", "volume", "day", "uptime",
-            "moon", "world", "year", "quote"};
+    static final String[] IDS = {"now_playing", "weather", "calendar", "week", "sun", "storage", "memory", "network",
+            "volume", "day", "uptime", "moon", "world", "year", "quote", "lyrics"};
     static final int DARK_RED_FROM = 0xFF7A0C12;
     static final int DARK_RED_TO = 0xFFB3121B;
     static final int CARD_H_DP = 64;
@@ -59,6 +62,11 @@ public class WidgetPanel extends LinearLayout {
 
     private static final String PREFS = "launcher_preferences";
     private static final String KEY_ON = "widgets_on_v6";
+    private static final String KEY_LEFT = "widgets_left_v1";      // widgets placed on the left side
+    private static final String KEY_WX = "weather_cache_v1";
+    private static final java.util.concurrent.ExecutorService WX_IO = java.util.concurrent.Executors.newSingleThreadExecutor();
+    private static volatile long wxTried;
+    private static volatile boolean wxFetching;
 
     private final SharedPreferences prefs;
     private final float d;
@@ -67,6 +75,12 @@ public class WidgetPanel extends LinearLayout {
     private int maxCards = 5;
     private int shown;
     private boolean playing;
+    private boolean left;               // this panel is the left column
+    private WidgetPanel peer;            // the other column; music and weather updates go to both
+    private TextView wxIcon, wxTemp, wxText, wxRange, sunValue;
+    private ColorBar sunBar;
+    private final TextView[] weekLetter = new TextView[7];
+    private final TextView[] weekNum = new TextView[7];
 
     private TextView npTitle, npArtist, npLabel, npTime;
     private EqView npEq;
@@ -102,8 +116,12 @@ public class WidgetPanel extends LinearLayout {
         buildWorld();
         buildYear();
         buildQuote();
+        buildWeather();
+        buildWeek();
+        buildSun();
         for (String id : IDS) {
             View c = cards.get(id);
+            if (c == null) continue;                       // "lyrics" has no card: it is drawn behind the wallpaper
             int heightDp = id.equals("now_playing") ? 2 * CARD_H_DP + GAP_DP : CARD_H_DP;
             LayoutParams lp = new LayoutParams((int) (WIDTH_DP * d), (int) (heightDp * d));
             lp.bottomMargin = (int) (GAP_DP * d);
@@ -127,6 +145,10 @@ public class WidgetPanel extends LinearLayout {
             case "world": return R.string.widget_world;
             case "year": return R.string.widget_year;
             case "quote": return R.string.widget_quote;
+            case "weather": return R.string.widget_weather;
+            case "week": return R.string.widget_week;
+            case "sun": return R.string.widget_sun;
+            case "lyrics": return R.string.widget_lyrics;
             default: return R.string.widget_network;
         }
     }
@@ -146,6 +168,49 @@ public class WidgetPanel extends LinearLayout {
         refresh();
     }
 
+    void setSide(boolean left) {
+        this.left = left;
+        applyVisibility();
+    }
+
+    void setPeer(WidgetPanel other) {
+        peer = other;
+    }
+
+    boolean isLeft(String id) {
+        Set<String> s = prefs.getStringSet(KEY_LEFT, null);
+        return s != null && s.contains(id);
+    }
+
+    /** 0 = off, 1 = on the right, 2 = on the left. */
+    int state(String id) {
+        return !isOn(id) ? 0 : isLeft(id) ? 2 : 1;
+    }
+
+    /** Off, right, left, off ... (the lyrics start on the left, where the screen is free). */
+    void cycle(String id) {
+        int s = state(id);
+        int next = id.equals("lyrics") ? (s == 0 ? 2 : s == 2 ? 1 : 0) : (s == 0 ? 1 : s == 1 ? 2 : 0);
+        Set<String> on = new HashSet<>();
+        Set<String> lefts = new HashSet<>();
+        for (String i : IDS) {
+            if (isOn(i)) on.add(i);
+            if (isLeft(i)) lefts.add(i);
+        }
+        if (next == 0) {
+            on.remove(id);
+            lefts.remove(id);
+        } else {
+            on.add(id);
+            if (next == 2) lefts.add(id);
+            else lefts.remove(id);
+        }
+        prefs.edit().putStringSet(KEY_ON, on).putStringSet(KEY_LEFT, lefts).apply();
+        applyVisibility();
+        if (peer != null) peer.applyVisibility();
+        refresh();
+    }
+
     /** Only this many cards are shown (what fits above the dock). */
     void setMaxCards(int n) {
         if (n == maxCards) return;
@@ -162,7 +227,8 @@ public class WidgetPanel extends LinearLayout {
         int count = 0;                                   // slots used; the Now playing card takes two
         for (String id : IDS) {
             View c = cards.get(id);
-            boolean want = isOn(id) && (!id.equals("now_playing") || playing);
+            if (c == null) continue;
+            boolean want = isOn(id) && isLeft(id) == left && (!id.equals("now_playing") || playing);
             int cost = id.equals("now_playing") ? 2 : 1;
             boolean show = want && count + cost <= maxCards;
             if (show) count += cost;
@@ -182,6 +248,11 @@ public class WidgetPanel extends LinearLayout {
 
     /** Refreshes the clock-driven cards; called on resume and every minute. */
     void refresh() {
+        refreshLocal();
+        if (peer != null) peer.refreshLocal();
+    }
+
+    private void refreshLocal() {
         Context ctx = getContext();
         Date now = new Date();
         calDay.setText(new SimpleDateFormat("d", Locale.getDefault()).format(now));
@@ -265,6 +336,10 @@ public class WidgetPanel extends LinearLayout {
         yearBar.set(yearFrac, 0xFF2DD4BF, 0xFF60A5FA);
 
         quoteText.setText(Quotes.forDay(doy));
+        refreshWeek(cal);
+        showWeather();
+        showSun();
+        if (isOn("weather") || isOn("sun")) maybeFetchWeather();
         applyVisibility();
     }
 
@@ -323,6 +398,11 @@ public class WidgetPanel extends LinearLayout {
 
     /** A song is playing in Spotify. */
     void setNowPlaying(String title, String artist, Bitmap art, int color) {
+        setNowPlayingLocal(title, artist, art, color);
+        if (peer != null) peer.setNowPlayingLocal(title, artist, art, color);
+    }
+
+    private void setNowPlayingLocal(String title, String artist, Bitmap art, int color) {
         nowColor = color;
         npTitle.setText(TextUtils.isEmpty(title) ? "Spotify" : title);
         npArtist.setText(TextUtils.isEmpty(artist) ? "" : artist);
@@ -341,6 +421,11 @@ public class WidgetPanel extends LinearLayout {
 
     /** Where the song is: updates the thin progress bar and the "1:23 / 3:45" text. */
     void setNowProgress(long posMs, long durMs) {
+        setNowProgressLocal(posMs, durMs);
+        if (peer != null) peer.setNowProgressLocal(posMs, durMs);
+    }
+
+    private void setNowProgressLocal(long posMs, long durMs) {
         if (durMs <= 0) {
             npBar.set(0f, nowColor, nowColor);
             npTime.setText("");
@@ -362,6 +447,11 @@ public class WidgetPanel extends LinearLayout {
     }
 
     void clearNowPlaying() {
+        clearNowPlayingLocal();
+        if (peer != null) peer.clearNowPlayingLocal();
+    }
+
+    private void clearNowPlayingLocal() {
         if (!playing) return;
         playing = false;
         npEq.setActive(false);
@@ -581,6 +671,291 @@ public class WidgetPanel extends LinearLayout {
         bl.topMargin = (int) (6 * d);
         c.addView(yearBar, bl);
         cards.put("year", c);
+    }
+
+    // ---- weather, this week, sunrise & sunset --------------------------------------------------------
+
+    private void buildWeather() {
+        LinearLayout c = card(true, 0xFFFBBF24);
+        wxIcon = text(30, Color.WHITE, false);
+        wxIcon.setText("\u2601\uFE0F");
+        LayoutParams il = new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        il.setMarginEnd((int) (8 * d));
+        c.addView(wxIcon, il);
+        wxTemp = text(30, Color.WHITE, false);
+        wxTemp.setTypeface(font, Typeface.BOLD);
+        LayoutParams tl = new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        tl.setMarginEnd((int) (12 * d));
+        c.addView(wxTemp, tl);
+        LinearLayout col = column();
+        col.addView(label("Weather", 9, 0xFFFCD34D));
+        wxText = text(13, Color.WHITE, false);
+        col.addView(wxText);
+        wxRange = text(11, 0xB3FFFFFF, false);
+        col.addView(wxRange);
+        c.addView(col, new LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        cards.put("weather", c);
+    }
+
+    private void buildWeek() {
+        LinearLayout c = card(true, 0xFFFF6B5E);
+        c.setPadding((int) (8 * d), (int) (6 * d), (int) (8 * d), (int) (6 * d));
+        for (int i = 0; i < 7; i++) {
+            LinearLayout col = column();
+            col.setGravity(Gravity.CENTER_HORIZONTAL);
+            weekLetter[i] = text(9, 0x99FFFFFF, true);
+            weekLetter[i].setGravity(Gravity.CENTER);
+            weekNum[i] = text(13, Color.WHITE, false);
+            weekNum[i].setGravity(Gravity.CENTER);
+            LayoutParams nl = new LayoutParams((int) (26 * d), (int) (26 * d));
+            nl.topMargin = (int) (2 * d);
+            col.addView(weekLetter[i]);
+            col.addView(weekNum[i], nl);
+            c.addView(col, new LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        }
+        cards.put("week", c);
+    }
+
+    private void buildSun() {
+        LinearLayout c = card(false, 0xFFFB923C);
+        c.addView(label("Sun", 9, 0xFFFDBA74));
+        sunValue = text(14, Color.WHITE, false);
+        c.addView(sunValue);
+        sunBar = new ColorBar(getContext());
+        LayoutParams bl = new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (5 * d));
+        bl.topMargin = (int) (6 * d);
+        c.addView(sunBar, bl);
+        cards.put("sun", c);
+    }
+
+    /** The seven days of this week, today in a coloured circle. */
+    private void refreshWeek(Calendar today) {
+        Calendar c = (Calendar) today.clone();
+        int back = (c.get(Calendar.DAY_OF_WEEK) - c.getFirstDayOfWeek() + 7) % 7;
+        c.add(Calendar.DAY_OF_YEAR, -back);
+        SimpleDateFormat letter = new SimpleDateFormat("EEEEE", Locale.getDefault());
+        for (int i = 0; i < 7; i++) {
+            boolean isToday = c.get(Calendar.YEAR) == today.get(Calendar.YEAR)
+                    && c.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR);
+            int dow = c.get(Calendar.DAY_OF_WEEK);
+            boolean weekend = dow == Calendar.SATURDAY || dow == Calendar.SUNDAY;
+            weekLetter[i].setText(letter.format(c.getTime()));
+            weekNum[i].setText(String.valueOf(c.get(Calendar.DAY_OF_MONTH)));
+            weekNum[i].setTextColor(isToday ? Color.WHITE : weekend ? 0x99FFFFFF : 0xE6FFFFFF);
+            weekNum[i].setTypeface(font, isToday ? Typeface.BOLD : Typeface.NORMAL);
+            if (isToday) {
+                GradientDrawable dot = new GradientDrawable();
+                dot.setShape(GradientDrawable.OVAL);
+                dot.setColor(0xFFFF6B5E);
+                weekNum[i].setBackground(dot);
+            } else {
+                weekNum[i].setBackground(null);
+            }
+            c.add(Calendar.DAY_OF_YEAR, 1);
+        }
+    }
+
+    // Weather comes from Open-Meteo (free, no account). The place is the TV's last known location, or else
+    // where the internet connection is. It is refreshed every 30 minutes and kept for the next start.
+
+    private JSONObject readWx() {
+        String s = prefs.getString(KEY_WX, null);
+        if (s == null) return null;
+        try {
+            return new JSONObject(s);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void showWeather() {
+        JSONObject o = readWx();
+        if (o == null) {
+            wxIcon.setText("\u2601\uFE0F");
+            wxTemp.setText("--");
+            wxText.setText("Getting the weather");
+            wxRange.setText("");
+            return;
+        }
+        int code = o.optInt("code");
+        String city = o.optString("city");
+        wxIcon.setText(weatherIcon(code));
+        wxTemp.setText(Math.round(o.optDouble("temp")) + "\u00B0");
+        wxText.setText(weatherText(code));
+        wxRange.setText((city.isEmpty() ? "" : city + "  \u00B7  ") + "H " + Math.round(o.optDouble("hi"))
+                + "\u00B0  L " + Math.round(o.optDouble("lo")) + "\u00B0");
+    }
+
+    private static String weatherIcon(int c) {
+        if (c == 0) return "\u2600\uFE0F";
+        if (c <= 2) return "\u26C5";
+        if (c == 3) return "\u2601\uFE0F";
+        if (c == 45 || c == 48) return "\uD83C\uDF2B\uFE0F";
+        if (c >= 51 && c <= 57) return "\uD83C\uDF26\uFE0F";
+        if ((c >= 61 && c <= 67) || (c >= 80 && c <= 82)) return "\uD83C\uDF27\uFE0F";
+        if ((c >= 71 && c <= 77) || c == 85 || c == 86) return "\u2744\uFE0F";
+        if (c >= 95) return "\u26C8\uFE0F";
+        return "\u2601\uFE0F";
+    }
+
+    private static String weatherText(int c) {
+        if (c == 0) return "Clear sky";
+        if (c == 1) return "Mostly clear";
+        if (c == 2) return "Partly cloudy";
+        if (c == 3) return "Overcast";
+        if (c == 45 || c == 48) return "Fog";
+        if (c >= 51 && c <= 57) return "Drizzle";
+        if (c >= 61 && c <= 67) return "Rain";
+        if (c >= 71 && c <= 77) return "Snow";
+        if (c >= 80 && c <= 82) return "Rain showers";
+        if (c == 85 || c == 86) return "Snow showers";
+        if (c >= 95) return "Thunderstorm";
+        return "Cloudy";
+    }
+
+    private void maybeFetchWeather() {
+        long now = System.currentTimeMillis();
+        if (wxFetching || now - wxTried < 30 * 60_000L) return;
+        wxTried = now;
+        wxFetching = true;
+        final Context app = getContext().getApplicationContext();
+        WX_IO.execute(() -> {
+            boolean ok = false;
+            try {
+                double lat = Double.NaN, lon = Double.NaN;
+                String city = "";
+                JSONObject old = readWx();
+                if (old != null) {
+                    lat = old.optDouble("lat");
+                    lon = old.optDouble("lon");
+                    city = old.optString("city");
+                }
+                if (Double.isNaN(lat) || Double.isNaN(lon)) {
+                    Location loc = lastKnown(app);
+                    if (loc != null) {
+                        lat = loc.getLatitude();
+                        lon = loc.getLongitude();
+                    } else {
+                        JSONObject ip = new JSONObject(http("https://ipwho.is/"));
+                        lat = ip.optDouble("latitude");
+                        lon = ip.optDouble("longitude");
+                        city = ip.optString("city");
+                    }
+                }
+                if (!Double.isNaN(lat) && !Double.isNaN(lon)) {
+                    JSONObject w = new JSONObject(http("https://api.open-meteo.com/v1/forecast?latitude=" + lat
+                            + "&longitude=" + lon + "&current=temperature_2m,weather_code"
+                            + "&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1"));
+                    JSONObject cur = w.getJSONObject("current");
+                    JSONObject daily = w.getJSONObject("daily");
+                    JSONObject out = new JSONObject();
+                    out.put("lat", lat);
+                    out.put("lon", lon);
+                    out.put("city", city);
+                    out.put("temp", cur.getDouble("temperature_2m"));
+                    out.put("code", cur.getInt("weather_code"));
+                    out.put("hi", daily.getJSONArray("temperature_2m_max").getDouble(0));
+                    out.put("lo", daily.getJSONArray("temperature_2m_min").getDouble(0));
+                    prefs.edit().putString(KEY_WX, out.toString()).apply();
+                    ok = true;
+                }
+            } catch (Exception ignored) {
+            }
+            if (!ok) wxTried = System.currentTimeMillis() - 25 * 60_000L;       // try again in 5 minutes
+            wxFetching = false;
+            post(() -> {
+                showWeather();
+                showSun();
+                if (peer != null) {
+                    peer.showWeather();
+                    peer.showSun();
+                }
+            });
+        });
+    }
+
+    private static String http(String url) throws Exception {
+        java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+        c.setConnectTimeout(8000);
+        c.setReadTimeout(10000);
+        c.setRequestProperty("User-Agent", "TvHomeLauncher/1.0");
+        try {
+            if (c.getResponseCode() != 200) throw new java.io.IOException("HTTP " + c.getResponseCode());
+            try (java.io.InputStream in = c.getInputStream()) {
+                java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+                byte[] buf = new byte[4096];
+                int n;
+                while ((n = in.read(buf)) > 0 && out.size() < 200_000) out.write(buf, 0, n);
+                return out.toString("UTF-8");
+            }
+        } finally {
+            c.disconnect();
+        }
+    }
+
+    private static Location lastKnown(Context ctx) {
+        try {
+            if (ctx.checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)
+                    != android.content.pm.PackageManager.PERMISSION_GRANTED) return null;
+            LocationManager lm = (LocationManager) ctx.getSystemService(Context.LOCATION_SERVICE);
+            if (lm == null) return null;
+            Location best = null;
+            for (String p : lm.getProviders(true)) {
+                Location l = lm.getLastKnownLocation(p);
+                if (l != null && (best == null || l.getTime() > best.getTime())) best = l;
+            }
+            return best;
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** Sunrise and sunset today (local hours). Works from the position found for the weather. */
+    private void showSun() {
+        JSONObject o = readWx();
+        double lat, lon;
+        if (o != null && !Double.isNaN(o.optDouble("lat"))) {
+            lat = o.optDouble("lat");
+            lon = o.optDouble("lon");
+        } else {
+            Location l = lastKnown(getContext());
+            if (l == null) {
+                sunValue.setText("Needs a location");
+                sunBar.set(0f, 0xFFFBBF24, 0xFFF97316);
+                return;
+            }
+            lat = l.getLatitude();
+            lon = l.getLongitude();
+        }
+        Calendar now = Calendar.getInstance();
+        int n = now.get(Calendar.DAY_OF_YEAR);
+        double decl = Math.toRadians(23.44) * Math.sin(2 * Math.PI * (284 + n) / 365.0);
+        double x = -Math.tan(Math.toRadians(lat)) * Math.tan(decl);
+        if (x <= -1 || x >= 1) {
+            sunValue.setText(x <= -1 ? "Sun all day" : "Sun stays down");
+            sunBar.set(x <= -1 ? 1f : 0f, 0xFFFBBF24, 0xFFF97316);
+            return;
+        }
+        double half = Math.toDegrees(Math.acos(x)) / 15.0;
+        double zone = now.getTimeZone().getOffset(now.getTimeInMillis()) / 3_600_000.0;
+        double noon = 12 - lon / 15.0 + zone;
+        double rise = noon - half, set = noon + half;
+        double hour = now.get(Calendar.HOUR_OF_DAY) + now.get(Calendar.MINUTE) / 60.0;
+        sunValue.setText("\u2191 " + clockText(rise) + "   \u2193 " + clockText(set));
+        float f = hour < rise ? 0f : hour > set ? 1f : (float) ((hour - rise) / (set - rise));
+        sunBar.set(f, 0xFFFBBF24, 0xFFF97316);
+    }
+
+    private String clockText(double hours) {
+        int h = (int) Math.floor(hours);
+        int m = (int) Math.round((hours - h) * 60);
+        if (m == 60) {
+            h++;
+            m = 0;
+        }
+        h = ((h % 24) + 24) % 24;
+        if (android.text.format.DateFormat.is24HourFormat(getContext())) return String.format(Locale.US, "%02d:%02d", h, m);
+        return String.format(Locale.US, "%d:%02d %s", h % 12 == 0 ? 12 : h % 12, m, h < 12 ? "AM" : "PM");
     }
 
     private void buildQuote() {
