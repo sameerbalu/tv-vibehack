@@ -126,14 +126,4 @@
     <string name="poster_open_app">Open %1$s</string>
     <string name="poster_remove">Remove from Continue Watching</string>
     <string name="poster_clear">Clear Continue Watching</string>
-    <string name="cc_nothing_playing">Nothing playing</string>
-    <string name="cc_now_playing">Now playing</string>
-    <string name="cc_volume">Volume</string>
-    <string name="cc_wifi">Wi-Fi</string>
-    <string name="cc_connected">Connected</string>
-    <string name="cc_ethernet">Ethernet</string>
-    <string name="cc_offline">Offline</string>
-    <string name="cc_on">On</string>
-    <string name="cc_off">Off</string>
-    <string name="cc_idle">Not playing</string>
 </resources>

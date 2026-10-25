@@ -17,7 +17,7 @@ public class GlassPanelView extends View {
     public GlassPanelView(Context context, AttributeSet attrs) {
         super(context, attrs);
         density = context.getResources().getDisplayMetrics().density;
-        style = new GlassStyle(density, 0x30000000, 0x0AFFFFFF, 0x04FFFFFF, 0x2EFFFFFF);
+        style = new GlassStyle(density, 0x2A000000, 0x22FFFFFF, 0x08FFFFFF, 0x38FFFFFF);
     }
 
     void setBackdrop(Bitmap blurred) {
@@ -27,7 +27,6 @@ public class GlassPanelView extends View {
 
     @Override
     protected void onDraw(Canvas canvas) {
-        if (true) return;             // no panel: the list floats on the dark blurred background
         float inset = 1f * density;
         rect.set(inset, inset, getWidth() - inset, getHeight() - inset);
         View parent = (View) getParent();

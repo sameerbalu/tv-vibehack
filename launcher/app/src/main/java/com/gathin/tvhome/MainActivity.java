@@ -480,7 +480,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         overlayApplied = keepAll;
         allUiApplied = keepAll;
         allAppsPanel.setAlpha(keepAll ? 1f : 0f);
-        wallpaperBlurView.setAlpha(keepAll ? BLUR_ALL_APPS : 0f);
+        wallpaperBlurView.setAlpha(keepAll ? 1f : 0f);
         allAppsScrim.setAlpha(keepAll ? 1f : 0f);
         wallpaperFront.setAlpha(keepAll ? 0f : 1f);
         wallpaperFrontTop.setAlpha(keepAll ? 0f : 1f);
@@ -679,7 +679,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         overlayApplied = overlay;
         allUiApplied = allUi;
         if (overlayChanged) {
-            wallpaperBlurView.animate().alpha(overlay ? BLUR_ALL_APPS : 0f).setDuration(350).start();
+            wallpaperBlurView.animate().alpha(overlay ? 1f : 0f).setDuration(350).start();
             allAppsScrim.animate().alpha(overlay ? 1f : 0f).setDuration(350).start();
             wallpaperFront.animate().alpha(overlay ? 0f : 1f).setDuration(350).start();
             wallpaperFrontTop.animate().alpha(overlay ? 0f : 1f).setDuration(350).start();
@@ -1086,18 +1086,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
 
     // ---- clock in the corner: always running -----------------------------------------------------------
 
-    /**
-     * The corner clock's own animation: lines inside the digits grow until the digits are solid and then shrink
-     * back (see TextFx.linesLoop). Only the digits animate: no glow, no divider, nothing behind the text.
-     * Stopped while the clock is hidden.
-     */
+    /** The corner clock is static (no animation); this only makes sure no old effect is left on it. */
     private void startClockLoop() {
         stopClockLoop();
         View c = findViewById(R.id.clock);
         if (c instanceof TextView) {
-            final TextView tv = (TextView) c;
+            TextView tv = (TextView) c;
+            tv.getPaint().setShader(null);
             tv.setShadowLayer(0f, 0f, 0f, 0);
-            clockLoop = TextFx.linesLoop(tv, 5600L);
+            tv.invalidate();
         }
     }
 
@@ -1241,40 +1238,26 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     }
 
     private void showLauncherSettings() {
-        dismissOpenPopup();
-        ControlCenter.Actions a = new ControlCenter.Actions();
-        a.wallpaper = this::showWallpaperMenu;
-        a.hideApps = this::showHideApps;
-        a.effects = this::showEffects;
-        a.widgets = this::showWidgets;
-        a.saver = () -> startActivity(new Intent(this, ScreensaverActivity.class));
-        a.bluetooth = () -> open(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS));
-        a.wifi = () -> open(new Intent(Settings.ACTION_WIFI_SETTINGS));
-        a.system = () -> open(new Intent(Settings.ACTION_SETTINGS));
-        a.clearCache = this::quickClearCache;
-        a.stopApps = this::quickStopApps;
-        if (!hasListenerAccess()) a.musicAccess = this::openMusicAccess;
-        controlCenter = new ControlCenter(this, menuBackdrop);
-        controlCenter.show(a, TvTools.storage(), TvTools.memory(this));
-    }
-
-    /** How strongly the blurred wallpaper covers the sharp one while the app list is open (1 = fully blurred). */
-    private static final float BLUR_ALL_APPS = 1f;
-
-    private ControlCenter controlCenter;
-
-    /** Memory module of the settings screen: stop the apps running in the background. */
-    private void quickStopApps() {
-        Toast.makeText(this, R.string.tc_working, Toast.LENGTH_SHORT).show();
-        new Thread(() -> {
-            int n = 0;
-            try {
-                n = TvTools.stopBackground(this);
-            } catch (Exception ignored) {
-            }
-            final int count = n;
-            runOnUiThread(() -> Toast.makeText(this, getString(R.string.tc_stopped, count), Toast.LENGTH_LONG).show());
-        }).start();
+        View anchor = findViewById(R.id.btnSettings);
+        View panel = getLayoutInflater().inflate(R.layout.popup_apps, root, false);
+        panel.findViewById(R.id.title).setVisibility(View.GONE);
+        LinearLayout rows = panel.findViewById(R.id.rows);
+        int minWidth = (int) (230 * density);
+        final PopupWindow popup = newDropdown(panel, minWidth);
+        addInputRow(rows, popup, MenuIcons.WALLPAPER, getString(R.string.wallpaper_tab), -1, this::showWallpaperMenu);
+        addInputRow(rows, popup, MenuIcons.EYE, getString(R.string.hide_apps), -1, this::showHideApps);
+        addInputRow(rows, popup, MenuIcons.WIDGETS, getString(R.string.widgets), -1, this::showWidgets);
+        addInputRow(rows, popup, MenuIcons.SPARKLE, getString(R.string.fx_title), -1, this::showEffects);
+        if (!hasListenerAccess()) {
+            addInputRow(rows, popup, MenuIcons.BELL, getString(R.string.music_access), -1, this::openMusicAccess);
+        }
+        addInputRow(rows, popup, MenuIcons.MOON, getString(R.string.screen_saver), -1,
+                () -> startActivity(new Intent(this, ScreensaverActivity.class)));
+        addSeparator(rows);
+        addInputRow(rows, popup, MenuIcons.GEAR, getString(R.string.system_settings), -1,
+                () -> open(new Intent(Settings.ACTION_SETTINGS)));
+        fitScroll(panel);
+        showDropdown(popup, panel, anchor, minWidth, true);
     }
 
     // ---- double tap on the settings icon: clear cache -----------------------------------------------
@@ -1642,7 +1625,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             wallpaperView.setImageBitmap(bitmap);
             wallpaperView.setVisibility(View.VISIBLE);
             // One blurred copy serves the full-screen blur (app list) and the frosted dock band.
-            Bitmap blurred = BlurUtil.blur(bitmap, 256, 8);
+            Bitmap blurred = BlurUtil.blur(bitmap, 192, 12);   // heavy, smooth blur like a frosted TV home
             wallpaperBlurView.setImageBitmap(blurred);
             wallpaperBlurView.setVisibility(View.VISIBLE);
             menuBackdrop = blurred;
@@ -2757,9 +2740,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     /** Fits the popup to its widest row, drops it in under the anchor (unfolding from the top) and focuses row one. */
     private void showDropdown(PopupWindow popup, View panel, View anchor, int minWidth, boolean alignEnd) {
         LinearLayout rows = panel.findViewById(R.id.rows);
-        if (menuBackdrop != null && panel.getId() == R.id.panel && !(panel.getBackground() instanceof BlurPanelDrawable)) {
-            panel.setBackground(new BlurPanelDrawable(density, menuBackdrop, root, panel));
-        }
         panel.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
         int width = Math.max(minWidth, panel.getMeasuredWidth());
         popup.setWidth(width);
@@ -2788,10 +2768,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
 
     /** Closes the open dropdown, if any. Returns true when there was one. */
     private boolean dismissOpenPopup() {
-        if (controlCenter != null && controlCenter.isShowing()) {
-            controlCenter.dismiss();
-            return true;
-        }
         PopupWindow p = openPopup;
         openPopup = null;
         if (p != null && p.isShowing()) {

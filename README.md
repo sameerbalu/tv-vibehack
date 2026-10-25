@@ -346,3 +346,10 @@ MIT, see [`LICENSE`](LICENSE). The Outfit typeface is under the SIL Open Font Li
 - Continue watching, YouTube-style apps (YouTube, TizenTube, SmartTube, ReVanced, NewPipe): the video id is found
   by searching the title, and the card opens that video. Other apps: links the app reported are tried first, then a
   "play <title>" request, then the app itself.
+
+## v34 notes
+
+- Tiles: lit from above (soft sheen, thin bright top rim, fine border, light shade at the bottom) with a soft shadow; the focused tile lifts a little more.
+- All apps: much heavier blur of the wallpaper (shared by the full-screen background and the glass panel), a bit more dimming,
+  and the panel now uses the same lit-glass look as the dock band.
+- The corner clock has no animation any more.

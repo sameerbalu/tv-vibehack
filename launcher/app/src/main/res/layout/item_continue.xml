@@ -8,13 +8,6 @@
     android:clipChildren="false"
     android:clipToPadding="false">
 
-    <View
-        android:id="@+id/shadow"
-        android:layout_width="10dp"
-        android:layout_height="10dp"
-        android:layout_gravity="start|top"
-        android:importantForAccessibility="no" />
-
     <FrameLayout
         android:id="@+id/card"
         android:layout_width="260dp"
