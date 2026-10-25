@@ -21,7 +21,10 @@ final class MenuIcons {
     }
 
     static PillIcon make(int kind, float density) {
-        ColorStateList white = ColorStateList.valueOf(0xFFFFFFFF);
+        return make(kind, density, ColorStateList.valueOf(0xFFFFFFFF));
+    }
+
+    static PillIcon make(int kind, float density, ColorStateList white) {
         switch (kind) {
             case WALLPAPER: return new Wallpaper(density, white);
             case DEPTH: return new Depth(density, white);

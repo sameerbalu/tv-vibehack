@@ -49,6 +49,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.animation.AnimationUtils;
+import android.view.animation.AccelerateInterpolator;
 import android.view.animation.DecelerateInterpolator;
 import android.view.animation.AccelerateDecelerateInterpolator;
 import android.view.animation.LayoutAnimationController;
@@ -574,7 +575,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         handler.removeCallbacks(minuteTick);
         stopClockLoop();
         handler.removeCallbacks(idleSaver);
-        if (controlCenter != null) controlCenter.dismiss();
+        if (controlCenter != null) controlCenter.dismissNow();
+        if (openPopup instanceof AnimPopup) ((AnimPopup) openPopup).dismissNow();
         if (menuVeil != null) {
             menuVeil.animate().cancel();
             menuVeil.setVisibility(View.GONE);
@@ -2798,8 +2800,40 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         showDropdown(popup, panel, anchor, width, false);
     }
 
+    /** A popup that fades and folds back up when it closes, the mirror of how showDropdown opens it. */
+    private final class AnimPopup extends PopupWindow {
+        private boolean closing;
+
+        AnimPopup(View content, int w, int h, boolean focusable) {
+            super(content, w, h, focusable);
+        }
+
+        @Override
+        public void dismiss() {
+            if (closing) return;
+            View c = getContentView();
+            if (!isShowing() || c == null || !c.isAttachedToWindow()) {
+                closing = true;
+                super.dismiss();
+                return;
+            }
+            closing = true;
+            c.animate().cancel();
+            c.animate().alpha(0f).scaleY(0.94f).translationY(-6 * density).setStartDelay(0).setDuration(150)
+                    .setInterpolator(new AccelerateInterpolator(1.3f))
+                    .withEndAction(() -> super.dismiss()).start();
+        }
+
+        void dismissNow() {
+            closing = true;
+            View c = getContentView();
+            if (c != null) c.animate().cancel();
+            super.dismiss();
+        }
+    }
+
     private PopupWindow newDropdown(View panel, int width) {
-        PopupWindow popup = new PopupWindow(panel, width, ViewGroup.LayoutParams.WRAP_CONTENT, true);
+        PopupWindow popup = new AnimPopup(panel, width, ViewGroup.LayoutParams.WRAP_CONTENT, true);
         popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));   // needed for Back to dismiss
         popup.setOutsideTouchable(true);
         popup.setAnimationStyle(0);

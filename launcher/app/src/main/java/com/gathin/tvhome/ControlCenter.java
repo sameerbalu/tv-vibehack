@@ -1,11 +1,16 @@
 package com.gathin.tvhome;
 
+import android.animation.ArgbEvaluator;
+import android.animation.ValueAnimator;
 import android.app.Dialog;
 import android.content.ComponentName;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
+import android.graphics.LinearGradient;
+import android.graphics.Shader;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.Typeface;
@@ -22,10 +27,12 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
+import android.view.animation.AccelerateInterpolator;
 import android.view.animation.DecelerateInterpolator;
 import android.view.animation.OvershootInterpolator;
 import android.widget.FrameLayout;
@@ -70,11 +77,32 @@ final class ControlCenter {
         this.d = ctx.getResources().getDisplayMetrics().density;
     }
 
+    private LinearLayout cardView;
+    private boolean closing;
+
     boolean isShowing() {
         return dialog != null && dialog.isShowing();
     }
 
+    /** Closes with a short fade-and-shrink toward the top-right corner it grew from. */
     void dismiss() {
+        if (dialog == null || !dialog.isShowing() || closing) return;
+        closing = true;
+        if (cardView == null) {
+            dialog.dismiss();
+            return;
+        }
+        cardView.animate().cancel();
+        cardView.animate().alpha(0f).scaleX(0.94f).scaleY(0.94f).translationY(-8 * d)
+                .setStartDelay(0).setDuration(190).setInterpolator(new AccelerateInterpolator(1.4f))
+                .withEndAction(() -> {
+                    if (dialog != null && dialog.isShowing()) dialog.dismiss();
+                }).start();
+    }
+
+    /** Closes at once (the app is going to the background). */
+    void dismissNow() {
+        closing = true;
         if (dialog != null && dialog.isShowing()) dialog.dismiss();
     }
 
@@ -85,6 +113,7 @@ final class ControlCenter {
     private Runnable onDismiss;
 
     void show(Actions a, Info info) {
+        closing = false;
         dialog = new Dialog(ctx, android.R.style.Theme_Translucent_NoTitleBar_Fullscreen);
         Window w = dialog.getWindow();
         if (w != null) {
@@ -95,19 +124,27 @@ final class ControlCenter {
         }
         FrameLayout root = new FrameLayout(ctx);
         root.setClipChildren(false);
+        root.setClipToPadding(false);
         root.setOnClickListener(v -> dismiss());
 
         final LinearLayout card = new LinearLayout(ctx);
+        cardView = card;
         card.setOrientation(LinearLayout.VERTICAL);
         card.setClipChildren(false);
+        card.setClipToPadding(false);
         int pad = (int) (18 * d);
         card.setPadding(pad, pad, pad, pad);
         card.setBackground(cardBackground());
-        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams((int) (452 * d), ViewGroup.LayoutParams.WRAP_CONTENT,
+        card.setElevation(18 * d);
+        // Never wider than the screen allows (small or scaled-up displays).
+        int screenW = ctx.getResources().getDisplayMetrics().widthPixels;
+        int cardW = Math.min((int) (452 * d), screenW - (int) (48 * d));
+        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(cardW, ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP | Gravity.END);
         clp.topMargin = (int) (26 * d);
-        clp.setMarginEnd((int) (40 * d));
+        clp.setMarginEnd((int) Math.min(40 * d, Math.max(12 * d, (screenW - cardW) / 2f)));
         root.addView(card, clp);
+        final int pivotW = cardW;
         final List<View> pop = new ArrayList<>();
 
         // ---- header ---------------------------------------------------------------------------------
@@ -132,12 +169,14 @@ final class ControlCenter {
                 LinearLayout row = new LinearLayout(ctx);
                 row.setOrientation(LinearLayout.HORIZONTAL);
                 row.setClipChildren(false);
+                row.setClipToPadding(false);
                 LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT);
                 rp.topMargin = (int) (10 * d);
                 card.addView(row, rp);
             }
             LinearLayout row = (LinearLayout) card.getChildAt(card.getChildCount() - 1);
-            LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(0, (int) (80 * d), 1f);
+            // Tall enough for badge + title + value + padding, and it stretches to the tallest tile in its row.
+            LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
             tp.setMarginStart(i % 3 == 0 ? 0 : (int) (10 * d));
             row.addView(tiles[i], tp);
             pop.add(tiles[i]);
@@ -147,9 +186,12 @@ final class ControlCenter {
         // ---- system block -----------------------------------------------------------------------------
         LinearLayout sys = new LinearLayout(ctx);
         sys.setOrientation(LinearLayout.VERTICAL);
-        sys.setBackground(glass(26f, false, false, false));
-        sys.setPadding((int) (14 * d), (int) (10 * d), (int) (14 * d), (int) (8 * d));
+        sys.setBackground(glass(26f, false, false, false, 0));
+        sys.setClipChildren(false);
+        sys.setClipToPadding(false);
+        sys.setPadding((int) (10 * d), (int) (12 * d), (int) (10 * d), (int) (8 * d));
         TextView st = text(ctx.getString(R.string.cc_system), 14f, 600, 0xFFFFFFFF);
+        st.setPadding((int) (6 * d), 0, 0, (int) (2 * d));
         sys.addView(st);
         sys.addView(meter(ctx.getString(R.string.tc_memory), info.memory, a.stopApps), meterLp());
         sys.addView(meter(ctx.getString(R.string.tc_storage), info.storage, a.clearCache), meterLp());
@@ -163,6 +205,7 @@ final class ControlCenter {
         rr.setOrientation(LinearLayout.HORIZONTAL);
         rr.setGravity(Gravity.CENTER);
         rr.setClipChildren(false);
+        rr.setClipToPadding(false);
         List<View> rb = new ArrayList<>();
         rb.add(round(MenuIcons.MOON, a.saver));
         rb.add(round(a.musicAccess != null ? MenuIcons.BELL : MenuIcons.LEVELS, a.musicAccess != null ? a.musicAccess : a.sound));
@@ -171,8 +214,9 @@ final class ControlCenter {
         for (View v : rb) {
             FrameLayout cell = new FrameLayout(ctx);
             cell.setClipChildren(false);
+            cell.setClipToPadding(false);
             cell.addView(v, new FrameLayout.LayoutParams((int) (48 * d), (int) (48 * d), Gravity.CENTER));
-            rr.addView(cell, new LinearLayout.LayoutParams(0, (int) (48 * d), 1f));
+            rr.addView(cell, new LinearLayout.LayoutParams(0, (int) (52 * d), 1f));
             pop.add(v);
         }
         LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -181,7 +225,13 @@ final class ControlCenter {
 
         dialog.setContentView(root);
         dialog.setCanceledOnTouchOutside(true);
+        dialog.setOnKeyListener((di, keyCode, event) -> {
+            if (keyCode != KeyEvent.KEYCODE_BACK) return false;
+            if (event.getAction() == KeyEvent.ACTION_UP) dismiss();
+            return true;                                   // Back closes with the animation, not instantly
+        });
         dialog.setOnDismissListener(di -> {
+            cardView = null;
             for (PillIcon p : icons) p.rest();
             icons.clear();
             ui.removeCallbacksAndMessages(null);
@@ -189,18 +239,22 @@ final class ControlCenter {
         });
         dialog.show();
 
-        card.setPivotX(452 * d);
+        card.setPivotX(pivotW);
         card.setPivotY(0f);
         card.setAlpha(0f);
         card.setScaleX(0.9f);
         card.setScaleY(0.9f);
-        card.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(340).setInterpolator(new DecelerateInterpolator(1.8f)).start();
+        card.setTranslationY(-10 * d);
+        card.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f).setStartDelay(0).setDuration(380)
+                .setInterpolator(new DecelerateInterpolator(2f)).start();
         for (int i = 0; i < pop.size(); i++) {
             View v = pop.get(i);
             v.setAlpha(0f);
-            v.setTranslationY(10 * d);
-            v.animate().alpha(1f).translationY(0f).setStartDelay(80L + i * 30L).setDuration(300)
-                    .setInterpolator(new DecelerateInterpolator(1.6f)).start();
+            v.setTranslationY(14 * d);
+            final View pv = v;
+            v.animate().alpha(1f).translationY(0f).setStartDelay(90L + i * 34L).setDuration(340)
+                    .setInterpolator(new DecelerateInterpolator(1.8f))
+                    .withEndAction(() -> pv.animate().setStartDelay(0)).start();
         }
         if (first != null) first.requestFocus();
     }
@@ -268,107 +322,184 @@ final class ControlCenter {
         return tv;
     }
 
+    private static final int INK = 0xFF16161A;          // text and icons on a light (focused / "on") fill
+
+    /** Dark frosted glass: white text stays readable on any wallpaper. */
     private GradientDrawable cardBackground() {
         GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{0x4DFFFFFF, 0x26FFFFFF});
+                new int[]{0xEB202026, 0xEB111114});
         g.setCornerRadius(38 * d);
-        g.setStroke(Math.max(1, Math.round(1.2f * d)), 0x73FFFFFF);
+        g.setStroke(Math.max(1, Math.round(1.1f * d)), 0x38FFFFFF);
         return g;
     }
 
-    /** Glass fill: normal, focused, or "on" (light, with dark text). */
-    private GradientDrawable glass(float radiusDp, boolean oval, boolean focused, boolean on) {
+    /**
+     * Fill for a control. Normal: faint glass. "on": light. Focused: bright white (dark content), plus an optional
+     * coloured ring for "on" tiles so they still stand out from their light resting state.
+     */
+    private GradientDrawable glass(float radiusDp, boolean oval, boolean focused, boolean on, int ring) {
         int top, bottom, stroke;
-        if (on) {
-            top = focused ? 0xFFFFFFFF : 0xF2F2F2F4;
-            bottom = focused ? 0xFFF4F4F6 : 0xE6E4E4E8;
-            stroke = focused ? 0xFFFFFFFF : 0x66FFFFFF;
+        if (focused) {
+            top = 0xFFFFFFFF;
+            bottom = 0xFFEDEDF2;
+            stroke = ring != 0 ? ring : 0xFFFFFFFF;
+        } else if (on) {
+            top = 0xF2F2F2F4;
+            bottom = 0xE6E4E4E8;
+            stroke = 0x66FFFFFF;
         } else {
-            top = focused ? 0x80FFFFFF : 0x3DFFFFFF;
-            bottom = focused ? 0x4DFFFFFF : 0x1FFFFFFF;
-            stroke = focused ? 0xF2FFFFFF : 0x4DFFFFFF;
+            top = 0x2EFFFFFF;
+            bottom = 0x1AFFFFFF;
+            stroke = 0x22FFFFFF;
         }
         GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{top, bottom});
         g.setShape(oval ? GradientDrawable.OVAL : GradientDrawable.RECTANGLE);
         if (!oval) g.setCornerRadius(radiusDp * d);
-        g.setStroke(Math.max(1, Math.round((focused ? 2f : 1f) * d)), stroke);
+        // Strokes are drawn inside the bounds, so nothing is ever cut off by a parent.
+        g.setStroke(Math.max(1, Math.round((focused && ring != 0 ? 3f : focused ? 1.5f : 1f) * d)), stroke);
         return g;
     }
 
-    private StateListDrawable states(float radiusDp, boolean oval, boolean on) {
+    private StateListDrawable states(float radiusDp, boolean oval, boolean on, int ring) {
         StateListDrawable sl = new StateListDrawable();
-        sl.addState(new int[]{android.R.attr.state_focused}, glass(radiusDp, oval, true, on));
-        sl.addState(new int[0], glass(radiusDp, oval, false, on));
+        sl.addState(new int[]{android.R.attr.state_focused}, glass(radiusDp, oval, true, on, ring));
+        sl.addState(new int[0], glass(radiusDp, oval, false, on, ring));
+        sl.setEnterFadeDuration(130);
+        sl.setExitFadeDuration(200);
         return sl;
     }
 
-    private void focusFx(final View v, final PillIcon icon) {
+    /** Smoothly changes a text colour (cancels a change that is still running). */
+    private void tint(final TextView tv, final int to) {
+        Object old = tv.getTag();
+        if (old instanceof ValueAnimator) ((ValueAnimator) old).cancel();
+        final int from = tv.getCurrentTextColor();
+        if (from == to) return;
+        ValueAnimator a = ValueAnimator.ofObject(new ArgbEvaluator(), from, to);
+        a.setDuration(150);
+        a.addUpdateListener(an -> tv.setTextColor((Integer) an.getAnimatedValue()));
+        tv.setTag(a);
+        a.start();
+    }
+
+    private void tintBadge(final GradientDrawable bg, final FrameLayout holder, final int to, final int from) {
+        Object old = holder.getTag();
+        if (old instanceof ValueAnimator) ((ValueAnimator) old).cancel();
+        ValueAnimator a = ValueAnimator.ofObject(new ArgbEvaluator(), from, to);
+        a.setDuration(170);
+        a.addUpdateListener(an -> bg.setColor((Integer) an.getAnimatedValue()));
+        holder.setTag(a);
+        a.start();
+    }
+
+    /** Lift on focus, a quick dip while OK is held. Never changes size enough to leave the card. */
+    private void scaleTo(View v, float s, boolean pop, int ms) {
+        v.animate().scaleX(s).scaleY(s).setStartDelay(0).setDuration(ms)
+                .setInterpolator(pop ? new OvershootInterpolator(1.3f) : new DecelerateInterpolator(1.6f)).start();
+    }
+
+    private void focusFx(final View v, final PillIcon icon, final float focusScale) {
         v.setOnFocusChangeListener((view, f) -> {
-            view.animate().scaleX(f ? 1.05f : 1f).scaleY(f ? 1.05f : 1f).setDuration(f ? 220 : 150)
-                    .setInterpolator(new OvershootInterpolator(f ? 1.4f : 0f)).start();
+            scaleTo(view, f ? focusScale : 1f, f, f ? 240 : 170);
             if (icon != null) icon.setFocused(f);
+        });
+        pressFx(v, focusScale);
+    }
+
+    private void pressFx(final View v, final float focusScale) {
+        v.setOnKeyListener((view, keyCode, event) -> {
+            if (keyCode != KeyEvent.KEYCODE_DPAD_CENTER && keyCode != KeyEvent.KEYCODE_ENTER
+                    && keyCode != KeyEvent.KEYCODE_NUMPAD_ENTER) return false;
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                scaleTo(view, focusScale * 0.95f, false, 90);
+            } else if (event.getAction() == KeyEvent.ACTION_UP) {
+                scaleTo(view, focusScale, false, 140);
+            }
+            return false;                                  // the click still goes through
         });
     }
 
     /** Runs after the card has closed (a detached view cannot post, so a Handler is used). */
     private void run(final Runnable action) {
         dismiss();
-        if (action != null) new Handler(Looper.getMainLooper()).postDelayed(action, 220);
+        if (action != null) new Handler(Looper.getMainLooper()).postDelayed(action, 240);
     }
 
     private View round(int iconKind, final Runnable action) {
         FrameLayout v = new FrameLayout(ctx);
-        v.setBackground(states(0, true, false));
+        v.setBackground(states(0, true, false, 0));
+        v.setClipChildren(false);
         v.setFocusable(true);
         v.setClickable(true);
         ImageView iv = new ImageView(ctx);
-        PillIcon icon = MenuIcons.make(iconKind, d);
+        iv.setDuplicateParentState(true);                  // so the icon knows when the button is focused
+        // White at rest, dark while the button is the bright focused circle.
+        PillIcon icon = MenuIcons.make(iconKind, d, new ColorStateList(
+                new int[][]{{android.R.attr.state_focused}, {}}, new int[]{INK, 0xFFFFFFFF}));
         icons.add(icon);
         iv.setImageDrawable(icon);
         int s = (int) (22 * d);
         v.addView(iv, new FrameLayout.LayoutParams(s, s, Gravity.CENTER));
-        focusFx(v, icon);
+        focusFx(v, icon, 1.1f);
         v.setOnClickListener(view -> run(action));
         return v;
     }
 
     /** A rounded tile: coloured badge top-left, title and value underneath. "On" tiles are light with dark text. */
-    private View tile(int vectorRes, int iconKind, int badgeColor, boolean on, String title, String value, final Runnable action) {
+    private View tile(int vectorRes, int iconKind, final int badgeColor, final boolean on, String title, String value,
+                      final Runnable action) {
         LinearLayout v = new LinearLayout(ctx);
         v.setOrientation(LinearLayout.VERTICAL);
         v.setGravity(Gravity.CENTER_VERTICAL);
-        v.setPadding((int) (12 * d), (int) (8 * d), (int) (10 * d), (int) (8 * d));
-        v.setBackground(states(26f, false, on));
+        v.setClipChildren(false);
+        v.setClipToPadding(false);
+        v.setMinimumHeight((int) (96 * d));
+        v.setPadding((int) (14 * d), (int) (12 * d), (int) (12 * d), (int) (12 * d));
+        v.setBackground(states(26f, false, on, badgeColor));
         v.setFocusable(true);
         v.setClickable(true);
 
-        FrameLayout badge = new FrameLayout(ctx);
-        GradientDrawable bg = new GradientDrawable();
+        final FrameLayout badge = new FrameLayout(ctx);
+        final GradientDrawable bg = new GradientDrawable();
         bg.setShape(GradientDrawable.OVAL);
         bg.setColor(on ? badgeColor : 0x40FFFFFF);
         badge.setBackground(bg);
         ImageView iv = new ImageView(ctx);
         PillIcon icon = null;
         if (iconKind > 0) {
-            icon = MenuIcons.make(iconKind, d);
+            icon = MenuIcons.make(iconKind, d);            // white on the coloured badge
             icons.add(icon);
             iv.setImageDrawable(icon);
         } else {
             iv.setImageResource(vectorRes);
         }
-        int is = (int) (15 * d);
+        int is = (int) (16 * d);
         badge.addView(iv, new FrameLayout.LayoutParams(is, is, Gravity.CENTER));
-        v.addView(badge, new LinearLayout.LayoutParams((int) (28 * d), (int) (28 * d)));
+        v.addView(badge, new LinearLayout.LayoutParams((int) (30 * d), (int) (30 * d)));
 
-        TextView t = text(title, 13f, 600, on ? 0xFF16161A : 0xFFFFFFFF);
+        final int titleRest = on ? INK : 0xFFFFFFFF;
+        final int valueRest = on ? 0xB316161A : 0xB3FFFFFF;
+        final TextView t = text(title, 13.5f, 600, titleRest);
         LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT);
-        tp.topMargin = (int) (8 * d);
+        tp.topMargin = (int) (10 * d);
         v.addView(t, tp);
-        TextView val = text(value, 11f, 400, on ? 0xB316161A : 0xB3FFFFFF);
+        final TextView val = text(value, 11.5f, 400, valueRest);
         LinearLayout.LayoutParams vp = new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT);
-        vp.topMargin = (int) (2 * d);
+        vp.topMargin = (int) (3 * d);
         v.addView(val, vp);
-        focusFx(v, icon);
+
+        final PillIcon fi = icon;
+        v.setOnFocusChangeListener((view, f) -> {
+            scaleTo(view, f ? 1.045f : 1f, f, f ? 240 : 170);
+            if (fi != null) fi.setFocused(f);
+            tint(t, f ? INK : titleRest);                  // white on the bright focused fill would vanish
+            tint(val, f ? 0xB316161A : valueRest);
+            // An "off" tile shows its colour while focused, so the white icon stays visible on the white fill.
+            int to = (f || on) ? badgeColor : 0x40FFFFFF;
+            int from = (f || on) ? (on ? badgeColor : 0x40FFFFFF) : badgeColor;
+            tintBadge(bg, badge, to, from);
+        });
+        pressFx(v, 1.045f);
         v.setOnClickListener(view -> run(action));
         return v;
     }
@@ -391,17 +522,19 @@ final class ControlCenter {
         final MeterRow m = new MeterRow(ctx, label, value, used);
         m.setFocusable(true);
         m.setClickable(true);
-        focusFx(m, null);
         m.setOnClickListener(view -> run(action));
         return m;
     }
 
+    /** One System row: label, a dark-red "used" bar, and what is free. The focus fill stays inside its own bounds. */
     private final class MeterRow extends View {
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF r = new RectF();
         private final String label, value;
         private final float frac;
-        private float shown;
+        private float shown, focusAmt;
+        private LinearGradient shader;
+        private float shaderX = -1, shaderW = -1;
 
         MeterRow(Context c, String label, String value, float frac) {
             super(c);
@@ -414,15 +547,24 @@ final class ControlCenter {
                 } catch (RuntimeException ignored) {
                 }
             }
+            setOnKeyListener((view, keyCode, event) -> {
+                if (keyCode != KeyEvent.KEYCODE_DPAD_CENTER && keyCode != KeyEvent.KEYCODE_ENTER) return false;
+                if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                    animate().scaleX(0.985f).scaleY(0.985f).setStartDelay(0).setDuration(90).start();
+                } else if (event.getAction() == KeyEvent.ACTION_UP) {
+                    animate().scaleX(1f).scaleY(1f).setStartDelay(0).setDuration(140).start();
+                }
+                return false;
+            });
         }
 
         @Override
         protected void onAttachedToWindow() {
             super.onAttachedToWindow();
-            android.animation.ValueAnimator a = android.animation.ValueAnimator.ofFloat(0f, 1f);
-            a.setStartDelay(300);
-            a.setDuration(650);
-            a.setInterpolator(new DecelerateInterpolator(1.6f));
+            ValueAnimator a = ValueAnimator.ofFloat(0f, 1f);
+            a.setStartDelay(380);
+            a.setDuration(850);
+            a.setInterpolator(new DecelerateInterpolator(2f));
             a.addUpdateListener(an -> {
                 shown = (Float) an.getAnimatedValue();
                 invalidate();
@@ -433,34 +575,72 @@ final class ControlCenter {
         @Override
         protected void onDraw(Canvas c) {
             float w = getWidth(), h = getHeight();
-            if (isFocused()) {
+            float inset = 1.2f * d;
+            if (focusAmt > 0.01f) {
+                r.set(inset, inset, w - inset, h - inset);
+                p.setShader(null);
                 p.setStyle(Paint.Style.FILL);
-                p.setColor(0x33FFFFFF);
-                r.set(0, 0, w, h);
-                c.drawRoundRect(r, 12 * d, 12 * d, p);
+                p.setColor(Color.argb((int) (0x33 * focusAmt), 255, 255, 255));
+                c.drawRoundRect(r, 14 * d, 14 * d, p);
+                p.setStyle(Paint.Style.STROKE);
+                p.setStrokeWidth(1.6f * d);
+                p.setColor(Color.argb((int) (0xCC * focusAmt), 255, 255, 255));
+                c.drawRoundRect(r, 14 * d, 14 * d, p);
             }
+            p.setShader(null);
             p.setStyle(Paint.Style.FILL);
-            p.setTextSize(12 * d);
-            p.setColor(0xCCFFFFFF);
+            float padL = 12 * d, padR = 12 * d;
+            Paint.FontMetrics fm = new Paint.FontMetrics();
+
+            // label (fixed column so both bars line up)
+            p.setTextSize(12.5f * d);
             p.setTextAlign(Paint.Align.LEFT);
-            c.drawText(label, 8 * d, h / 2f + 4 * d, p);
-            float bx = 96 * d, bw = w - bx - 110 * d, bh = 6 * d, by = h / 2f - bh / 2f;
-            p.setColor(0x40FFFFFF);
+            p.setColor(Color.argb(0xCC + (int) (0x33 * focusAmt), 255, 255, 255));
+            p.getFontMetrics(fm);
+            float baseline = h / 2f - (fm.ascent + fm.descent) / 2f;
+            float labelW = 62 * d;
+            String lbl = android.text.TextUtils.ellipsize(label, new android.text.TextPaint(p), labelW,
+                    android.text.TextUtils.TruncateAt.END).toString();
+            c.drawText(lbl, padL, baseline, p);
+
+            // value on the right
+            p.setTextSize(11.5f * d);
+            p.setTextAlign(Paint.Align.RIGHT);
+            p.setColor(Color.argb(0xB3 + (int) (0x2A * focusAmt), 255, 255, 255));
+            p.getFontMetrics(fm);
+            float vBase = h / 2f - (fm.ascent + fm.descent) / 2f;
+            float valueW = Math.max(p.measureText(value), 60 * d);
+            c.drawText(value, w - padR, vBase, p);
+
+            // bar
+            float bx = padL + labelW + 8 * d;
+            float bw = Math.max(20 * d, w - bx - padR - valueW - 12 * d);
+            float bh = 7 * d, by = h / 2f - bh / 2f;
+            p.setTextAlign(Paint.Align.LEFT);
+            p.setColor(0x33FFFFFF);
             r.set(bx, by, bx + bw, by + bh);
             c.drawRoundRect(r, bh / 2f, bh / 2f, p);
-            p.setColor(0xFFFFFFFF);
-            r.set(bx, by, bx + bw * frac * shown, by + bh);
+            if (shader == null || shaderX != bx || shaderW != bw) {
+                shader = new LinearGradient(bx, 0, bx + bw, 0, 0xFF7A0C14, 0xFFC8202C, Shader.TileMode.CLAMP);
+                shaderX = bx;
+                shaderW = bw;
+            }
+            p.setShader(shader);
+            r.set(bx, by, bx + Math.max(bh, bw * frac * shown), by + bh);
             c.drawRoundRect(r, bh / 2f, bh / 2f, p);
-            p.setTextAlign(Paint.Align.RIGHT);
-            p.setColor(0xA6FFFFFF);
-            p.setTextSize(11 * d);
-            c.drawText(value, w - 8 * d, h / 2f + 4 * d, p);
+            p.setShader(null);
         }
 
         @Override
         protected void onFocusChanged(boolean gained, int direction, android.graphics.Rect prev) {
             super.onFocusChanged(gained, direction, prev);
-            invalidate();
+            ValueAnimator a = ValueAnimator.ofFloat(focusAmt, gained ? 1f : 0f);
+            a.setDuration(gained ? 170 : 220);
+            a.addUpdateListener(an -> {
+                focusAmt = (Float) an.getAnimatedValue();
+                invalidate();
+            });
+            a.start();
         }
     }
 
@@ -522,7 +702,7 @@ final class ControlCenter {
         art.setClipToOutline(true);
         Bitmap bmp = m == null ? null : SongColors.artOf(m);
         if (bmp != null) art.setImageBitmap(bmp);
-        else art.setBackground(glass(12f, false, false, false));
+        else art.setBackground(glass(12f, false, false, false, 0));
         h.addView(art, new LinearLayout.LayoutParams((int) (56 * d), (int) (56 * d)));
 
         LinearLayout col = new LinearLayout(ctx);
@@ -565,9 +745,11 @@ final class ControlCenter {
         iv.setClickable(true);
         int p = (int) (8 * d);
         iv.setPadding(p, p, p, p);
-        iv.setBackground(states(0, true, false));
-        iv.setOnFocusChangeListener((view, f) ->
-                view.animate().scaleX(f ? 1.12f : 1f).scaleY(f ? 1.12f : 1f).setDuration(150).start());
+        iv.setBackground(states(0, true, false, 0));
+        // White glyph at rest, dark on the bright focused circle.
+        iv.setImageTintList(new ColorStateList(new int[][]{{android.R.attr.state_focused}, {}},
+                new int[]{INK, 0xFFFFFFFF}));
+        focusFx(iv, null, 1.12f);
         return iv;
     }
 }
