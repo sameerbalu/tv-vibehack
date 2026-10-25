@@ -498,6 +498,10 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
                 }
             });
             card.setClipToOutline(true);
+            // Rim light that follows the rounded corners, on top of the sheen from the XML.
+            Drawable sheen = card.getForeground();
+            card.setForeground(sheen == null ? new RimLight(density, 16f)
+                    : new android.graphics.drawable.LayerDrawable(new Drawable[]{sheen, new RimLight(density, 16f)}));
             card.setOnKeyListener((view, keyCode, event) -> {
                 if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
                 int pos = getBindingAdapterPosition();

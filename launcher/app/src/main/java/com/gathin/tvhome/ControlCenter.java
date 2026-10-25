@@ -15,7 +15,9 @@ import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.LayerDrawable;
 import android.graphics.drawable.StateListDrawable;
 import android.media.MediaMetadata;
 import android.media.session.MediaController;
@@ -334,29 +336,44 @@ final class ControlCenter {
     }
 
     /**
-     * Fill for a control. Normal: faint glass. "on": light. Focused: bright white (dark content), plus an optional
-     * coloured ring for "on" tiles so they still stand out from their light resting state.
+     * Fill for a control. Normal: faint glass. "On" (Wi-Fi connected, effects running...): smoked black glass with a
+     * soft glow of the control's own colour in the top-left corner. Focused: brighter, with a ring. Never white.
      */
-    private GradientDrawable glass(float radiusDp, boolean oval, boolean focused, boolean on, int ring) {
+    private Drawable glass(float radiusDp, boolean oval, boolean focused, boolean on, int accent) {
+        int ringW = Math.max(1, Math.round((focused ? (on && accent != 0 ? 3f : 2f) : 1f) * d));
+        if (on && accent != 0 && !oval) {
+            GradientDrawable base = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                    new int[]{focused ? 0xE6000000 : 0xCC000000, focused ? 0xB8000000 : 0x99000000});
+            base.setCornerRadius(radiusDp * d);
+            GradientDrawable glow = new GradientDrawable();
+            glow.setShape(GradientDrawable.RECTANGLE);
+            glow.setGradientType(GradientDrawable.RADIAL_GRADIENT);
+            glow.setGradientCenter(0.16f, 0.14f);
+            glow.setGradientRadius(170 * d);
+            int a1 = focused ? 0xB3 : 0x7A;
+            glow.setColors(new int[]{(a1 << 24) | (accent & 0xFFFFFF), 0x00000000});
+            glow.setCornerRadius(radiusDp * d);
+            GradientDrawable edge = new GradientDrawable();
+            edge.setShape(GradientDrawable.RECTANGLE);
+            edge.setCornerRadius(radiusDp * d);
+            edge.setStroke(ringW, focused ? accent : ((0x80 << 24) | (accent & 0xFFFFFF)));
+            return new LayerDrawable(new Drawable[]{base, glow, edge});
+        }
         int top, bottom, stroke;
         if (focused) {
-            top = 0xFFFFFFFF;
-            bottom = 0xFFEDEDF2;
-            stroke = ring != 0 ? ring : 0xFFFFFFFF;
-        } else if (on) {
-            top = 0xF2F2F2F4;
-            bottom = 0xE6E4E4E8;
-            stroke = 0x66FFFFFF;
+            top = 0x52FFFFFF;
+            bottom = 0x33FFFFFF;
+            stroke = 0xE6FFFFFF;
         } else {
-            top = 0x2EFFFFFF;
-            bottom = 0x1AFFFFFF;
-            stroke = 0x22FFFFFF;
+            top = 0x26FFFFFF;
+            bottom = 0x14FFFFFF;
+            stroke = 0x24FFFFFF;
         }
         GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{top, bottom});
         g.setShape(oval ? GradientDrawable.OVAL : GradientDrawable.RECTANGLE);
         if (!oval) g.setCornerRadius(radiusDp * d);
         // Strokes are drawn inside the bounds, so nothing is ever cut off by a parent.
-        g.setStroke(Math.max(1, Math.round((focused && ring != 0 ? 3f : focused ? 1.5f : 1f) * d)), stroke);
+        g.setStroke(ringW, stroke);
         return g;
     }
 
@@ -401,11 +418,7 @@ final class ControlCenter {
     private void focusFx(final View v, final PillIcon icon, final float focusScale) {
         v.setOnFocusChangeListener((view, f) -> {
             scaleTo(view, f ? focusScale : 1f, f, f ? 240 : 170);
-            if (icon != null) {
-                icon.setFocused(f);
-                // The icon is a child, so tell it directly (dark on the bright focused circle, white otherwise).
-                icon.setState(f ? new int[]{android.R.attr.state_focused} : new int[0]);
-            }
+            if (icon != null) icon.setFocused(f);
         });
         pressFx(v, focusScale);
     }
@@ -436,9 +449,7 @@ final class ControlCenter {
         v.setFocusable(true);
         v.setClickable(true);
         ImageView iv = new ImageView(ctx);
-        // White at rest, dark while the button is the bright focused circle.
-        PillIcon icon = MenuIcons.make(iconKind, d, new ColorStateList(
-                new int[][]{{android.R.attr.state_focused}, {}}, new int[]{INK, 0xFFFFFFFF}));
+        PillIcon icon = MenuIcons.make(iconKind, d);
         icons.add(icon);
         iv.setImageDrawable(icon);
         int s = (int) (22 * d);
@@ -480,8 +491,8 @@ final class ControlCenter {
         badge.addView(iv, new FrameLayout.LayoutParams(is, is, Gravity.CENTER));
         v.addView(badge, new LinearLayout.LayoutParams((int) (30 * d), (int) (30 * d)));
 
-        final int titleRest = on ? INK : 0xFFFFFFFF;
-        final int valueRest = on ? 0xB316161A : 0xB3FFFFFF;
+        final int titleRest = 0xFFFFFFFF;
+        final int valueRest = on ? 0xCCFFFFFF : 0xB3FFFFFF;
         final TextView t = text(title, 13.5f, 600, titleRest);
         LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT);
         tp.topMargin = (int) (10 * d);
@@ -495,9 +506,9 @@ final class ControlCenter {
         v.setOnFocusChangeListener((view, f) -> {
             scaleTo(view, f ? 1.045f : 1f, f, f ? 240 : 170);
             if (fi != null) fi.setFocused(f);
-            tint(t, f ? INK : titleRest);                  // white on the bright focused fill would vanish
-            tint(val, f ? 0xB316161A : valueRest);
-            // An "off" tile shows its colour while focused, so the white icon stays visible on the white fill.
+            tint(t, titleRest);
+            tint(val, f ? 0xE6FFFFFF : valueRest);
+            // An "off" tile shows its colour while focused.
             int to = (f || on) ? badgeColor : 0x40FFFFFF;
             int from = (f || on) ? (on ? badgeColor : 0x40FFFFFF) : badgeColor;
             tintBadge(bg, badge, to, from);
@@ -692,7 +703,9 @@ final class ControlCenter {
         LinearLayout h = new LinearLayout(ctx);
         h.setOrientation(LinearLayout.HORIZONTAL);
         h.setGravity(Gravity.CENTER_VERTICAL);
-        h.setPadding((int) (2 * d), (int) (2 * d), 0, (int) (4 * d));
+        h.setClipChildren(false);
+        h.setClipToPadding(false);
+        h.setPadding((int) (2 * d), (int) (4 * d), (int) (6 * d), (int) (6 * d));
 
         ImageView art = new ImageView(ctx);
         art.setScaleType(ImageView.ScaleType.CENTER_CROP);
@@ -730,7 +743,7 @@ final class ControlCenter {
             else controller.getTransportControls().play();
             playBtn.setImageResource(isPlaying() ? R.drawable.ic_play : R.drawable.ic_pause);   // state flips after this call
         });
-        int sz = (int) (36 * d);
+        int sz = (int) (38 * d);
         h.addView(prev, new LinearLayout.LayoutParams(sz, sz));
         LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(sz, sz);
         mp.setMarginStart((int) (4 * d));
@@ -749,10 +762,8 @@ final class ControlCenter {
         int p = (int) (8 * d);
         iv.setPadding(p, p, p, p);
         iv.setBackground(states(0, true, false, 0));
-        // White glyph at rest, dark on the bright focused circle.
-        iv.setImageTintList(new ColorStateList(new int[][]{{android.R.attr.state_focused}, {}},
-                new int[]{INK, 0xFFFFFFFF}));
-        focusFx(iv, null, 1.12f);
+        iv.setImageTintList(ColorStateList.valueOf(0xFFFFFFFF));
+        focusFx(iv, null, 1.08f);
         return iv;
     }
 }

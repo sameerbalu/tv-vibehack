@@ -112,6 +112,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private AppAdapter adapter;
     private RecyclerView grid;
     private DockDecoration dockDecoration;
+    private Bitmap veilBackdrop;            // lightly blurred wallpaper behind open menus
     private Bitmap menuBackdrop;            // blurred wallpaper, for the frosted pop-up menus
     private FrameLayout root;
     private View header;
@@ -1312,13 +1313,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             menuVeilImg.setScaleType(ImageView.ScaleType.CENTER_CROP);
             menuVeil.addView(menuVeilImg, new FrameLayout.LayoutParams(-1, -1));
             View dark = new View(this);
-            dark.setBackgroundColor(0x80000000);
+            dark.setBackgroundColor(0xB8000000);          // dark, so the menu stands out
             menuVeil.addView(dark, new FrameLayout.LayoutParams(-1, -1));
             menuVeil.setVisibility(View.GONE);
             root.addView(menuVeil, new FrameLayout.LayoutParams(-1, -1));
         }
-        menuVeilImg.setImageBitmap(menuBackdrop);
-        menuVeilImg.setAlpha(menuBackdrop != null ? 0.92f : 0f);
+        menuVeilImg.setImageBitmap(veilBackdrop);
+        menuVeilImg.setAlpha(veilBackdrop != null ? 1f : 0f);
         menuVeil.animate().cancel();
         if (menuVeil.getVisibility() != View.VISIBLE) {
             menuVeil.setAlpha(0f);
@@ -1586,6 +1587,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         wallpaperBlurView.setImageDrawable(null);
         wallpaperBlurView.setVisibility(View.GONE);
         menuBackdrop = null;
+        veilBackdrop = null;
         if (dockDecoration != null) dockDecoration.setBackdrop(null);
         if (allAppsPanel != null) allAppsPanel.setBackdrop(null);
         if (grid != null) grid.invalidate();
@@ -1701,6 +1703,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             wallpaperBlurView.setImageBitmap(blurred);
             wallpaperBlurView.setVisibility(View.VISIBLE);
             menuBackdrop = blurred;
+            veilBackdrop = BlurUtil.blur(bitmap, 360, 4);       // a gentle blur: the picture stays recognisable
             if (dockDecoration != null) dockDecoration.setBackdrop(blurred);
             if (allAppsPanel != null) allAppsPanel.setBackdrop(blurred);
             if (grid != null) grid.invalidate();
@@ -2803,6 +2806,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     /** A popup that fades and folds back up when it closes, the mirror of how showDropdown opens it. */
     private final class AnimPopup extends PopupWindow {
         private boolean closing;
+        private OnDismissListener user;
+
+        @Override
+        public void setOnDismissListener(OnDismissListener l) {
+            user = l;
+            super.setOnDismissListener(l);
+        }
 
         AnimPopup(View content, int w, int h, boolean focusable) {
             super(content, w, h, focusable);
@@ -2866,7 +2876,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         }
         openPopup = popup;
         showVeil();
-        popup.setOnDismissListener(this::scheduleHideVeil);
+        // Keep a listener the caller already set (Hide apps reloads the list when it closes).
+        final PopupWindow.OnDismissListener prev = popup instanceof AnimPopup ? ((AnimPopup) popup).user : null;
+        popup.setOnDismissListener(() -> {
+            if (prev != null) prev.onDismiss();
+            scheduleHideVeil();
+        });
         if (rows.getChildCount() > 0) rows.getChildAt(0).requestFocus();
     }
 
