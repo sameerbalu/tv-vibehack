@@ -1253,7 +1253,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         a.effects = this::showEffects;
         a.widgets = this::showWidgets;
         a.saver = () -> startActivity(new Intent(this, ScreensaverActivity.class));
-        a.bluetooth = () -> open(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS));
+        a.bluetooth = this::showBluetooth;                  // the same device list as the Bluetooth pill
         a.wifi = () -> open(new Intent(Settings.ACTION_WIFI_SETTINGS));
         a.sound = () -> open(new Intent(Settings.ACTION_SOUND_SETTINGS));
         a.about = () -> open(new Intent(Settings.ACTION_DEVICE_INFO_SETTINGS));

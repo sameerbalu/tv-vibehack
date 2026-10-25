@@ -15,7 +15,7 @@ final class MenuIcons {
 
     static final int WALLPAPER = 1, DEPTH = 2, EYE = 3, WIDGETS = 4, SPARKLE = 5, MOON = 6, BELL = 7, GEAR = 8,
             TRASH = 9, PLAY = 10, OPEN = 11, CLEAR = 12, GLOW = 13, BRUSH = 14, LEVELS = 15, TV = 16,
-            BLUETOOTH = 17, SOURCE = 18;
+            BLUETOOTH = 17, SOURCE = 18, WIFI = 19;
 
     private MenuIcons() {
     }
@@ -42,6 +42,7 @@ final class MenuIcons {
             case BRUSH: return new Brush(density, white);
             case LEVELS: return new Levels(density, white);
             case TV: return new Tv(density, white);
+            case WIFI: return new Wifi(density, white);
             case BLUETOOTH: return new PillIcon.Bluetooth(density, white);
             default: return new PillIcon.Input(density, white);
         }
@@ -538,6 +539,36 @@ final class MenuIcons {
                 ink(0.6f * (1f - q));
                 c.drawCircle(12f, 14.2f, 2f + 3.4f * q, paint);
             }
+        }
+    }
+
+    // ---- Wi-Fi: the waves light up one after the other, the dot pulses ------------------------------------------------
+    static final class Wifi extends Menu {
+        private final RectF oval = new RectF();
+
+        Wifi(float d, ColorStateList c) {
+            super(d, c, 2200);
+        }
+
+        @Override
+        void drawIcon(Canvas c) {
+            float cx = 12f, cy = 19f;
+            float[] radii = {5f, 9f, 13f};
+            for (int i = 0; i < 3; i++) {
+                float k = bump(0.04f + i * 0.15f, 0.36f);
+                ink(0.38f + 0.62f * k);
+                float r = radii[i];
+                oval.set(cx - r, cy - r, cx + r, cy + r);
+                c.drawArc(oval, 232f, 76f, false, paint);
+            }
+            float p = 1f + 0.35f * bump(0f, 0.3f);
+            c.save();
+            c.scale(p, p, cx, cy);
+            fill();
+            ink(1f);
+            c.drawCircle(cx, cy, 1.4f, paint);
+            line();
+            c.restore();
         }
     }
 }

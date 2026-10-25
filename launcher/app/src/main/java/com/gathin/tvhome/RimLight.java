@@ -44,9 +44,16 @@ final class RimLight extends Drawable {
 
     @Override
     protected void onBoundsChange(Rect b) {
-        rim.setShader(new LinearGradient(0, b.top, 0, b.top + b.height() * 0.72f,
-                new int[]{0x7AFFFFFF, 0x30FFFFFF, 0x00FFFFFF},
-                new float[]{0f, 0.32f, 1f}, Shader.TileMode.CLAMP));
+        if (withBottom) {
+            rim.setShader(new LinearGradient(0, b.top, 0, b.top + b.height() * 0.72f,
+                    new int[]{0x7AFFFFFF, 0x30FFFFFF, 0x00FFFFFF},
+                    new float[]{0f, 0.32f, 1f}, Shader.TileMode.CLAMP));
+        } else {
+            // Apps: bright at the top, getting dimmer all the way down but keeping a little light at the bottom.
+            rim.setShader(new LinearGradient(0, b.top, 0, b.bottom,
+                    new int[]{0x7AFFFFFF, 0x34FFFFFF, 0x18FFFFFF},
+                    new float[]{0f, 0.40f, 1f}, Shader.TileMode.CLAMP));
+        }
         // The faint light from below: only the last part of the sides and the bottom edge, dim.
         rimBottom.setShader(new LinearGradient(0, b.bottom - b.height() * 0.42f, 0, b.bottom,
                 new int[]{0x00FFFFFF, 0x1CFFFFFF}, null, Shader.TileMode.CLAMP));

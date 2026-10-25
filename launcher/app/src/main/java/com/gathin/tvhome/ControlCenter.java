@@ -159,7 +159,7 @@ final class ControlCenter {
         boolean wifiOn = isWifiUp();
         boolean btOn = isBluetoothOn();
         View[] tiles = {
-                tile(R.drawable.ic_wifi, -1, 0xFF0A84FF, wifiOn, ctx.getString(R.string.cc_wifi), wifiState(), a.wifi),
+                tile(0, MenuIcons.WIFI, 0xFF0A84FF, wifiOn, ctx.getString(R.string.cc_wifi), wifiState(), a.wifi),
                 tile(0, MenuIcons.BLUETOOTH, 0xFF0A84FF, btOn, ctx.getString(R.string.bluetooth), bluetoothState(), a.bluetooth),
                 tile(0, MenuIcons.SPARKLE, 0xFFAF52DE, info.effectsOn, ctx.getString(R.string.fx_title), info.effectsValue, a.effects),
                 tile(0, MenuIcons.WALLPAPER, 0xFFFF2D55, info.wallpaperOn, ctx.getString(R.string.wallpaper_tab), info.wallpaperValue, a.wallpaper),
