@@ -157,7 +157,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
     void openApp(NuvioHistory.Entry e) {
         String pkg = resolvePkg(e);
         if (pkg == null) {
-            Toast.makeText(ctx, R.string.library_no_nuvio, Toast.LENGTH_SHORT).show();
+            { if (ctx instanceof MainActivity) ((MainActivity) ctx).toast(R.string.library_no_nuvio, false); else Toast.makeText(ctx, R.string.library_no_nuvio, Toast.LENGTH_SHORT).show(); }
             return;
         }
         launch(pkg);
@@ -458,14 +458,14 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         Intent i = pm.getLeanbackLaunchIntentForPackage(pkg);
         if (i == null) i = pm.getLaunchIntentForPackage(pkg);
         if (i == null) {
-            Toast.makeText(ctx, R.string.library_no_nuvio, Toast.LENGTH_SHORT).show();
+            { if (ctx instanceof MainActivity) ((MainActivity) ctx).toast(R.string.library_no_nuvio, false); else Toast.makeText(ctx, R.string.library_no_nuvio, Toast.LENGTH_SHORT).show(); }
             return;
         }
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         try {
             ctx.startActivity(i);
         } catch (Exception ex) {
-            Toast.makeText(ctx, R.string.library_no_nuvio, Toast.LENGTH_SHORT).show();
+            { if (ctx instanceof MainActivity) ((MainActivity) ctx).toast(R.string.library_no_nuvio, false); else Toast.makeText(ctx, R.string.library_no_nuvio, Toast.LENGTH_SHORT).show(); }
         }
     }
 
@@ -479,7 +479,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         String pkg = (e.pkg == null || e.pkg.isEmpty() || pm.getLaunchIntentForPackage(e.pkg) == null
                 && pm.getLeanbackLaunchIntentForPackage(e.pkg) == null) ? nuvioPkg : e.pkg;
         if (pkg == null) {
-            Toast.makeText(ctx, R.string.library_no_nuvio, Toast.LENGTH_SHORT).show();
+            { if (ctx instanceof MainActivity) ((MainActivity) ctx).toast(R.string.library_no_nuvio, false); else Toast.makeText(ctx, R.string.library_no_nuvio, Toast.LENGTH_SHORT).show(); }
             return;
         }
         // 1) The app still holds this video: play it from the saved position and bring the app up.

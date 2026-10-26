@@ -91,10 +91,9 @@ final class ClockStyles {
 
     static final String OWNER = "Sameer";
 
-    /** "Good morning" in the normal styles; "Good morning Sameer" in the Minecraft style. */
+    /** "Good morning Sameer": every style greets by name. */
     static CharSequence greeting(Context c, int res) {
-        String base = c.getString(res);
-        return get(c) == MINECRAFT ? base + " " + OWNER : base;
+        return c.getString(res) + " " + OWNER;
     }
 
     /**

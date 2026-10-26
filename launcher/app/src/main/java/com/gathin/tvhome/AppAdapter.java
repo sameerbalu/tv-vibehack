@@ -492,7 +492,7 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         try {
             ctx.startActivity(i);
         } catch (Exception ex) {
-            Toast.makeText(ctx, ctx.getString(R.string.cant_open, e.label), Toast.LENGTH_SHORT).show();
+            { String msg = ctx.getString(R.string.cant_open, e.label); if (ctx instanceof MainActivity) ((MainActivity) ctx).toast(msg, false); else Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show(); }
         }
     }
 

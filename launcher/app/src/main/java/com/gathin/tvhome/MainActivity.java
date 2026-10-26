@@ -679,35 +679,49 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         Uri uri = data.getData();
         if (uri == null) return;
         if (requestCode == REQUEST_DOCK_PNG) {
-            try {
-                WallpaperStore.copyDock(this, uri);
-                dockPng.setBitmap(null);
-                loadDockPng();
-                if (!dockPng.hasBitmap()) throw new IllegalArgumentException("Unable to decode image");
-                setDockPngOn(true);
-            } catch (Exception | OutOfMemoryError e) {
-                Toast.makeText(this, R.string.wallpaper_failed, Toast.LENGTH_SHORT).show();
-            }
+            final Uri pick = uri;
+            IMG.execute(() -> {                                    // copying and decoding stay off the main thread
+                try {
+                    WallpaperStore.copyDock(this, pick);
+                } catch (Exception | OutOfMemoryError e) {
+                    runOnUiThread(() -> toast("Could not load that PNG", false));
+                    return;
+                }
+                runOnUiThread(() -> {
+                    if (isDestroyed()) return;
+                    dockPng.setBitmap(null);
+                    loadDockPng(true, ok -> {
+                        if (ok) setDockPngOn(true);
+                        else toast("Could not load that PNG", false);
+                    });
+                });
+            });
             return;
         }
         if (requestCode == REQUEST_FRONT) {
-            try {
-                WallpaperStore.copyFront(this, uri);
-                applyFront();
-            } catch (Exception e) {
-                Toast.makeText(this, R.string.wallpaper_failed, Toast.LENGTH_SHORT).show();
-            }
+            final Uri pick = uri;
+            IMG.execute(() -> {
+                try {
+                    WallpaperStore.copyFront(this, pick);
+                    runOnUiThread(this::applyFront);
+                } catch (Exception e) {
+                    runOnUiThread(() -> toast(R.string.wallpaper_failed, false));
+                }
+            });
             return;
         }
         if (requestCode != REQUEST_WALLPAPER) return;
-        try {
-            // Keep a private copy: the picked link may stop working after a TV restart.
-            WallpaperStore.copyFrom(this, uri);
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(WALLPAPER_URI).apply();
-            applyWallpaper(WallpaperStore.uri(this));
-        } catch (Exception e) {
-            Toast.makeText(this, R.string.wallpaper_failed, Toast.LENGTH_SHORT).show();
-        }
+        final Uri pick = uri;
+        IMG.execute(() -> {
+            try {
+                // Keep a private copy: the picked link may stop working after a TV restart.
+                WallpaperStore.copyFrom(this, pick);
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(WALLPAPER_URI).apply();
+                runOnUiThread(() -> applyWallpaper(WallpaperStore.uri(this)));
+            } catch (Exception e) {
+                runOnUiThread(() -> toast(R.string.wallpaper_failed, false));
+            }
+        });
     }
 
     @Override
@@ -1364,7 +1378,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             dot.setVisibility(sel == i ? View.VISIBLE : View.GONE);
             row.setOnClickListener(v -> {
                 if (!PrivateDns.supported()) {
-                    Toast.makeText(this, "Private DNS needs Android 9 or newer", Toast.LENGTH_LONG).show();
+                    toast("Private DNS needs Android 9 or newer", true);
                     return;
                 }
                 if (!PrivateDns.canWrite(this)) {
@@ -1378,8 +1392,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
                     return;
                 }
                 boolean ok = PrivateDns.set(this, PrivateDns.HOSTS[index]);
-                Toast.makeText(this, ok ? (index == 0 ? "DNS: automatic" : "Ad-block DNS on: " + PrivateDns.HOSTS[index])
-                        : "Could not change the DNS", Toast.LENGTH_SHORT).show();
+                toast(ok ? (index == 0 ? "DNS: automatic" : "Ad-block DNS on: " + PrivateDns.HOSTS[index])
+                        : "Could not change the DNS", false);
                 for (int k = 0; k < items.length; k++) {
                     items[k].findViewById(R.id.dot).setVisibility(ok && k == index ? View.VISIBLE : (ok ? View.GONE
                             : items[k].findViewById(R.id.dot).getVisibility()));
@@ -1421,12 +1435,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
                 .setPositiveButton("Use it", (d, w) -> {
                     String host = input.getText().toString().trim().toLowerCase(Locale.ROOT);
                     if (!PrivateDns.validHost(host)) {
-                        Toast.makeText(this, "That is not a valid host name", Toast.LENGTH_LONG).show();
+                        toast("That is not a valid host name", true);
                         return;
                     }
                     getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_DNS_CUSTOM, host).apply();
                     boolean ok = PrivateDns.set(this, host);
-                    Toast.makeText(this, ok ? "DNS: " + host : "Could not change the DNS", Toast.LENGTH_SHORT).show();
+                    toast(ok ? "DNS: " + host : "Could not change the DNS", false);
                 })
                 .show();
     }
@@ -1577,7 +1591,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         arranging = true;
         grid.invalidateItemDecorations();
         arrangeBackup = adapter.orderSnapshot();
-        Toast.makeText(this, R.string.arrange_help, Toast.LENGTH_LONG).show();
+        toast(R.string.arrange_help, true);
         hideHero();
         updateGridPadding();
         refreshChrome();
@@ -1592,10 +1606,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         grid.invalidateItemDecorations();
         if (save) {
             adapter.saveOrder();
-            Toast.makeText(this, R.string.order_saved, Toast.LENGTH_SHORT).show();
+            toast(R.string.order_saved, false);
         } else {
             adapter.restoreOrder(arrangeBackup);
-            Toast.makeText(this, R.string.order_cancelled, Toast.LENGTH_SHORT).show();
+            toast(R.string.order_cancelled, false);
         }
         arrangeBackup = null;
         int pos = adapter.positionOf(lastFocusedKey);
@@ -1647,74 +1661,100 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
 
     private LinearLayout noticePanel;
     private TextView noticeText;
-    private View noticeDots;
+    private NoticeIcon noticeIcon;
     private final Runnable hideNotice = () -> {
         if (noticePanel == null) return;
         final View p = noticePanel;
-        p.animate().alpha(0f).translationY(-10 * density).setDuration(260).withEndAction(() -> {
+        p.animate().cancel();
+        p.animate().alpha(0f).translationY(14 * density).setDuration(240).withEndAction(() -> {
             if (p.getParent() == root) root.removeView(p);
             if (noticePanel == p) {
                 noticePanel = null;
                 noticeText = null;
-                noticeDots = null;
+                noticeIcon = null;
             }
         }).start();
     };
 
-    /** Shows a blurred glass notice at the top of the screen, like the menus; sticky ones stay until replaced. */
+    /** Kept for the cache / background-apps messages: sticky = still working, otherwise done. */
     private void showNotice(String text, boolean sticky) {
+        notice(text, sticky ? NoticeIcon.WORKING : NoticeIcon.OK, false);
+    }
+
+    /** Drop-in for Toast: a frosted notice at the bottom centre. The icon follows what the message says. */
+    void toast(int res, boolean longer) {
+        String name = "";
+        try {
+            name = getResources().getResourceEntryName(res);
+        } catch (RuntimeException ignored) {
+        }
+        boolean bad = name.contains("fail") || name.startsWith("not_") || name.startsWith("no_") || name.contains("_no_") || name.contains("cant");
+        notice(getString(res), bad ? NoticeIcon.WARN : NoticeIcon.INFO, longer);
+    }
+
+    void toast(CharSequence text, boolean longer) {
+        String t = String.valueOf(text).toLowerCase(Locale.ROOT);
+        boolean bad = t.contains("could not") || t.contains("not found") || t.contains("not a valid") || t.contains("needs")
+                || t.startsWith("add a") || t.contains("failed");
+        boolean good = !bad && (t.contains(" on") || t.startsWith("dns") || t.contains("saved") || t.contains("done"));
+        notice(String.valueOf(text), bad ? NoticeIcon.WARN : good ? NoticeIcon.OK : NoticeIcon.INFO, longer);
+    }
+
+    /**
+     * A blurred glass notice at the bottom centre of the screen, built like the menus (same frosted panel as the
+     * Inputs menu). WORKING stays until replaced; the other kinds fade away by themselves.
+     */
+    private void notice(String text, int kind, boolean longer) {
         handler.removeCallbacks(hideNotice);
         if (noticePanel == null || noticePanel.getParent() != root) {
             final LinearLayout panel = new LinearLayout(this);
             panel.setOrientation(LinearLayout.HORIZONTAL);
             panel.setGravity(Gravity.CENTER_VERTICAL);
-            int px = (int) (26 * density), py = (int) (16 * density);
-            panel.setPadding(px, py, px, py);
+            int pl = (int) (18 * density), pr = (int) (26 * density), py = (int) (14 * density);
+            panel.setPadding(pl, py, pr, py);
             panel.setBackground(new BlurPanelDrawable(density, menuBackdrop, root, panel));
             panel.setElevation(0f);
-            noticeDots = new View(this);
-            GradientDrawable dot = new GradientDrawable();
-            dot.setShape(GradientDrawable.OVAL);
-            dot.setColor(0xFFFFFFFF);
-            noticeDots.setBackground(dot);
-            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams((int) (9 * density), (int) (9 * density));
-            dlp.setMarginEnd((int) (14 * density));
-            panel.addView(noticeDots, dlp);
+            panel.setFocusable(false);
+            noticeIcon = new NoticeIcon(this);
+            LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams((int) (22 * density), (int) (22 * density));
+            ilp.setMarginEnd((int) (14 * density));
+            panel.addView(noticeIcon, ilp);
             noticeText = new TextView(this);
             noticeText.setTextColor(0xFFFFFFFF);
-            noticeText.setTextSize(17f);
+            noticeText.setTextSize(16f);
+            noticeText.setMaxWidth((int) (640 * density));
             try {
                 noticeText.setTypeface(getResources().getFont(R.font.outfit), Typeface.NORMAL);
+                noticeText.setFontVariationSettings("'wght' 500");
             } catch (Exception ignored) {
             }
             panel.addView(noticeText);
             FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL | Gravity.TOP);
-            lp.topMargin = (int) (72 * density);
+                    ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM);
+            lp.bottomMargin = (int) (46 * density);
             root.addView(panel, lp);
             panel.setAlpha(0f);
-            panel.setTranslationY(-14 * density);
-            panel.animate().alpha(1f).translationY(0f).setDuration(260)
-                    .setInterpolator(new DecelerateInterpolator(1.6f)).start();
+            panel.setTranslationY(18 * density);
+            panel.setScaleX(0.96f);
+            panel.setScaleY(0.96f);
+            panel.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f).setDuration(300)
+                    .setInterpolator(new DecelerateInterpolator(1.8f))
+                    .withEndAction(panel::invalidate).start();       // redraw so the blur lines up with the wallpaper
             noticePanel = panel;
-        }
-        noticePanel.animate().cancel();
-        noticePanel.setAlpha(1f);
-        noticePanel.setTranslationY(0f);
-        noticeText.setText(text);
-        noticeDots.animate().cancel();
-        if (sticky) {                                    // a dot that breathes while the work runs
-            noticeDots.setAlpha(1f);
-            noticeDots.animate().alpha(0.2f).setDuration(650).withEndAction(new Runnable() {
-                @Override public void run() {
-                    if (noticeDots == null || noticePanel == null) return;
-                    float next = noticeDots.getAlpha() < 0.5f ? 1f : 0.2f;
-                    noticeDots.animate().alpha(next).setDuration(650).withEndAction(this).start();
-                }
-            }).start();
         } else {
-            noticeDots.setAlpha(1f);
-            handler.postDelayed(hideNotice, 2600);
+            noticePanel.animate().cancel();
+            noticePanel.setAlpha(1f);
+            noticePanel.setTranslationY(0f);
+            noticePanel.setScaleX(1f);
+            noticePanel.setScaleY(1f);
+            noticePanel.setScaleX(1.03f);                               // a small pulse when the message changes
+            noticePanel.setScaleY(1.03f);
+            noticePanel.animate().scaleX(1f).scaleY(1f).setDuration(220).start();
+        }
+        noticeText.setText(text);
+        noticeIcon.setKind(kind);
+        if (kind != NoticeIcon.WORKING) {
+            handler.postDelayed(hideNotice, Math.max(longer ? 5200 : 2600, Math.min(8000, text.length() * 55L)));
         }
     }
 
@@ -1886,7 +1926,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         updateDepthRow(depthRow);
         depthRow.setOnClickListener(v -> {
             if (!WallpaperStore.hasFront(this)) {
-                Toast.makeText(this, "Add a depth PNG first: Settings > Wallpaper", Toast.LENGTH_LONG).show();
+                toast("Add a depth PNG first: Settings > Wallpaper", true);
                 return;
             }
             widgetsDepth = (widgetsDepth + 1) % 4;                    // off -> right -> left -> both
@@ -1937,8 +1977,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
                 .setTitle("Weather city")
                 .setView(input)
                 .setPositiveButton("Save", (d, w) -> widgets.setWeatherCity(input.getText().toString(), city -> {
-                    Toast.makeText(this, city == null ? "City not found"
-                            : city.isEmpty() ? "Weather: Nawanshahr" : "Weather: " + city, Toast.LENGTH_SHORT).show();
+                    toast(city == null ? "City not found"
+                            : city.isEmpty() ? "Weather: Nawanshahr" : "Weather: " + city, false);
                     widgets.refresh();
                     if (widgetsLeft != null) widgetsLeft.refresh();
                 }))
@@ -2140,7 +2180,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             rows.addView(row);
         }
         if (rows.getChildCount() == 0) {
-            Toast.makeText(this, R.string.not_available, Toast.LENGTH_SHORT).show();
+            toast(R.string.not_available, false);
             return;
         }
         // Tall lists scroll inside the popup instead of running off the screen.
@@ -2170,7 +2210,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         try {
             startActivityForResult(pick, REQUEST_WALLPAPER);
         } catch (ActivityNotFoundException e) {
-            Toast.makeText(this, R.string.not_available, Toast.LENGTH_SHORT).show();
+            toast(R.string.not_available, false);
         }
     }
 
@@ -2202,7 +2242,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         try {
             startActivityForResult(pick, REQUEST_FRONT);
         } catch (ActivityNotFoundException e) {
-            Toast.makeText(this, R.string.not_available, Toast.LENGTH_SHORT).show();
+            toast(R.string.not_available, false);
         }
     }
 
@@ -2258,7 +2298,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
                 if (isDestroyed() || gen != frontGen) return;
                 if (bitmap == null) {
                     wallpaperFront.setVisibility(View.GONE);
-                    Toast.makeText(this, R.string.wallpaper_failed, Toast.LENGTH_SHORT).show();
+                    toast(R.string.wallpaper_failed, false);
                     return;
                 }
                 wallpaperFront.setImageBitmap(bitmap);
@@ -2284,10 +2324,27 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         wallpaperFrontTop.setClipBounds(r);
     }
 
-    /** Loads the saved PNG for the dock (kept in the app's own storage, so it survives a restart). Decoded in the background. */
+    private int dockGen;
+
     private void loadDockPng() {
-        if (dockPng == null || dockPng.hasBitmap() || dockLoading || !WallpaperStore.hasDock(this)) return;
+        loadDockPng(false, null);
+    }
+
+    /**
+     * Loads the saved PNG for the dock (kept in the app's own storage, so it survives a restart), decoding in the
+     * background. force = load again even when one is shown (a new PNG was just picked); done gets true/false.
+     */
+    private void loadDockPng(boolean force, final java.util.function.Consumer<Boolean> done) {
+        if (dockPng == null || !WallpaperStore.hasDock(this)) {
+            if (done != null) done.accept(false);
+            return;
+        }
+        if (!force && (dockPng.hasBitmap() || dockLoading)) {
+            if (done != null) done.accept(dockPng.hasBitmap());
+            return;
+        }
         dockLoading = true;
+        final int gen = ++dockGen;
         final String path = WallpaperStore.dockPath(this);
         final int limit = Math.max(1, getResources().getDisplayMetrics().widthPixels) * 2;
         IMG.execute(() -> {
@@ -2298,10 +2355,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             }
             final Bitmap bitmap = bmp;
             runOnUiThread(() -> {
+                if (isDestroyed() || gen != dockGen) return;      // a newer load reports instead
                 dockLoading = false;
-                if (isDestroyed()) return;
-                if (bitmap != null && !dockPng.hasBitmap()) dockPng.setBitmap(bitmap);
+                if (bitmap != null) dockPng.setBitmap(bitmap);
                 if (grid != null) grid.invalidate();
+                if (done != null) done.accept(bitmap != null);
             });
         });
     }
@@ -2320,7 +2378,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         try {
             startActivityForResult(pick, REQUEST_DOCK_PNG);
         } catch (ActivityNotFoundException e) {
-            Toast.makeText(this, R.string.not_available, Toast.LENGTH_SHORT).show();
+            toast(R.string.not_available, false);
         }
     }
 
@@ -2390,7 +2448,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             if (isDestroyed() || gen != wallGen) return;
             if (bitmap == null || blurred == null) {
                 clearWallpaperViews();
-                Toast.makeText(this, R.string.wallpaper_failed, Toast.LENGTH_SHORT).show();
+                toast(R.string.wallpaper_failed, false);
                 return;
             }
             boolean first = wallpaperView.getVisibility() != View.VISIBLE;
@@ -3426,7 +3484,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             } catch (Exception ignored) {
             }
         }
-        Toast.makeText(this, R.string.not_available, Toast.LENGTH_SHORT).show();
+        toast(R.string.not_available, false);
     }
 
     // ---- Spotify: glow follows the album colour ----------------------------------------------------
@@ -3441,7 +3499,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             open(new Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"));
         } catch (Exception ignored) {
         }
-        Toast.makeText(this, R.string.music_access_help, Toast.LENGTH_LONG).show();
+        toast(R.string.music_access_help, true);
     }
 
     private void startMusicWatch() {
@@ -3568,7 +3626,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         try {
             startActivity(i);
         } catch (ActivityNotFoundException e) {
-            Toast.makeText(this, R.string.not_available, Toast.LENGTH_SHORT).show();
+            toast(R.string.not_available, false);
         }
     }
 
@@ -3640,7 +3698,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             addInputRow(rows, popup, MenuIcons.TV, getString(R.string.live_tv), -1, () -> open(liveTvIntent));
         }
         if (rows.getChildCount() == 0) {
-            Toast.makeText(this, R.string.no_inputs, Toast.LENGTH_SHORT).show();
+            toast(R.string.no_inputs, false);
             return;
         }
 
