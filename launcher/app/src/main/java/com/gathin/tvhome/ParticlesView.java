@@ -496,7 +496,8 @@ public class ParticlesView extends View {
             }
         }
         endFrame(c, w, h);
-        postInvalidateOnAnimation();
+        if (w >= 2500) postInvalidateDelayed(33);   // 4K screen: 30 fps is plenty for drifting dots and halves the GPU load
+        else postInvalidateOnAnimation();
     }
 
     private static final int[] BLOCKS = {0xFF7A5230, 0xFF8A8A8A, 0xFF4AEDD9, 0xFFE0242B, 0xFFF0C93A, 0xFF5DA130};

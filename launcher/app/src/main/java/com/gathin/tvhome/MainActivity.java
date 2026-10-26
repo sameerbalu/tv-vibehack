@@ -692,9 +692,58 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     }
 
     @Override
+    protected void onStart() {
+        super.onStart();
+        handler.removeCallbacks(releaseMemory);
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        // Another app is in front: hand the RAM back to it (pictures come back by themselves on Home).
+        handler.removeCallbacks(releaseMemory);
+        handler.postDelayed(releaseMemory, 1500);
+    }
+
+    @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        if (continueAdapter != null && level >= TRIM_MEMORY_RUNNING_LOW) continueAdapter.trimMemory();
+        if (paused && level >= TRIM_MEMORY_BACKGROUND) releaseHeavyBitmaps();
+    }
+
+    private final Runnable releaseMemory = () -> {
+        if (paused) releaseHeavyBitmaps();
+    };
+
+    /** Drops every big bitmap (wallpaper, blurs, depth PNG, dock PNG, poster caches). onResume loads them again. */
+    private void releaseHeavyBitmaps() {
+        if (wallpaperView == null || !paused) return;
+        wallpaperView.setImageDrawable(null);
+        wallpaperView.setVisibility(View.GONE);
+        wallpaperBlurView.setImageDrawable(null);
+        wallpaperBlurView.setVisibility(View.GONE);
+        wallpaperFront.setImageDrawable(null);
+        wallpaperFront.setVisibility(View.GONE);
+        wallpaperFrontTop.setImageDrawable(null);
+        wallpaperFrontTop.setVisibility(View.GONE);
+        if (depthWidgets != null) depthWidgets.setBitmap(null);
+        if (dockPng != null) dockPng.setBitmap(null);
+        if (menuVeilImg != null) menuVeilImg.setImageDrawable(null);
+        menuBackdrop = null;
+        veilBackdrop = null;
+        if (dockDecoration != null) dockDecoration.setBackdrop(null);
+        if (appsPanel != null) appsPanel.setBackdrop(null);
+        if (allAppsPanel != null) allAppsPanel.setBackdrop(null);
+        if (continueAdapter != null) continueAdapter.trimMemory();
+        System.gc();
+    }
+
+    @Override
     protected void onDestroy() {
         super.onDestroy();
         handler.removeCallbacks(clipRunnable);
+        handler.removeCallbacks(releaseMemory);
     }
 
     @Override
@@ -2143,7 +2192,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             BitmapFactory.decodeFile(path, bounds);
             int limit = Math.max(1, getResources().getDisplayMetrics().widthPixels);
             int sample = 1;
-            while (bounds.outWidth / sample > limit * 2 || bounds.outHeight / sample > limit * 2) sample *= 2;
+            while (bounds.outWidth / sample > limit || bounds.outHeight / sample > limit) sample *= 2;
             BitmapFactory.Options options = new BitmapFactory.Options();
             options.inSampleSize = sample;                       // ARGB_8888: keeps the transparency
             Bitmap bitmap = BitmapFactory.decodeFile(path, options);
@@ -2208,7 +2257,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             int targetWidth = Math.max(1, getResources().getDisplayMetrics().widthPixels);
             int targetHeight = Math.max(1, getResources().getDisplayMetrics().heightPixels);
             int sample = 1;
-            while (bounds.outWidth / sample > targetWidth * 2 || bounds.outHeight / sample > targetHeight * 2) sample *= 2;
+            while (bounds.outWidth / sample > targetWidth || bounds.outHeight / sample > targetHeight) sample *= 2;   // exactly screen size: 4K screen = 4K picture, never 8K
             BitmapFactory.Options options = new BitmapFactory.Options();
             options.inSampleSize = sample;
             options.inPreferredConfig = Bitmap.Config.RGB_565;
