@@ -702,7 +702,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         super.onStop();
         // Another app is in front: hand the RAM back to it (pictures come back by themselves on Home).
         handler.removeCallbacks(releaseMemory);
-        handler.postDelayed(releaseMemory, 1500);
+        handler.postDelayed(releaseMemory, 20000);   // quick app switches never pay the reload
     }
 
     @Override
@@ -713,7 +713,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     }
 
     private final Runnable releaseMemory = () -> {
-        if (paused) releaseHeavyBitmaps();
+        if (!paused) return;
+        long[] m = TvTools.memory(this);
+        if (m[1] < m[0] / 5) releaseHeavyBitmaps();   // only when less than 20% RAM is free: otherwise Home stays instant
     };
 
     /** Drops every big bitmap (wallpaper, blurs, depth PNG, dock PNG, poster caches). onResume loads them again. */
