@@ -702,14 +702,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         super.onStop();
         // Another app is in front: hand the RAM back to it (pictures come back by themselves on Home).
         handler.removeCallbacks(releaseMemory);
-        handler.postDelayed(releaseMemory, 20000);   // quick app switches never pay the reload
+        // nothing is released here: Home must be instant
     }
 
     @Override
     public void onTrimMemory(int level) {
         super.onTrimMemory(level);
         if (continueAdapter != null && level >= TRIM_MEMORY_RUNNING_LOW) continueAdapter.trimMemory();
-        if (paused && level >= TRIM_MEMORY_BACKGROUND) releaseHeavyBitmaps();
     }
 
     private final Runnable releaseMemory = () -> {
