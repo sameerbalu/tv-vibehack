@@ -21,6 +21,8 @@ import androidx.recyclerview.widget.RecyclerView;
  */
 final class AppsPanelDecoration extends RecyclerView.ItemDecoration {
 
+    /** Card bottom -> bottom of the app name; the same amount is added above so the panel is even all round. */
+    static final int TITLE_DP = 29;
     private final int columns;
     private final float d;
     private final Paint base = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -128,7 +130,7 @@ final class AppsPanelDecoration extends RecyclerView.ItemDecoration {
 
         float radius = 22 * d;
         float beyond = 3 * radius;                                      // an end that is off screen is pushed out of view
-        float top = haveFirst ? firstCardTop - innerGap : -beyond;
+        float top = haveFirst ? firstCardTop - innerGap - TITLE_DP * d : -beyond;
         float bottom = haveLast ? lastBottom + innerGap + extra : parent.getHeight() + beyond;
         if (bottom < top + 2 * radius) bottom = top + 2 * radius;
         // Same distance from the glass panel on the left, right and top; the bottom keeps it too when the apps run on.

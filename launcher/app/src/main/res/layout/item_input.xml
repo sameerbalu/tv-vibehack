@@ -32,20 +32,22 @@
         android:fontVariationSettings="'wght' 500"
         android:singleLine="true" />
 
-    <com.gathin.tvhome.SwitchView
-        android:id="@+id/dot"
-        android:layout_width="40dp"
-        android:layout_height="26dp"
-        android:layout_marginEnd="4dp"
-        android:visibility="gone" />
-
     <TextView
         android:id="@+id/status"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:layout_marginEnd="8dp"
+        android:gravity="end"
         android:textColor="@drawable/pill_text_dim"
         android:duplicateParentState="true"
         android:textSize="11sp"
         android:fontFamily="@font/outfit"
         android:letterSpacing="0.04" />
+    <com.gathin.tvhome.SwitchView
+        android:id="@+id/dot"
+        android:layout_width="40dp"
+        android:layout_height="26dp"
+        android:layout_marginEnd="0dp"
+        android:visibility="gone" />
+
 </LinearLayout>

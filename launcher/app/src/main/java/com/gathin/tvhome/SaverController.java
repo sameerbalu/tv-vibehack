@@ -88,6 +88,9 @@ final class SaverController {
         musicGlow = root.findViewById(R.id.saverMusicGlow);
         front = root.findViewById(R.id.saverFront);
         scrimView = root.findViewById(R.id.saverScrim);
+        ClockStyles.apply(ctx, ClockStyles.get(ctx), (android.widget.TextView) root.findViewById(R.id.saverHours),
+                (android.widget.TextView) root.findViewById(R.id.saverMinutes), (android.widget.TextView) root.findViewById(R.id.saverAmPm),
+                (android.widget.TextView) root.findViewById(R.id.saverDate), (PixelClockView) root.findViewById(R.id.saverPixel), true);
         final float d = ctx.getResources().getDisplayMetrics().density;
         nowArt.setOutlineProvider(new ViewOutlineProvider() {
             @Override

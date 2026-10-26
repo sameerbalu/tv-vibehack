@@ -15,7 +15,7 @@ final class MenuIcons {
 
     static final int WALLPAPER = 1, DEPTH = 2, EYE = 3, WIDGETS = 4, SPARKLE = 5, MOON = 6, BELL = 7, GEAR = 8,
             TRASH = 9, PLAY = 10, OPEN = 11, CLEAR = 12, GLOW = 13, BRUSH = 14, LEVELS = 15, TV = 16,
-            BLUETOOTH = 17, SOURCE = 18, WIFI = 19;
+            BLUETOOTH = 17, SOURCE = 18, WIFI = 19, CLOCK = 20;
 
     private MenuIcons() {
     }
@@ -43,6 +43,7 @@ final class MenuIcons {
             case LEVELS: return new Levels(density, white);
             case TV: return new Tv(density, white);
             case WIFI: return new Wifi(density, white);
+            case CLOCK: return new Clock(density, white);
             case BLUETOOTH: return new PillIcon.Bluetooth(density, white);
             default: return new PillIcon.Input(density, white);
         }
@@ -292,6 +293,28 @@ final class MenuIcons {
                 c.drawArc(oval, 205f, 28f, false, paint);
                 c.drawArc(oval, 307f, 28f, false, paint);
             }
+        }
+    }
+
+    // ---- clock: the minute hand sweeps round while the hour hand creeps ------------------------------------
+    static final class Clock extends Menu {
+        private final RectF oval = new RectF(3.5f, 3.5f, 20.5f, 20.5f);
+
+        Clock(float d, ColorStateList c) {
+            super(d, c, 3200);
+        }
+
+        @Override
+        void drawIcon(Canvas c) {
+            ink(1f);
+            c.drawOval(oval, paint);
+            double mm = t * 2 * Math.PI - Math.PI / 2, hh = t * 2 * Math.PI / 6 - Math.PI / 4;
+            c.drawLine(12f, 12f, 12f + (float) Math.cos(mm) * 6.2f, 12f + (float) Math.sin(mm) * 6.2f, paint);
+            c.drawLine(12f, 12f, 12f + (float) Math.cos(hh) * 3.8f, 12f + (float) Math.sin(hh) * 3.8f, paint);
+            fill();
+            ink(1f);
+            c.drawCircle(12f, 12f, 1.1f, paint);
+            line();
         }
     }
 

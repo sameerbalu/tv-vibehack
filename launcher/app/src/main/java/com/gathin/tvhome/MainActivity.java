@@ -110,7 +110,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private static final int REQUEST_FRONT = 73;
     private static final int REQUEST_DOCK_PNG = 74;
     private static final String KEY_DOCK_PNG_ON = "dock_png_on";
-    private static final String PREFS = "launcher_preferences";
+    static final String PREFS = "launcher_preferences";
     private static final String WALLPAPER_URI = "wallpaper_uri";
 
     private AppAdapter adapter;
@@ -1153,7 +1153,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private static final String[] FX_COLOR_NAMES = {"Auto (app colour)", "Red", "Orange", "Gold", "Green", "Cyan", "Blue",
             "Purple", "Pink", "White"};
     private static final String[] FX_PARTICLE_NAMES = {"Off", "Stars", "Snow", "Fireflies", "Rain", "Bubbles", "Embers", "Code rain", "Hyperspace",
-            "Sakura petals", "Neon rain", "Thunderstorm", "Sky lanterns", "Magic dust", "Red spores"};
+            "Sakura petals", "Neon rain", "Thunderstorm", "Sky lanterns", "Magic dust", "Red spores",
+            "Minecraft", "Batman", "Spider-Man", "John Wick"};
     private static final int[] STYLE_NAMES = {R.string.fx_steady, R.string.fx_breathing, R.string.fx_heartbeat,
             R.string.fx_drift, R.string.fx_shimmer, R.string.fx_rainbow, R.string.fx_flicker, R.string.fx_wave,
             R.string.fx_aurora};
@@ -1293,6 +1294,44 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             tv.setShadowLayer(0f, 0f, 0f, 0);
             tv.invalidate();
         }
+        applyClockStyle();
+    }
+
+    /** Applies the chosen clock look to the home screen clock (the screensaver reads the same choice). */
+    private void applyClockStyle() {
+        ClockStyles.apply(this, ClockStyles.get(this), (TextView) findViewById(R.id.clock), null,
+                (TextView) findViewById(R.id.ampm), (TextView) findViewById(R.id.date),
+                (PixelClockView) findViewById(R.id.clockPixel), false);
+    }
+
+    /** Pick a clock look; it is applied right away so the clock behind the menu changes live. */
+    private void showClockStyles() {
+        View anchor = findViewById(R.id.btnSettings);
+        View panel = getLayoutInflater().inflate(R.layout.popup_apps, root, false);
+        panel.findViewById(R.id.title).setVisibility(View.GONE);
+        LinearLayout rows = panel.findViewById(R.id.rows);
+        int minWidth = (int) (320 * density);
+        final PopupWindow popup = newDropdown(panel, minWidth);
+        final View[] items = new View[ClockStyles.NAMES.length];
+        for (int i = 0; i < items.length; i++) {
+            final int style = i;
+            View row = getLayoutInflater().inflate(R.layout.item_input, rows, false);
+            setMenuIcon(row, MenuIcons.CLOCK);
+            ((TextView) row.findViewById(R.id.title)).setText(ClockStyles.NAMES[i]);
+            ((TextView) row.findViewById(R.id.status)).setText(ClockStyles.NOTES[i]);
+            View dot = row.findViewById(R.id.dot);
+            if (dot instanceof SwitchView) ((SwitchView) dot).setCheckStyle(true);
+            dot.setVisibility(ClockStyles.get(this) == i ? View.VISIBLE : View.GONE);
+            row.setOnClickListener(v -> {
+                ClockStyles.set(this, style);
+                applyClockStyle();
+                for (int k = 0; k < items.length; k++) items[k].findViewById(R.id.dot).setVisibility(k == style ? View.VISIBLE : View.GONE);
+            });
+            items[i] = row;
+            rows.addView(row);
+        }
+        fitScroll(panel);
+        showDropdown(popup, panel, anchor, minWidth, true);
     }
 
     private void stopClockLoop() {
@@ -1446,6 +1485,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         a.bluetooth = this::showBluetooth;                  // the same device list as the Bluetooth pill
         a.wifi = () -> open(new Intent(Settings.ACTION_WIFI_SETTINGS));
         a.sound = () -> open(new Intent(Settings.ACTION_SOUND_SETTINGS));
+        a.clockStyle = this::showClockStyles;
         a.about = () -> open(new Intent(Settings.ACTION_DEVICE_INFO_SETTINGS));
         a.system = () -> open(new Intent(Settings.ACTION_SETTINGS));
         a.clearCache = this::quickClearCache;
@@ -2199,7 +2239,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private static final int PILL_H_DP = 34;          // height of the "Continue watching" / "All apps" pills
     private static final int TOP_BUF_DP = 40;         // hidden space above the first pill: the dock never reaches the panel
     private static final int CONT_PILL_GAP_DP = 18;   // pill -> posters
-    private static final int APPS_PILL_GAP_DP = 14;   // pill -> first row of apps
+    private static final int APPS_PILL_GAP_DP = 14 + AppsPanelDecoration.TITLE_DP;   // pill -> first row of apps
     private TextView contPill, appsPill;
     private PillIcon.Film contPillIcon;
     private PillIcon.Apps appsPillIcon;
@@ -2483,7 +2523,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             return;
         }
         if (dockPng.getVisibility() != View.VISIBLE) dockPng.setVisibility(View.VISIBLE);
-        if (dockPng.getAlpha() != dockFade) dockPng.setAlpha(dockFade);
+        // Coming back from All apps the dock rises and fades in with the grid: the PNG rides along with it
+        // (same lift, alpha following the grid squared) instead of popping up at its final place first.
+        float ga = grid.getAlpha();
+        float pa = dockFade * ga * ga;
+        if (dockPng.getAlpha() != pa) dockPng.setAlpha(pa);
+        if (dockPng.getTranslationY() != grid.getTranslationY()) dockPng.setTranslationY(grid.getTranslationY());
     }
 
     private boolean rowsFaded;

@@ -15,8 +15,8 @@ import java.util.Random;
 public class ParticlesView extends View {
 
     static final int OFF = 0, STARS = 1, SNOW = 2, FIREFLIES = 3, RAIN = 4, BUBBLES = 5, EMBERS = 6, CODE = 7, WARP = 8, SAKURA = 9, NEON = 10, STORM = 11,
-            LANTERNS = 12, MAGIC = 13, SPORES = 14;
-    static final int COUNT = 15;
+            LANTERNS = 12, MAGIC = 13, SPORES = 14, MINECRAFT = 15, BATMAN = 16, SPIDER = 17, WICK = 18;
+    static final int COUNT = 19;
 
     private static final int N = 90;
     private final float[] x = new float[N], y = new float[N], v = new float[N], sz = new float[N], ph = new float[N];
@@ -79,6 +79,10 @@ public class ParticlesView extends View {
             case LANTERNS: return 14;
             case MAGIC: return 60;
             case SPORES: return 55;
+            case MINECRAFT: return 46;
+            case BATMAN: return 14;
+            case SPIDER: return 40;
+            case WICK: return 36;
             default: return 48;
         }
     }
@@ -319,6 +323,165 @@ public class ParticlesView extends View {
                     c.drawCircle(x[i] * w, y[i] * h, s * 0.5f, paint);
                     break;
                 }
+                case MINECRAFT: {
+                    if (i % 4 == 0) {                                              // experience orbs drifting up
+                        y[i] -= dt * (0.03f + 0.03f * v[i]);
+                        x[i] += dt * 0.01f * (float) Math.sin(time * 0.8f + ph[i]);
+                        if (y[i] < -0.05f) { y[i] = 1.05f; x[i] = (float) Math.random(); }
+                        float a = 0.55f + 0.45f * (float) Math.sin(time * 3f * v[i] + ph[i]);
+                        float s = d * (4f + 3f * sz[i]);
+                        paint.setStyle(Paint.Style.FILL);
+                        paint.setShader(new RadialGradient(x[i] * w, y[i] * h, s * 3.2f, ((int) (90 * a) << 24) | 0xC6FF3A,
+                                0x00C6FF3A, Shader.TileMode.CLAMP));
+                        c.drawCircle(x[i] * w, y[i] * h, s * 3.2f, paint);
+                        paint.setShader(null);
+                        paint.setColor(a > 0.75f ? 0xFFE8FF6A : 0xFF7CE82A);
+                        paint.setAlpha(240);
+                        float q = s * 0.5f;
+                        c.drawRect(x[i] * w - q, y[i] * h - q, x[i] * w + q, y[i] * h + q, paint);
+                    } else {                                                       // little block pixels falling
+                        y[i] += dt * (0.03f + 0.035f * v[i]);
+                        x[i] += dt * 0.006f * (float) Math.sin(time * 0.5f + ph[i]);
+                        if (y[i] > 1.05f) { y[i] = -0.05f; x[i] = (float) Math.random(); }
+                        int kind = (i * 7) % BLOCKS.length;
+                        float cell = d * (2.2f + 1.6f * sz[i]);
+                        float px = x[i] * w - cell * 1.5f, py = y[i] * h - cell * 1.5f;
+                        float fade = Math.min(1f, Math.min(y[i] + 0.05f, 1.05f - y[i]) * 8f);
+                        paint.setStyle(Paint.Style.FILL);
+                        for (int r = 0; r < 3; r++) for (int q = 0; q < 3; q++) {
+                            int hsh = (i * 31 + r * 7 + q * 13) % 5;
+                            int col = BLOCKS[kind];
+                            if (r == 0 && (kind == 0)) col = 0xFF5DA130;           // grass top
+                            float f = 0.78f + 0.1f * hsh;
+                            int rr = Math.min(255, (int) (((col >> 16) & 255) * f)), gg = Math.min(255, (int) (((col >> 8) & 255) * f)),
+                                    bb = Math.min(255, (int) ((col & 255) * f));
+                            paint.setColor(0xFF000000 | (rr << 16) | (gg << 8) | bb);
+                            paint.setAlpha((int) (225 * fade));
+                            c.drawRect(px + q * cell, py + r * cell, px + (q + 1) * cell, py + (r + 1) * cell, paint);
+                        }
+                    }
+                    break;
+                }
+                case BATMAN: {
+                    float spd = 0.035f + 0.03f * v[i];
+                    x[i] += dt * spd * (i % 2 == 0 ? 1f : -1f);
+                    y[i] += dt * 0.008f * (float) Math.sin(time * 0.7f + ph[i]);
+                    if (x[i] > 1.12f) x[i] = -0.12f;
+                    if (x[i] < -0.12f) x[i] = 1.12f;
+                    float px = x[i] * w, py = (0.08f + 0.7f * y[i]) * h + d * 14f * (float) Math.sin(time * 1.4f + ph[i]);
+                    float s = d * (13f + 16f * sz[i]);
+                    float fl = (float) Math.sin(time * (7f + 3f * v[i]) + ph[i]);
+                    petal.reset();
+                    petal.moveTo(0f, -0.3f * s);
+                    petal.lineTo(0.12f * s, -0.66f * s);
+                    petal.lineTo(0.22f * s, -0.32f * s);
+                    petal.quadTo(0.7f * s, -0.45f * s * fl - 0.2f * s, 1.25f * s, -0.6f * s * fl);
+                    petal.quadTo(1.0f * s, 0.02f * s - 0.1f * s * fl, 0.82f * s, 0.2f * s);
+                    petal.quadTo(0.66f * s, 0.06f * s, 0.5f * s, 0.24f * s);
+                    petal.quadTo(0.34f * s, 0.08f * s, 0.2f * s, 0.34f * s);
+                    petal.lineTo(0f, 0.5f * s);
+                    petal.close();
+                    for (int side = 0; side < 2; side++) {
+                        c.save();
+                        c.translate(px, py);
+                        if (side == 1) c.scale(-1f, 1f);
+                        paint.setStyle(Paint.Style.FILL);
+                        paint.setColor(0xFF08080C);
+                        paint.setAlpha(235);
+                        c.drawPath(petal, paint);
+                        paint.setStyle(Paint.Style.STROKE);
+                        paint.setStrokeWidth(d * 1.1f);
+                        paint.setColor(0xFFFFD21F);
+                        paint.setAlpha(120);
+                        c.drawPath(petal, paint);
+                        c.restore();
+                    }
+                    break;
+                }
+                case SPIDER: {
+                    if (i % 2 == 0) {                                              // a spider on a thread
+                        float tx = (0.04f + 0.92f * ((i * 0.6180339f) % 1f)) * w;
+                        float len = h * (0.1f + 0.45f * (0.5f + 0.5f * (float) Math.sin(time * 0.22f * v[i] + ph[i])));
+                        float sx = tx + d * 3f * (float) Math.sin(time * 0.9f + ph[i]);
+                        paint.setStyle(Paint.Style.STROKE);
+                        paint.setStrokeWidth(d * 1f);
+                        paint.setColor(0xFFFFFFFF);
+                        paint.setAlpha(95);
+                        c.drawLine(tx, 0f, sx, len, paint);
+                        float s = d * (4f + 3f * sz[i]);
+                        paint.setStrokeWidth(d * 1.1f);
+                        paint.setColor(0xFFD9DEE8);
+                        paint.setAlpha(150);
+                        for (int k = -2; k <= 2; k++) {
+                            if (k == 0) continue;
+                            c.drawLine(sx, len, sx - s * 1.5f, len + k * s * 0.55f - s * 0.2f, paint);
+                            c.drawLine(sx, len, sx + s * 1.5f, len + k * s * 0.55f - s * 0.2f, paint);
+                        }
+                        paint.setStyle(Paint.Style.FILL);
+                        paint.setColor(0xFFE0242B);
+                        paint.setAlpha(245);
+                        c.drawCircle(sx, len, s, paint);
+                        paint.setColor(0xFF1B4DD8);
+                        paint.setAlpha(245);
+                        c.drawCircle(sx, len + s * 0.9f, s * 0.7f, paint);
+                    } else {                                                       // red and blue web sparkles
+                        y[i] += dt * (0.02f + 0.02f * v[i]);
+                        x[i] += dt * 0.008f * (float) Math.sin(time * 0.6f + ph[i]);
+                        if (y[i] > 1.05f) { y[i] = -0.05f; x[i] = (float) Math.random(); }
+                        float tw = 0.5f + 0.5f * (float) Math.sin(time * 2.6f * v[i] + ph[i]);
+                        int col = i % 4 == 1 ? 0xFFE0242B : 0xFF3F7BFF;
+                        float s = d * (2.5f + 3.5f * sz[i]) * (0.6f + 0.6f * tw);
+                        paint.setStyle(Paint.Style.FILL);
+                        paint.setShader(new RadialGradient(x[i] * w, y[i] * h, s * 3f, ((int) (100 * tw) << 24) | (col & 0xFFFFFF),
+                                col & 0x00FFFFFF, Shader.TileMode.CLAMP));
+                        c.drawCircle(x[i] * w, y[i] * h, s * 3f, paint);
+                        paint.setShader(null);
+                        paint.setStyle(Paint.Style.STROKE);
+                        paint.setStrokeWidth(d * 0.9f);
+                        paint.setColor(0xFFFFFFFF);
+                        paint.setAlpha((int) (200 * tw));
+                        c.drawLine(x[i] * w - s, y[i] * h, x[i] * w + s, y[i] * h, paint);   // a tiny web star
+                        c.drawLine(x[i] * w, y[i] * h - s, x[i] * w, y[i] * h + s, paint);
+                        c.drawLine(x[i] * w - s * 0.7f, y[i] * h - s * 0.7f, x[i] * w + s * 0.7f, y[i] * h + s * 0.7f, paint);
+                        c.drawLine(x[i] * w - s * 0.7f, y[i] * h + s * 0.7f, x[i] * w + s * 0.7f, y[i] * h - s * 0.7f, paint);
+                    }
+                    break;
+                }
+                case WICK: {
+                    if (i % 3 != 0) {                                              // gold Continental coins tumbling down
+                        y[i] += dt * (0.05f + 0.05f * v[i]);
+                        x[i] += dt * 0.012f * (float) Math.sin(time * 0.7f + ph[i]);
+                        if (y[i] > 1.06f) { y[i] = -0.06f; x[i] = (float) Math.random(); }
+                        float rad = d * (6f + 6f * sz[i]);
+                        float turn = (float) Math.cos(time * 2.2f * v[i] + ph[i]);
+                        float ew = Math.max(rad * 0.12f, rad * Math.abs(turn));
+                        float px = x[i] * w, py = y[i] * h;
+                        rect.set(px - ew, py - rad, px + ew, py + rad);
+                        paint.setStyle(Paint.Style.FILL);
+                        paint.setColor(turn > 0 ? 0xFFE9B84A : 0xFFB98A24);
+                        paint.setAlpha(235);
+                        c.drawOval(rect, paint);
+                        paint.setStyle(Paint.Style.STROKE);
+                        paint.setStrokeWidth(d * 1.1f);
+                        paint.setColor(0xFFFFE9A0);
+                        paint.setAlpha(190);
+                        c.drawOval(rect, paint);
+                        rect.inset(ew * 0.3f, rad * 0.3f);
+                        paint.setColor(0xFF8A6213);
+                        paint.setAlpha(150);
+                        c.drawOval(rect, paint);
+                    } else {                                                       // red sparks rising
+                        y[i] -= dt * (0.06f + 0.08f * v[i]);
+                        x[i] += dt * 0.02f * (float) Math.sin(time * 1.5f + ph[i]);
+                        if (y[i] < -0.05f) { y[i] = 1.05f; x[i] = (float) Math.random(); }
+                        float life = Math.max(0f, Math.min(1f, y[i]));
+                        paint.setStyle(Paint.Style.FILL);
+                        paint.setColor(i % 2 == 0 ? 0xFFFF3B30 : 0xFFFFB02E);
+                        paint.setAlpha((int) (230 * life));
+                        c.drawCircle(x[i] * w, y[i] * h, d * (0.9f + 1.4f * sz[i]) * (0.4f + 0.6f * life), paint);
+                    }
+                    break;
+                }
                 default: {   // embers
                     y[i] -= dt * 0.09f * v[i];
                     x[i] += dt * 0.012f * (float) Math.sin(time * 1.2f + ph[i]);
@@ -336,6 +499,7 @@ public class ParticlesView extends View {
         postInvalidateOnAnimation();
     }
 
+    private static final int[] BLOCKS = {0xFF7A5230, 0xFF8A8A8A, 0xFF4AEDD9, 0xFFE0242B, 0xFFF0C93A, 0xFF5DA130};
     private static final char[] CODE_CHARS = ("0123456789ABCDEFXYZ<>+=*:|\u30A2\u30AB\u30B5\u30BF\u30CA\u30CF\u30DE\u30E4\u30E9\u30EF").toCharArray();
     private final android.graphics.Path petal = new android.graphics.Path();
     private final android.graphics.RectF rect = new android.graphics.RectF();

@@ -54,6 +54,7 @@
             android:baselineAligned="true">
 
             <TextClock
+                android:id="@+id/saverHours"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:format12Hour="h:"
@@ -66,6 +67,7 @@
                 android:includeFontPadding="false" />
 
             <TextClock
+                android:id="@+id/saverMinutes"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:format12Hour="mm"
@@ -77,7 +79,15 @@
                 android:letterSpacing="-0.04"
                 android:includeFontPadding="false" />
 
+            <com.gathin.tvhome.PixelClockView
+                android:id="@+id/saverPixel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom"
+                android:visibility="gone" />
+
             <TextClock
+                android:id="@+id/saverAmPm"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="10dp"
@@ -92,6 +102,7 @@
         </LinearLayout>
 
         <TextClock
+            android:id="@+id/saverDate"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="6dp"
