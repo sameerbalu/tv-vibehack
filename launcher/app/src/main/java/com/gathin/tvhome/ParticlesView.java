@@ -14,8 +14,9 @@ import java.util.Random;
 /** Slow ambient particles over the wallpaper (stars, snow, fireflies, rain, bubbles, embers), tinted by the glow. */
 public class ParticlesView extends View {
 
-    static final int OFF = 0, STARS = 1, SNOW = 2, FIREFLIES = 3, RAIN = 4, BUBBLES = 5, EMBERS = 6, BATS = 7, WEB = 8;
-    static final int COUNT = 9;
+    static final int OFF = 0, STARS = 1, SNOW = 2, FIREFLIES = 3, RAIN = 4, BUBBLES = 5, EMBERS = 6, CODE = 7, WARP = 8, SAKURA = 9, NEON = 10, STORM = 11,
+            LANTERNS = 12, MAGIC = 13, SPORES = 14;
+    static final int COUNT = 15;
 
     private static final int N = 90;
     private final float[] x = new float[N], y = new float[N], v = new float[N], sz = new float[N], ph = new float[N];
@@ -45,6 +46,9 @@ public class ParticlesView extends View {
 
     void setMode(int m) {
         mode = m;
+        boltAge = 99f;
+        nextBolt = time + 2f;
+        for (int i = 0; i < N; i++) if (m == CODE) { y[i] = -x[i] * 40f; }
         setVisibility(m == OFF ? GONE : VISIBLE);
         last = 0;
         invalidate();
@@ -67,8 +71,14 @@ public class ParticlesView extends View {
             case FIREFLIES: return 26;
             case RAIN: return 80;
             case BUBBLES: return 26;
-            case BATS: return 7;
-            case WEB: return 1;
+            case CODE: return Math.min(N, Math.max(8, (int) (getWidth() / (18 * d))));
+            case WARP: return 90;
+            case SAKURA: return 42;
+            case NEON: return 70;
+            case STORM: return 80;
+            case LANTERNS: return 14;
+            case MAGIC: return 60;
+            case SPORES: return 55;
             default: return 48;
         }
     }
@@ -83,6 +93,8 @@ public class ParticlesView extends View {
         time += dt;
         int n = count();
         paint.setShader(null);
+        if (Perf.paused) { last = 0; return; }
+        beginFrame(c, w, h);
         for (int i = 0; i < n; i++) {
             switch (mode) {
                 case STARS: {
@@ -149,19 +161,162 @@ public class ParticlesView extends View {
                     c.drawCircle(px * w, y[i] * h, r, paint);
                     break;
                 }
-                case BATS: {
-                    float speed = 0.018f + 0.02f * v[i];
-                    float prog = (time * speed + y[i] * 3f) % 1f;            // 0..1 across the screen
-                    boolean right = i % 2 == 0;
-                    float px = (right ? prog : 1f - prog) * (w + 160 * d) - 80 * d;
-                    float py = h * (0.08f + 0.5f * x[i]) + h * 0.04f * (float) Math.sin(time * 1.1f * v[i] + ph[i]);
-                    float size = d * (11f + 15f * sz[i]);
-                    float flap = (float) Math.sin(time * (7f + 3f * v[i]) + ph[i]);
-                    drawBat(c, px, py, size, flap, right);
+                case CODE: {
+                    float rowH = d * 17f;
+                    y[i] += dt * (7f + 9f * v[i]);                        // head position, in rows
+                    float colX = (i + 0.5f) * (w / (float) n);
+                    if ((y[i] - 14) * rowH > h) { y[i] = -(float) Math.random() * 18f; v[i] = 0.4f + (float) Math.random() * 0.9f; }
+                    paint.setStyle(Paint.Style.FILL);
+                    paint.setTextSize(d * 14f);
+                    paint.setTextAlign(Paint.Align.CENTER);
+                    int head = (int) Math.floor(y[i]);
+                    for (int k = 0; k < 13; k++) {
+                        int row = head - k;
+                        float yy = row * rowH;
+                        if (yy < -rowH || yy > h) continue;
+                        float fade = 1f - k / 13f;
+                        int idx = Math.abs(i * 31 + row * 17 + (int) (time * (k == 0 ? 9 : 2) + row % 3)) % CODE_CHARS.length;
+                        if (k == 0) { paint.setColor(0xFFE6FFEF); paint.setAlpha(235); }
+                        else { paint.setColor(0xFF2BFF7A); paint.setAlpha((int) (200 * fade * fade)); }
+                        c.drawText(CODE_CHARS, idx, 1, colX, yy, paint);
+                    }
                     break;
                 }
-                case WEB: {
-                    drawWeb(c, w, h);
+                case WARP: {
+                    float cx = w * 0.5f, cy = h * 0.46f;
+                    float z = (time * (0.18f + 0.12f * v[i]) + ph[i] / 6.2832f) % 1f;       // 0 far .. 1 near
+                    float rr = z * z * Math.max(w, h) * 0.75f;
+                    float rr0 = Math.max(0f, (z - 0.06f)) * Math.max(0f, (z - 0.06f)) * Math.max(w, h) * 0.75f;
+                    float ca = (float) Math.cos(ph[i] * 7.3f + x[i] * 40f), sa = (float) Math.sin(ph[i] * 7.3f + x[i] * 40f);
+                    paint.setStyle(Paint.Style.STROKE);
+                    paint.setStrokeCap(Paint.Cap.ROUND);
+                    paint.setStrokeWidth(d * (0.6f + 1.8f * z));
+                    paint.setColor(i % 4 == 0 ? tint : 0xFFDCE8FF);
+                    paint.setAlpha((int) (40 + 215 * z));
+                    c.drawLine(cx + ca * rr0, cy + sa * rr0, cx + ca * rr, cy + sa * rr, paint);
+                    break;
+                }
+                case SAKURA: {
+                    y[i] += dt * (0.045f + 0.03f * v[i]);
+                    x[i] += dt * (0.012f + 0.01f * v[i]) + dt * 0.006f * (float) Math.sin(time * 0.9f + ph[i]);
+                    if (y[i] > 1.05f) { y[i] = -0.05f; x[i] = (float) Math.random() * 1.1f - 0.2f; }
+                    if (x[i] > 1.1f) x[i] -= 1.25f;
+                    float px = x[i] * w, py = y[i] * h;
+                    float size = d * (5f + 5f * sz[i]);
+                    float rot = (time * 40f * v[i] + ph[i] * 57f);
+                    float flip = 0.55f + 0.45f * (float) Math.sin(time * 1.6f * v[i] + ph[i]);   // tumbling
+                    c.save();
+                    c.translate(px, py);
+                    c.rotate(rot);
+                    c.scale(1f, flip);
+                    paint.setStyle(Paint.Style.FILL);
+                    paint.setColor(i % 3 == 0 ? 0xFFFFD1E3 : 0xFFFFA9C8);
+                    paint.setAlpha(225);
+                    petal.reset();
+                    petal.moveTo(0f, -size);
+                    petal.cubicTo(size * 0.95f, -size * 0.9f, size * 0.8f, size * 0.7f, 0f, size);
+                    petal.cubicTo(-size * 0.8f, size * 0.7f, -size * 0.95f, -size * 0.9f, 0f, -size);
+                    c.drawPath(petal, paint);
+                    paint.setColor(0xFFFF7FA8);
+                    paint.setAlpha(120);
+                    c.drawCircle(0f, size * 0.55f, size * 0.12f, paint);
+                    c.restore();
+                    break;
+                }
+                case NEON: {
+                    y[i] += dt * (1.1f + 0.9f * v[i]);
+                    x[i] -= dt * 0.16f * v[i];
+                    if (y[i] > 1.08f) { y[i] = -0.15f; x[i] = (float) Math.random() * 1.3f; }
+                    int col = i % 3 == 0 ? 0xFF22E5FF : i % 3 == 1 ? 0xFFFF2BD6 : 0xFF7A5CFF;
+                    float len = d * (22f + 30f * sz[i]);
+                    float px = x[i] * w, py = y[i] * h;
+                    paint.setStyle(Paint.Style.STROKE);
+                    paint.setStrokeCap(Paint.Cap.ROUND);
+                    paint.setColor(col);
+                    paint.setStrokeWidth(d * 4.5f);
+                    paint.setAlpha(34);                                             // soft glow under the line
+                    c.drawLine(px, py, px - len * 0.2f, py + len, paint);
+                    paint.setStrokeWidth(d * 1.5f);
+                    paint.setAlpha(190);
+                    c.drawLine(px, py, px - len * 0.2f, py + len, paint);
+                    break;
+                }
+                case STORM: {
+                    y[i] += dt * (1.5f + 0.9f * v[i]);
+                    x[i] -= dt * 0.2f * v[i];
+                    if (y[i] > 1.06f) { y[i] = -0.12f; x[i] = (float) Math.random() * 1.3f; }
+                    float len = d * (18f + 22f * sz[i]);
+                    paint.setStyle(Paint.Style.STROKE);
+                    paint.setStrokeCap(Paint.Cap.ROUND);
+                    paint.setStrokeWidth(d * 1.2f);
+                    paint.setColor(0xFFB5CDEB);
+                    paint.setAlpha(120);
+                    c.drawLine(x[i] * w, y[i] * h, x[i] * w - len * 0.22f, y[i] * h + len, paint);
+                    break;
+                }
+                case LANTERNS: {
+                    y[i] -= dt * (0.018f + 0.02f * v[i]);
+                    if (y[i] < -0.12f) { y[i] = 1.1f; x[i] = 0.05f + 0.9f * (float) Math.random(); }
+                    float px = x[i] * w + w * 0.02f * (float) Math.sin(time * 0.35f * v[i] + ph[i]);
+                    float py = y[i] * h;
+                    float s = d * (11f + 12f * sz[i]);
+                    float flick = 0.85f + 0.15f * (float) Math.sin(time * 5f * v[i] + ph[i] * 3f);
+                    float depth = 0.55f + 0.45f * sz[i] / 1.5f;
+                    paint.setStyle(Paint.Style.FILL);
+                    paint.setShader(new RadialGradient(px, py, s * 3.2f, ((int) (110 * flick * depth) << 24) | 0xFFA030,
+                            0x00FFA030, Shader.TileMode.CLAMP));
+                    c.drawCircle(px, py, s * 3.2f, paint);
+                    paint.setShader(null);
+                    rect.set(px - s * 0.62f, py - s * 0.8f, px + s * 0.62f, py + s * 0.8f);
+                    paint.setColor(0xFFFFB347);
+                    paint.setAlpha((int) (235 * depth));
+                    c.drawRoundRect(rect, s * 0.3f, s * 0.3f, paint);
+                    rect.inset(s * 0.18f, s * 0.2f);
+                    paint.setColor(0xFFFFE9A8);
+                    paint.setAlpha((int) (230 * flick * depth));
+                    c.drawRoundRect(rect, s * 0.2f, s * 0.2f, paint);
+                    paint.setColor(0xFF6B3A12);
+                    paint.setAlpha((int) (200 * depth));
+                    c.drawRect(px - s * 0.4f, py - s * 0.88f, px + s * 0.4f, py - s * 0.78f, paint);
+                    break;
+                }
+                case MAGIC: {
+                    float life = (time * (0.07f + 0.05f * v[i]) + ph[i] / 6.2832f) % 1f;
+                    float px = (x[i] + 0.06f * (float) Math.sin(life * 12f + ph[i])) * w;
+                    float py = (1.05f - life * 1.15f) * h;
+                    float tw = 0.5f + 0.5f * (float) Math.sin(time * 4f * v[i] + ph[i]);
+                    float a = (float) Math.sin(Math.PI * life) * (0.45f + 0.55f * tw);
+                    float s = d * (3f + 5f * sz[i]) * (0.6f + 0.6f * tw);
+                    paint.setStyle(Paint.Style.FILL);
+                    paint.setShader(new RadialGradient(px, py, s * 3f, ((int) (90 * a) << 24) | 0xFFD76A,
+                            0x00FFD76A, Shader.TileMode.CLAMP));
+                    c.drawCircle(px, py, s * 3f, paint);
+                    paint.setShader(null);
+                    paint.setColor(i % 5 == 0 ? tint : 0xFFFFE9A8);
+                    paint.setAlpha((int) (255 * a));
+                    petal.reset();
+                    petal.moveTo(px, py - s);
+                    petal.quadTo(px, py, px + s, py);
+                    petal.quadTo(px, py, px, py + s);
+                    petal.quadTo(px, py, px - s, py);
+                    petal.quadTo(px, py, px, py - s);
+                    c.drawPath(petal, paint);
+                    break;
+                }
+                case SPORES: {
+                    y[i] -= dt * (0.01f + 0.018f * v[i]);
+                    x[i] += dt * 0.006f * (float) Math.sin(time * 0.4f + ph[i]);
+                    if (y[i] < -0.05f) { y[i] = 1.05f; x[i] = (float) Math.random(); }
+                    float a = 0.4f + 0.6f * (0.5f + 0.5f * (float) Math.sin(time * 0.8f * v[i] + ph[i]));
+                    float s = d * (2f + 4f * sz[i]);
+                    paint.setStyle(Paint.Style.FILL);
+                    paint.setShader(new RadialGradient(x[i] * w, y[i] * h, s * 4f, ((int) (75 * a) << 24) | 0xFF3B30,
+                            0x00FF3B30, Shader.TileMode.CLAMP));
+                    c.drawCircle(x[i] * w, y[i] * h, s * 4f, paint);
+                    paint.setShader(null);
+                    paint.setColor(0xFFFFB0A8);
+                    paint.setAlpha((int) (170 * a));
+                    c.drawCircle(x[i] * w, y[i] * h, s * 0.5f, paint);
                     break;
                 }
                 default: {   // embers
@@ -177,132 +332,84 @@ public class ParticlesView extends View {
                 }
             }
         }
+        endFrame(c, w, h);
         postInvalidateOnAnimation();
     }
 
-    private final android.graphics.Path bat = new android.graphics.Path();
+    private static final char[] CODE_CHARS = ("0123456789ABCDEFXYZ<>+=*:|\u30A2\u30AB\u30B5\u30BF\u30CA\u30CF\u30DE\u30E4\u30E9\u30EF").toCharArray();
+    private final android.graphics.Path petal = new android.graphics.Path();
+    private final android.graphics.RectF rect = new android.graphics.RectF();
 
-    /** A flapping bat silhouette; flap is -1..1 (wings up .. down). */
-    private void drawBat(Canvas c, float x, float y, float s, float flap, boolean facingRight) {
-        paint.setShader(null);
-        c.save();
-        c.translate(x, y);
-        if (!facingRight) c.scale(-1f, 1f);
-        float tip = -0.75f * s * flap;
-        for (int side = 0; side < 2; side++) {
-            c.save();
-            if (side == 1) c.scale(-1f, 1f);
-            bat.reset();
-            bat.moveTo(0f, -0.1f * s);
-            bat.cubicTo(0.5f * s, -0.9f * s + tip * 0.3f, 1.4f * s, -0.8f * s + tip * 0.8f, 2.2f * s, -0.2f * s + tip);
-            bat.quadTo(1.85f * s, 0.05f * s + tip * 0.7f, 1.55f * s, 0.42f * s + tip * 0.5f);
-            bat.quadTo(1.25f * s, 0.1f * s + tip * 0.3f, 0.95f * s, 0.5f * s + tip * 0.15f);
-            bat.quadTo(0.6f * s, 0.18f * s, 0.3f * s, 0.55f * s);
-            bat.lineTo(0f, 0.45f * s);
-            bat.close();
-            paint.setStyle(Paint.Style.FILL);
-            paint.setColor(0xFF0B0A12);
-            paint.setAlpha(235);
-            c.drawPath(bat, paint);
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(d * 0.9f);
-            paint.setColor(tint);
-            paint.setAlpha(70);
-            c.drawPath(bat, paint);
-            c.restore();
-        }
-        paint.setStyle(Paint.Style.FILL);
-        paint.setColor(0xFF0B0A12);
-        paint.setAlpha(240);
-        c.drawOval(-0.28f * s, -0.38f * s, 0.28f * s, 0.62f * s, paint);
-        bat.reset();                                                   // ears
-        bat.moveTo(-0.22f * s, -0.28f * s);
-        bat.lineTo(-0.2f * s, -0.7f * s);
-        bat.lineTo(-0.04f * s, -0.36f * s);
-        bat.moveTo(0.22f * s, -0.28f * s);
-        bat.lineTo(0.2f * s, -0.7f * s);
-        bat.lineTo(0.04f * s, -0.36f * s);
-        c.drawPath(bat, paint);
-        paint.setColor(0xFFFF4D4D);                                    // eyes
-        paint.setAlpha(230);
-        c.drawCircle(-0.1f * s, -0.12f * s, s * 0.05f, paint);
-        c.drawCircle(0.1f * s, -0.12f * s, s * 0.05f, paint);
-        c.restore();
-    }
+    // lightning (Thunderstorm): a flash of the whole screen and a jagged bolt every few seconds
+    private float nextBolt = 3f, boltAge = 99f;
+    private final float[] boltX = new float[16], boltY = new float[16];
+    private final float[] branchX = new float[6], branchY = new float[6];
 
-    /** Spider webs in the top corners, a little spider that lowers itself on a thread, and a web shot now and then. */
-    private void drawWeb(Canvas c, int w, int h) {
-        float len = Math.min(w, h) * 0.34f;
-        paint.setShader(null);
-        paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(d * 1.1f);
-        paint.setColor(0xFFFFFFFF);
-        for (int side = 0; side < 2; side++) {
-            c.save();
-            if (side == 1) {
-                c.translate(w, 0f);
-                c.scale(-1f, 1f);
-            }
-            int spokes = 6;
-            float[] ax = new float[spokes], ay = new float[spokes];
-            for (int k = 0; k < spokes; k++) {
-                double a = Math.toRadians(4 + k * (82f / (spokes - 1)) + 1.2f * Math.sin(time * 0.6 + k));
-                ax[k] = (float) Math.cos(a);
-                ay[k] = (float) Math.sin(a);
-                paint.setAlpha(70);
-                c.drawLine(0f, 0f, ax[k] * len, ay[k] * len, paint);
-            }
-            for (int ring = 1; ring <= 5; ring++) {
-                float r = len * ring / 5f;
-                android.graphics.Path pth = bat;
-                pth.reset();
-                pth.moveTo(ax[0] * r, ay[0] * r);
-                for (int k = 1; k < spokes; k++) {
-                    float mx = (ax[k - 1] + ax[k]) * 0.5f * r * 0.9f, my = (ay[k - 1] + ay[k]) * 0.5f * r * 0.9f;   // sags to the corner
-                    pth.quadTo(mx, my, ax[k] * r, ay[k] * r);
+    private void beginFrame(Canvas c, int w, int h) {
+        if (mode == STORM) {
+            boltAge += 0.016f;
+            if (time >= nextBolt) {
+                nextBolt = time + 4f + (float) Math.random() * 6f;
+                boltAge = 0f;
+                float bx = w * (0.15f + 0.7f * (float) Math.random());
+                float by = 0f;
+                for (int k = 0; k < boltX.length; k++) {
+                    boltX[k] = bx;
+                    boltY[k] = by;
+                    bx += (float) (Math.random() - 0.5) * w * 0.07f;
+                    by += h * (0.55f / boltX.length) * (0.7f + 0.6f * (float) Math.random());
                 }
-                paint.setAlpha(55);
-                c.drawPath(pth, paint);
+                for (int k = 0; k < branchX.length; k += 2) {
+                    int from = 4 + k;
+                    branchX[k] = boltX[from];
+                    branchY[k] = boltY[from];
+                    branchX[k + 1] = boltX[from] + (k % 4 == 0 ? 1 : -1) * w * (0.04f + 0.05f * (float) Math.random());
+                    branchY[k + 1] = boltY[from] + h * 0.1f;
+                }
             }
-            c.restore();
-        }
-        // spider on a thread
-        float sx = w * 0.14f;
-        float drop = h * (0.14f + 0.07f * (float) Math.sin(time * 0.45f));
-        paint.setAlpha(110);
-        paint.setStrokeWidth(d);
-        c.drawLine(sx, 0f, sx, drop, paint);
-        float r = d * 7f;
-        paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(d * 1.4f);
-        paint.setColor(0xFF0B0A12);
-        paint.setAlpha(255);
-        for (int k = 0; k < 4; k++) {                                   // eight legs, wiggling
-            float wob = (float) Math.sin(time * 5f + k) * d * 1.5f;
-            for (int side = -1; side <= 1; side += 2) {
-                float ly = drop - r * 0.4f + k * r * 0.45f;
-                c.drawLine(sx, ly, sx + side * r * 1.1f, ly - r * 0.8f + wob, paint);
-                c.drawLine(sx + side * r * 1.1f, ly - r * 0.8f + wob, sx + side * r * 1.9f, ly + r * 0.6f, paint);
-            }
-        }
-        paint.setStyle(Paint.Style.FILL);
-        c.drawCircle(sx, drop + r * 0.6f, r, paint);
-        c.drawCircle(sx, drop - r * 0.5f, r * 0.62f, paint);
-        paint.setColor(0xFFFF4D4D);
-        c.drawCircle(sx - r * 0.2f, drop - r * 0.6f, d * 1.2f, paint);
-        c.drawCircle(sx + r * 0.2f, drop - r * 0.6f, d * 1.2f, paint);
-        // a web shot across the screen every few seconds
-        float cycle = time % 7f;
-        if (cycle < 1.1f) {
-            float p = cycle / 1.1f;
-            float x0 = w * 0.88f, y0 = 0f, x1 = w * 0.52f, y1 = h * 0.46f;
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(d * 1.6f);
-            paint.setColor(0xFFFFFFFF);
-            paint.setAlpha((int) (170 * (1f - p * p)));
-            c.drawLine(x0, y0, x0 + (x1 - x0) * p, y0 + (y1 - y0) * p, paint);
-            paint.setStyle(Paint.Style.FILL);
-            c.drawCircle(x0 + (x1 - x0) * p, y0 + (y1 - y0) * p, d * 3f, paint);
         }
     }
+
+    private void endFrame(Canvas c, int w, int h) {
+        if (mode == STORM && boltAge < 1.2f) {
+            float flash = Math.max(Math.max(0f, 1f - boltAge / 0.14f), 0.6f * Math.max(0f, 1f - Math.abs(boltAge - 0.22f) / 0.09f));
+            paint.setShader(null);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(0xFFDCE8FF);
+            paint.setAlpha((int) (70 * flash));
+            c.drawRect(0, 0, w, h, paint);
+            if (boltAge < 0.5f) {
+                float fade = Math.min(1f, Math.max(0f, 1f - (boltAge - 0.12f) / 0.35f));
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeJoin(Paint.Join.ROUND);
+                paint.setStrokeCap(Paint.Cap.ROUND);
+                petal.reset();
+                petal.moveTo(boltX[0], boltY[0]);
+                for (int k = 1; k < boltX.length; k++) petal.lineTo(boltX[k], boltY[k]);
+                for (int k = 0; k < branchX.length; k += 2) {
+                    petal.moveTo(branchX[k], branchY[k]);
+                    petal.lineTo(branchX[k + 1], branchY[k + 1]);
+                }
+                paint.setColor(0xFFB9D2FF);
+                paint.setStrokeWidth(d * 9f);
+                paint.setAlpha((int) (60 * fade));
+                c.drawPath(petal, paint);
+                paint.setColor(0xFFFFFFFF);
+                paint.setStrokeWidth(d * 2.2f);
+                paint.setAlpha((int) (240 * fade));
+                c.drawPath(petal, paint);
+            }
+        }
+        if (mode == SPORES) {                      // the whole room breathes a faint red now and then
+            float pulse = Math.max(0f, (float) Math.sin(time * 0.5f) - 0.6f) / 0.4f;
+            if (pulse > 0f) {
+                paint.setShader(null);
+                paint.setStyle(Paint.Style.FILL);
+                paint.setColor(0xFFFF2A1A);
+                paint.setAlpha((int) (22 * pulse));
+                c.drawRect(0, 0, w, h, paint);
+            }
+        }
+    }
+
 }

@@ -63,7 +63,7 @@ public class WidgetPanel extends LinearLayout {
     private static final String PREFS = "launcher_preferences";
     private static final String KEY_ON = "widgets_on_v6";
     private static final String KEY_LEFT = "widgets_left_v1";      // widgets placed on the left side
-    private static final String KEY_WX = "weather_cache_v1";
+    private static final String KEY_WX = "weather_cache_v2";
     private static final String KEY_WX_MANUAL = "weather_city_manual_v1";
     private static final java.util.concurrent.ExecutorService WX_IO = java.util.concurrent.Executors.newSingleThreadExecutor();
     private static volatile long wxTried;
@@ -130,10 +130,6 @@ public class WidgetPanel extends LinearLayout {
             LayoutParams lp = new LayoutParams((int) (WIDTH_DP * d), (int) (heightDp * d));
             lp.bottomMargin = (int) (GAP_DP * d);
             addView(c, lp);
-            if (id.equals("now_playing")) {              // the light sweep is only for the music card
-                sweeps.add(new Sweep(c, 0));
-                c.setForeground(sweeps.get(0));
-            }
         }
         applyVisibility();
     }
@@ -426,6 +422,13 @@ public class WidgetPanel extends LinearLayout {
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
+        if (sweeps.isEmpty()) {
+            try {
+                getContext().registerReceiver(volumeReceiver, new IntentFilter("android.media.VOLUME_CHANGED_ACTION"));
+            } catch (RuntimeException ignored) {
+            }
+            return;
+        }
         sweepAnim = android.animation.ValueAnimator.ofFloat(0f, 1f);
         sweepAnim.setDuration(1000);
         sweepAnim.setRepeatCount(android.animation.ValueAnimator.INFINITE);
@@ -953,17 +956,10 @@ public class WidgetPanel extends LinearLayout {
                     lat = m.optDouble("lat");
                     lon = m.optDouble("lon");
                     city = m.optString("city");
-                } else {
-                    Location loc = lastKnown(app);
-                    if (loc != null) {
-                        lat = loc.getLatitude();
-                        lon = loc.getLongitude();
-                    } else {
-                        JSONObject ip = new JSONObject(http("https://ipwho.is/"));
-                        lat = ip.optDouble("latitude");
-                        lon = ip.optDouble("longitude");
-                        city = ip.optString("city");
-                    }
+                } else {                                    // default place: Nawanshahr, Punjab
+                    lat = 31.1245;
+                    lon = 76.1195;
+                    city = "Nawanshahr";
                 }
                 if (!Double.isNaN(lat) && !Double.isNaN(lon)) {
                     JSONObject w = new JSONObject(http("https://api.open-meteo.com/v1/forecast?latitude=" + lat

@@ -84,7 +84,7 @@ public class ColorBar extends View {
 
     private final Paint shinePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
-    private boolean shineOn;
+    private boolean shineOn = true;
 
     /** Turns on the light that runs along the fill (off by default). */
     void setShine(boolean on) {
@@ -110,6 +110,7 @@ public class ColorBar extends View {
         shine.setInterpolator(new android.view.animation.LinearInterpolator());
         final float offset = (System.identityHashCode(this) % 100) / 100f * 0.4f;
         shine.addUpdateListener(a -> {
+            if (Perf.paused) return;
             float v = ((Float) a.getAnimatedValue() + offset) % 1f;
             float n = v < 0.45f ? v / 0.45f : -1f;               // shines for the first part of each cycle only
             if (n != shineT) {

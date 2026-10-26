@@ -1128,7 +1128,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             0xFFA855F7, 0xFFEC4899, 0xFFFFFFFF};
     private static final String[] FX_COLOR_NAMES = {"Auto (app colour)", "Red", "Orange", "Gold", "Green", "Cyan", "Blue",
             "Purple", "Pink", "White"};
-    private static final String[] FX_PARTICLE_NAMES = {"Off", "Stars", "Snow", "Fireflies", "Rain", "Bubbles", "Embers", "Bats", "Spider web"};
+    private static final String[] FX_PARTICLE_NAMES = {"Off", "Stars", "Snow", "Fireflies", "Rain", "Bubbles", "Embers", "Code rain", "Hyperspace",
+            "Sakura petals", "Neon rain", "Thunderstorm", "Sky lanterns", "Magic dust", "Red spores"};
     private static final int[] STYLE_NAMES = {R.string.fx_steady, R.string.fx_breathing, R.string.fx_heartbeat,
             R.string.fx_drift, R.string.fx_shimmer, R.string.fx_rainbow, R.string.fx_flicker, R.string.fx_wave,
             R.string.fx_aurora};
@@ -1538,9 +1539,22 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         if (menuVeil == null) return;
         boolean open = (this.openPopup != null && this.openPopup.isShowing()) || (controlCenter != null && controlCenter.isShowing());
         if (open) return;
+        pauseBackground(false);
         menuVeil.animate().cancel();
         menuVeil.animate().alpha(0f).setDuration(240).withEndAction(() -> menuVeil.setVisibility(View.GONE)).start();
     };
+
+    /** While a big menu covers the home screen, the glow, particles and widget animations behind it rest. */
+    private void pauseBackground(boolean pause) {
+        if (Perf.paused == pause) return;
+        Perf.paused = pause;
+        if (pause) {
+            stopAmbientPulse();
+        } else {
+            syncPulse();
+            if (particles != null) particles.invalidate();
+        }
+    }
 
     private View menuVeilDark;
 
@@ -1554,6 +1568,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
      */
     private void showVeil(boolean light) {
         handler.removeCallbacks(hideVeilRunnable);
+        if (!light) pauseBackground(true);
         if (menuVeil == null) {
             menuVeil = new FrameLayout(this);
             menuVeil.setFocusable(false);
@@ -1697,13 +1712,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         input.setSingleLine(true);
         input.setText(current);
         input.setSelection(input.getText().length());
-        input.setHint("City, e.g. Mumbai (empty = automatic)");
+        input.setHint("City, e.g. Nawanshahr (empty = Nawanshahr)");
         new android.app.AlertDialog.Builder(this)
                 .setTitle("Weather city")
                 .setView(input)
                 .setPositiveButton("Save", (d, w) -> widgets.setWeatherCity(input.getText().toString(), city -> {
                     Toast.makeText(this, city == null ? "City not found"
-                            : city.isEmpty() ? "Weather location: automatic" : "Weather: " + city, Toast.LENGTH_SHORT).show();
+                            : city.isEmpty() ? "Weather: Nawanshahr" : "Weather: " + city, Toast.LENGTH_SHORT).show();
                     widgets.refresh();
                     if (widgetsLeft != null) widgetsLeft.refresh();
                 }))

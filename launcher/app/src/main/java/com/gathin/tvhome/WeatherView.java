@@ -63,6 +63,7 @@ public class WeatherView extends View {
             anim.setRepeatCount(ValueAnimator.INFINITE);
             anim.setInterpolator(new LinearInterpolator());
             anim.addUpdateListener(a -> {
+                if (Perf.paused) return;
                 t = (Float) a.getAnimatedValue();
                 invalidate();
             });
