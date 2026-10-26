@@ -1639,6 +1639,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         a.adBlock = this::showAdBlock;
         a.about = () -> open(new Intent(Settings.ACTION_DEVICE_INFO_SETTINGS));
         a.system = () -> open(new Intent(Settings.ACTION_SETTINGS));
+        a.power = this::showPowerMenu;
         a.clearCache = this::quickClearCache;
         a.stopApps = this::quickStopApps;
         if (!hasListenerAccess()) a.musicAccess = this::openMusicAccess;
@@ -2791,6 +2792,36 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         if (wallpaperFrontTop.getAlpha() != a) wallpaperFrontTop.setAlpha(a);
         if (depthWidgets.getAlpha() != a) depthWidgets.setAlpha(a);
         if (done) depthFollowDock = false;
+    }
+
+    private PowerMenu powerMenu;
+
+    /** The launcher's own power menu (Sleep / Restart / Power off). */
+    private void showPowerMenu() {
+        if (powerMenu != null && powerMenu.isShowing()) return;
+        powerMenu = new PowerMenu(this);
+        powerMenu.show(which -> PowerActions.perform(this, which));
+    }
+
+    private static boolean isPowerKey(int k) {
+        return k == KeyEvent.KEYCODE_POWER || k == KeyEvent.KEYCODE_TV_POWER || k == KeyEvent.KEYCODE_STB_POWER
+                || k == KeyEvent.KEYCODE_SLEEP || k == KeyEvent.KEYCODE_SOFT_SLEEP;
+    }
+
+    // Only if the remote's power key reaches the launcher at all (many TVs keep it for the system): hold it for the menu.
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (isPowerKey(keyCode) && event.getRepeatCount() == 0) event.startTracking();
+        return super.onKeyDown(keyCode, event);
+    }
+
+    @Override
+    public boolean onKeyLongPress(int keyCode, KeyEvent event) {
+        if (isPowerKey(keyCode)) {
+            showPowerMenu();
+            return true;
+        }
+        return super.onKeyLongPress(keyCode, event);
     }
 
     private boolean rowsFaded;

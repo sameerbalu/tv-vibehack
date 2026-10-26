@@ -122,4 +122,13 @@
     <string name="dock_png">PNG über dem Dock</string>
     <string name="dock_png_choose">Dock-PNG wählen</string>
     <string name="dock_png_remove">Dock-PNG entfernen</string>
+    <string name="power_menu_title">Ein/Aus</string>
+    <string name="power_sleep">Standby</string>
+    <string name="power_restart">Neustart</string>
+    <string name="power_off">Ausschalten</string>
+    <string name="power_hint">Zurück zum Abbrechen</string>
+    <string name="power_service_label">Power-Menü-Helfer</string>
+    <string name="power_service_desc">Öffnet das Ein/Aus-Menü des Fernsehers und wählt Standby, Neustart oder Ausschalten. Sonst nichts.</string>
+    <string name="power_need_access">Power-Menü-Helfer in den Bedienungshilfen erlauben</string>
+    <string name="power_pick_system">Im Ein/Aus-Menü des Fernsehers wählen</string>
 </resources>
