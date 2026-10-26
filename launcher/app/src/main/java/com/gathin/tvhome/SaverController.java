@@ -88,9 +88,8 @@ final class SaverController {
         musicGlow = root.findViewById(R.id.saverMusicGlow);
         front = root.findViewById(R.id.saverFront);
         scrimView = root.findViewById(R.id.saverScrim);
-        ClockStyles.apply(ctx, ClockStyles.get(ctx), (android.widget.TextView) root.findViewById(R.id.saverHours),
-                (android.widget.TextView) root.findViewById(R.id.saverMinutes), (android.widget.TextView) root.findViewById(R.id.saverAmPm),
-                (android.widget.TextView) root.findViewById(R.id.saverDate), (PixelClockView) root.findViewById(R.id.saverPixel), true);
+        clockRoot = root;
+        applyClockStyle();
         final float d = ctx.getResources().getDisplayMetrics().density;
         nowArt.setOutlineProvider(new ViewOutlineProvider() {
             @Override
@@ -107,8 +106,18 @@ final class SaverController {
         musicGlow.setBackground(glowDrawable);
     }
 
+    private final View clockRoot;
+
+    /** Reads the saved clock style (it may have changed since the last time) and styles all the saver's clock texts. */
+    private void applyClockStyle() {
+        ClockStyles.apply(ctx, ClockStyles.get(ctx), greeting, (TextView) clockRoot.findViewById(R.id.saverHours),
+                (TextView) clockRoot.findViewById(R.id.saverMinutes), (TextView) clockRoot.findViewById(R.id.saverAmPm),
+                (TextView) clockRoot.findViewById(R.id.saverDate), (PixelClockView) clockRoot.findViewById(R.id.saverPixel), true);
+    }
+
     void start() {
         running = true;
+        applyClockStyle();
         loadBackground();
         loadFront();
         // Slow cinematic entrance: the picture fades in while easing out of a slight zoom, then the clock

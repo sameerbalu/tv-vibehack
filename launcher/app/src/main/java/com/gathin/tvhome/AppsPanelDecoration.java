@@ -132,13 +132,13 @@ final class AppsPanelDecoration extends RecyclerView.ItemDecoration {
         float beyond = 3 * radius;                                      // an end that is off screen is pushed out of view
         float top = haveFirst ? firstCardTop - innerGap - TITLE_DP * d : -beyond;
         float bottom = haveLast ? lastBottom + innerGap + extra : parent.getHeight() + beyond;
-        if (bottom < top + 2 * radius) bottom = top + 2 * radius;
-        // Same distance from the glass panel on the left, right and top; the bottom keeps it too when the apps run on.
+        // Same distance from the glass panel on all four sides. The panel is squeezed into that area instead of being
+        // clipped by it, so it always keeps four rounded corners (and its edge stroke is never cut off).
         float cl = glass.left + margin, ct = glass.top + margin, cr = glass.right - margin, cb = glass.bottom - margin;
+        top = Math.min(Math.max(top, ct), cb - 2 * radius);
+        bottom = Math.max(Math.min(bottom, cb), top + 2 * radius);
         rect.set(cl, top, cr, bottom);
 
-        int clip = c.save();
-        c.clipRect(cl, ct, cr, cb);                                     // never outside the glass panel
         int a = Math.round(alpha * 255);
         base.setColor(0xFF0C0C0E);
         base.setAlpha(Math.round(a * (backdrop != null ? 1f : 0.88f)));
@@ -158,6 +158,5 @@ final class AppsPanelDecoration extends RecyclerView.ItemDecoration {
         edge.setColor(0x26FFFFFF);
         edge.setAlpha(Math.round(a * 0.15f));
         c.drawRoundRect(rect, radius, radius, edge);
-        c.restoreToCount(clip);
     }
 }

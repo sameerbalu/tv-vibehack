@@ -746,9 +746,17 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         if (overlayChanged) {
             wallpaperBlurView.animate().alpha(overlay ? 1f : 0f).setDuration(350).start();
             allAppsScrim.animate().alpha(overlay ? 1f : 0f).setDuration(350).start();
-            wallpaperFront.animate().alpha(overlay ? 0f : 1f).setDuration(350).start();
-            wallpaperFrontTop.animate().alpha(overlay ? 0f : 1f).setDuration(350).start();
-            depthWidgets.animate().alpha(overlay ? 0f : 1f).setDuration(350).start();
+            if (overlay) depthFollowDock = false;
+            if (!overlay && depthFollowDock) {
+                // Back from All apps to the dock: the depth PNGs get no fade of their own, they follow the dock row.
+                wallpaperFront.animate().cancel();
+                wallpaperFrontTop.animate().cancel();
+                depthWidgets.animate().cancel();
+            } else {
+                wallpaperFront.animate().alpha(overlay ? 0f : 1f).setDuration(350).start();
+                wallpaperFrontTop.animate().alpha(overlay ? 0f : 1f).setDuration(350).start();
+                depthWidgets.animate().alpha(overlay ? 0f : 1f).setDuration(350).start();
+            }
             setHeaderShown(!overlay);
         }
         if (allUiChanged) setAllUiShown(allUi);
@@ -1083,6 +1091,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         boolean entering = alignNext || (!allAppsMode && position >= COLUMNS);
         alignNext = false;
         allAppsMode = position >= COLUMNS;
+        depthFollowDock = leavingAll;
         refreshChrome();
         if (position < COLUMNS) {
             // Dock: park it at the bottom of the screen and show the top shelf for this app.
@@ -1299,7 +1308,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
 
     /** Applies the chosen clock look to the home screen clock (the screensaver reads the same choice). */
     private void applyClockStyle() {
-        ClockStyles.apply(this, ClockStyles.get(this), (TextView) findViewById(R.id.clock), null,
+        ClockStyles.apply(this, ClockStyles.get(this), (TextView) findViewById(R.id.greeting),
+                (TextView) findViewById(R.id.clock), null,
                 (TextView) findViewById(R.id.ampm), (TextView) findViewById(R.id.date),
                 (PixelClockView) findViewById(R.id.clockPixel), false);
     }
@@ -2523,12 +2533,33 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             return;
         }
         if (dockPng.getVisibility() != View.VISIBLE) dockPng.setVisibility(View.VISIBLE);
-        // Coming back from All apps the dock rises and fades in with the grid: the PNG rides along with it
-        // (same lift, alpha following the grid squared) instead of popping up at its final place first.
-        float ga = grid.getAlpha();
-        float pa = dockFade * ga * ga;
+        // No animation of its own: exactly the dock row's alpha, no movement.
+        float pa = dockRowAlpha();
         if (dockPng.getAlpha() != pa) dockPng.setAlpha(pa);
-        if (dockPng.getTranslationY() != grid.getTranslationY()) dockPng.setTranslationY(grid.getTranslationY());
+        if (dockPng.getTranslationY() != 0f) dockPng.setTranslationY(0f);
+    }
+
+    private boolean depthFollowDock;
+
+    /** The alpha the dock row is really drawn with (0 while the grid is still being moved to the dock). */
+    private float dockRowAlpha() {
+        if (snapActive && !snapRising) return 0f;
+        return dockFade * grid.getAlpha();
+    }
+
+    /** After All apps -> dock, the depth PNG layers show with the dock row's alpha, never earlier. */
+    private void syncDepthFollow() {
+        if (!depthFollowDock || wallpaperFront == null) return;
+        if (allAppsMode || arranging) {
+            depthFollowDock = false;
+            return;
+        }
+        boolean done = !snapActive && dockFade == 1f && grid.getAlpha() == 1f;
+        float a = done ? 1f : dockRowAlpha();
+        if (wallpaperFront.getAlpha() != a) wallpaperFront.setAlpha(a);
+        if (wallpaperFrontTop.getAlpha() != a) wallpaperFrontTop.setAlpha(a);
+        if (depthWidgets.getAlpha() != a) depthWidgets.setAlpha(a);
+        if (done) depthFollowDock = false;
     }
 
     private boolean rowsFaded;
@@ -2588,6 +2619,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         syncDock();
         syncAppsPanel();
         syncDockPng();
+        syncDepthFollow();
         syncRowFade();
         if (continueRow == null) return;
         boolean active = continueActive();
