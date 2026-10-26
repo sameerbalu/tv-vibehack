@@ -113,6 +113,7 @@ final class SaverController {
         ClockStyles.apply(ctx, ClockStyles.get(ctx), greeting, (TextView) clockRoot.findViewById(R.id.saverHours),
                 (TextView) clockRoot.findViewById(R.id.saverMinutes), (TextView) clockRoot.findViewById(R.id.saverAmPm),
                 (TextView) clockRoot.findViewById(R.id.saverDate), (PixelClockView) clockRoot.findViewById(R.id.saverPixel), true);
+        updateGreeting();
     }
 
     void start() {
@@ -226,7 +227,7 @@ final class SaverController {
         }
     }
 
-    private void updateInfo() {
+    private void updateGreeting() {
         int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
         int res;
         if (hour < 5) res = R.string.good_night;
@@ -234,7 +235,11 @@ final class SaverController {
         else if (hour < 17) res = R.string.good_afternoon;
         else if (hour < 22) res = R.string.good_evening;
         else res = R.string.good_night;
-        greeting.setText(res);
+        greeting.setText(ClockStyles.greeting(ctx, res));
+    }
+
+    private void updateInfo() {
+        updateGreeting();
         updateMusic();
     }
 

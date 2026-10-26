@@ -42,6 +42,7 @@ final class ClockStyles {
         float shadowRadius, shadowDx, shadowDy;
         int shadowColor;
         int visibility;
+        int bottomMargin;
     }
 
     private static Orig capture(View v) {
@@ -50,6 +51,8 @@ final class ClockStyles {
         if (t instanceof Orig) return (Orig) t;
         Orig o = new Orig();
         o.visibility = v.getVisibility();
+        if (v.getLayoutParams() instanceof android.view.ViewGroup.MarginLayoutParams)
+            o.bottomMargin = ((android.view.ViewGroup.MarginLayoutParams) v.getLayoutParams()).bottomMargin;
         if (v instanceof TextView) {
             TextView tv = (TextView) v;
             o.typeface = tv.getTypeface();
@@ -77,6 +80,21 @@ final class ClockStyles {
             tv.setShadowLayer(o.shadowRadius, o.shadowDx, o.shadowDy, o.shadowColor);
         }
         v.setVisibility(o.visibility);
+        if (v.getLayoutParams() instanceof android.view.ViewGroup.MarginLayoutParams) {
+            android.view.ViewGroup.MarginLayoutParams lp = (android.view.ViewGroup.MarginLayoutParams) v.getLayoutParams();
+            if (lp.bottomMargin != o.bottomMargin) {
+                lp.bottomMargin = o.bottomMargin;
+                v.setLayoutParams(lp);
+            }
+        }
+    }
+
+    static final String OWNER = "Sameer";
+
+    /** "Good morning" in the normal styles; "Good morning Sameer" in the Minecraft style. */
+    static CharSequence greeting(Context c, int res) {
+        String base = c.getString(res);
+        return get(c) == MINECRAFT ? base + " " + OWNER : base;
     }
 
     /**
@@ -102,6 +120,12 @@ final class ClockStyles {
             if (hours != null) hours.setVisibility(View.GONE);
             if (minutes != null && minutes != hours) minutes.setVisibility(View.GONE);
             if (greeting != null) {
+                // Air between the greeting and the pixel clock (the blocks start right at the top of their view).
+                if (greeting.getLayoutParams() instanceof android.view.ViewGroup.MarginLayoutParams) {
+                    android.view.ViewGroup.MarginLayoutParams lp = (android.view.ViewGroup.MarginLayoutParams) greeting.getLayoutParams();
+                    lp.bottomMargin = Math.round((saver ? 16f : 10f) * ctx.getResources().getDisplayMetrics().density);
+                    greeting.setLayoutParams(lp);
+                }
                 style(ctx, greeting, 0, 700, gBase, 0xFFFFAA00);
                 greeting.setShadowLayer(0.01f, 2f * ctx.getResources().getDisplayMetrics().density,
                         2f * ctx.getResources().getDisplayMetrics().density, 0xCC000000);   // the game's small dark drop shadow

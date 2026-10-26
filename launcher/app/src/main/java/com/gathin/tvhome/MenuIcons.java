@@ -15,7 +15,7 @@ final class MenuIcons {
 
     static final int WALLPAPER = 1, DEPTH = 2, EYE = 3, WIDGETS = 4, SPARKLE = 5, MOON = 6, BELL = 7, GEAR = 8,
             TRASH = 9, PLAY = 10, OPEN = 11, CLEAR = 12, GLOW = 13, BRUSH = 14, LEVELS = 15, TV = 16,
-            BLUETOOTH = 17, SOURCE = 18, WIFI = 19, CLOCK = 20;
+            BLUETOOTH = 17, SOURCE = 18, WIFI = 19, CLOCK = 20, SHIELD = 21;
 
     private MenuIcons() {
     }
@@ -44,6 +44,7 @@ final class MenuIcons {
             case TV: return new Tv(density, white);
             case WIFI: return new Wifi(density, white);
             case CLOCK: return new Clock(density, white);
+            case SHIELD: return new Shield(density, white);
             case BLUETOOTH: return new PillIcon.Bluetooth(density, white);
             default: return new PillIcon.Input(density, white);
         }
@@ -293,6 +294,37 @@ final class MenuIcons {
                 c.drawArc(oval, 205f, 28f, false, paint);
                 c.drawArc(oval, 307f, 28f, false, paint);
             }
+        }
+    }
+
+    // ---- shield: the tick inside gives a small pulse ---------------------------------------------------------------
+    static final class Shield extends Menu {
+        private final Path shield = new Path();
+        private final Path tick = new Path();
+
+        Shield(float d, ColorStateList c) {
+            super(d, c, 2600);
+            shield.moveTo(12f, 3.2f);
+            shield.lineTo(19.2f, 6f);
+            shield.lineTo(19.2f, 11.6f);
+            shield.quadTo(19.2f, 17.4f, 12f, 20.8f);
+            shield.quadTo(4.8f, 17.4f, 4.8f, 11.6f);
+            shield.lineTo(4.8f, 6f);
+            shield.close();
+            tick.moveTo(8.6f, 12f);
+            tick.lineTo(11f, 14.4f);
+            tick.lineTo(15.6f, 9.4f);
+        }
+
+        @Override
+        void drawIcon(Canvas c) {
+            ink(1f);
+            c.drawPath(shield, paint);
+            float pop = 1f + 0.16f * bump(0.1f, 0.35f);            // the tick gives a small pulse
+            c.save();
+            c.scale(pop, pop, 12f, 12f);
+            c.drawPath(tick, paint);
+            c.restore();
         }
     }
 

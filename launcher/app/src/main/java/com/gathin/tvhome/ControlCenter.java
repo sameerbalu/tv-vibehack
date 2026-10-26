@@ -55,7 +55,7 @@ final class ControlCenter {
 
     /** What the controls do (each may be null = hidden). */
     static final class Actions {
-        Runnable wallpaper, hideApps, effects, widgets, saver, bluetooth, wifi, system, about, sound, clockStyle, musicAccess,
+        Runnable wallpaper, hideApps, effects, widgets, saver, bluetooth, wifi, system, about, sound, clockStyle, adBlock, musicAccess,
                 clearCache, stopApps;
     }
 
@@ -217,6 +217,7 @@ final class ControlCenter {
         List<View> rb = new ArrayList<>();
         rb.add(round(MenuIcons.MOON, a.saver));
         rb.add(round(MenuIcons.CLOCK, a.clockStyle));
+        rb.add(round(MenuIcons.SHIELD, a.adBlock));
         if (a.musicAccess != null) rb.add(round(MenuIcons.BELL, a.musicAccess));
         rb.add(round(MenuIcons.TV, a.about));
         rb.add(round(MenuIcons.GEAR, a.system));

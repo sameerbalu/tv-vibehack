@@ -1325,12 +1325,119 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         applyClockStyle();
     }
 
+    // ---- ad-blocking DNS (system Private DNS) ------------------------------------------------------------
+
+    private static final String KEY_DNS_CUSTOM = "dns_custom";
+
+    private int dnsSelected(String[] customOut) {
+        String cur = PrivateDns.current(this);
+        if (cur.isEmpty()) return 0;
+        for (int i = 1; i < PrivateDns.HOSTS.length; i++) if (PrivateDns.HOSTS[i].equalsIgnoreCase(cur)) return i;
+        customOut[0] = cur;
+        return PrivateDns.HOSTS.length;           // a custom host
+    }
+
+    /** Pick the DNS that filters ads for every app. Needs a one-time adb permission; the menu explains it. */
+    private void showAdBlock() {
+        View anchor = findViewById(R.id.btnSettings);
+        View panel = getLayoutInflater().inflate(R.layout.popup_apps, root, false);
+        panel.findViewById(R.id.title).setVisibility(View.GONE);
+        LinearLayout rows = panel.findViewById(R.id.rows);
+        int minWidth = (int) (340 * density);
+        final PopupWindow popup = newDropdown(panel, minWidth);
+        final int presets = PrivateDns.NAMES.length;
+        final View[] items = new View[presets + 1];
+        final String[] customNow = {""};
+        final int sel = dnsSelected(customNow);
+        final String savedCustom = getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_DNS_CUSTOM, "");
+        for (int i = 0; i <= presets; i++) {
+            final int index = i;
+            View row = getLayoutInflater().inflate(R.layout.item_input, rows, false);
+            setMenuIcon(row, MenuIcons.SHIELD);
+            boolean isCustom = i == presets;
+            ((TextView) row.findViewById(R.id.title)).setText(isCustom ? "Custom DNS" : PrivateDns.NAMES[i]);
+            String note = isCustom ? (!customNow[0].isEmpty() ? customNow[0] : !savedCustom.isEmpty() ? savedCustom : "Your own host name")
+                    : PrivateDns.NOTES[i];
+            ((TextView) row.findViewById(R.id.status)).setText(note);
+            View dot = row.findViewById(R.id.dot);
+            if (dot instanceof SwitchView) ((SwitchView) dot).setCheckStyle(true);
+            dot.setVisibility(sel == i ? View.VISIBLE : View.GONE);
+            row.setOnClickListener(v -> {
+                if (!PrivateDns.supported()) {
+                    Toast.makeText(this, "Private DNS needs Android 9 or newer", Toast.LENGTH_LONG).show();
+                    return;
+                }
+                if (!PrivateDns.canWrite(this)) {
+                    popup.dismiss();
+                    handler.postDelayed(this::showDnsSetup, 160);
+                    return;
+                }
+                if (isCustom) {
+                    popup.dismiss();
+                    handler.postDelayed(() -> askCustomDns(!customNow[0].isEmpty() ? customNow[0] : savedCustom), 160);
+                    return;
+                }
+                boolean ok = PrivateDns.set(this, PrivateDns.HOSTS[index]);
+                Toast.makeText(this, ok ? (index == 0 ? "DNS: automatic" : "Ad-block DNS on: " + PrivateDns.HOSTS[index])
+                        : "Could not change the DNS", Toast.LENGTH_SHORT).show();
+                for (int k = 0; k < items.length; k++) {
+                    items[k].findViewById(R.id.dot).setVisibility(ok && k == index ? View.VISIBLE : (ok ? View.GONE
+                            : items[k].findViewById(R.id.dot).getVisibility()));
+                }
+            });
+            items[i] = row;
+            rows.addView(row);
+        }
+        fitScroll(panel);
+        showDropdown(popup, panel, anchor, minWidth, true);
+    }
+
+    private void showDnsSetup() {
+        String cmd = PrivateDns.grantCommand(this);
+        new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("One-time setup")
+                .setMessage("Android only lets an app change the DNS after it has been given a permission once. "
+                        + "Run this on the computer or Termux that is connected to the TV over adb, then open this menu again:\n\n"
+                        + cmd)
+                .setPositiveButton("OK", null)
+                .show();
+    }
+
+    private void askCustomDns(String initial) {
+        final android.widget.EditText input = new android.widget.EditText(this);
+        input.setSingleLine(true);
+        input.setHint("dns.example.com");
+        input.setText(initial);
+        input.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_URI);
+        int pad = (int) (20 * density);
+        FrameLayout box = new FrameLayout(this);
+        box.setPadding(pad, pad / 2, pad, 0);
+        box.addView(input);
+        new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Custom DNS host name")
+                .setMessage("A DNS-over-TLS host name, for example dns.adguard-dns.com or dns.nextdns.io")
+                .setView(box)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Use it", (d, w) -> {
+                    String host = input.getText().toString().trim().toLowerCase(Locale.ROOT);
+                    if (!PrivateDns.validHost(host)) {
+                        Toast.makeText(this, "That is not a valid host name", Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_DNS_CUSTOM, host).apply();
+                    boolean ok = PrivateDns.set(this, host);
+                    Toast.makeText(this, ok ? "DNS: " + host : "Could not change the DNS", Toast.LENGTH_SHORT).show();
+                })
+                .show();
+    }
+
     /** Applies the chosen clock look to the home screen clock (the screensaver reads the same choice). */
     private void applyClockStyle() {
         ClockStyles.apply(this, ClockStyles.get(this), (TextView) findViewById(R.id.greeting),
                 (TextView) findViewById(R.id.clock), null,
                 (TextView) findViewById(R.id.ampm), (TextView) findViewById(R.id.date),
                 (PixelClockView) findViewById(R.id.clockPixel), false);
+        updateGreeting();
     }
 
     /** Pick a clock look; it is applied right away so the clock behind the menu changes live. */
@@ -1515,6 +1622,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         a.wifi = () -> open(new Intent(Settings.ACTION_WIFI_SETTINGS));
         a.sound = () -> open(new Intent(Settings.ACTION_SOUND_SETTINGS));
         a.clockStyle = this::showClockStyles;
+        a.adBlock = this::showAdBlock;
         a.about = () -> open(new Intent(Settings.ACTION_DEVICE_INFO_SETTINGS));
         a.system = () -> open(new Intent(Settings.ACTION_SETTINGS));
         a.clearCache = this::quickClearCache;
@@ -3007,7 +3115,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         else if (hour < 17) res = R.string.good_afternoon;
         else if (hour < 22) res = R.string.good_evening;
         else res = R.string.good_night;
-        greeting.setText(res);
+        greeting.setText(ClockStyles.greeting(this, res));
     }
 
     private int btPending;

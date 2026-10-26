@@ -127,10 +127,7 @@ public class ParticlesView extends View {
                     float a = 0.5f + 0.5f * (float) Math.sin(time * 1.1f * v[i] + ph[i]);
                     float r = d * (14f + 10f * sz[i]);
                     paint.setStyle(Paint.Style.FILL);
-                    paint.setShader(new RadialGradient(px * w, py * h, r,
-                            ((int) (170 * a) << 24) | (tint & 0xFFFFFF), tint & 0x00FFFFFF, Shader.TileMode.CLAMP));
-                    c.drawCircle(px * w, py * h, r, paint);
-                    paint.setShader(null);
+                    glow(c, px * w, py * h, r, tint, (int) (170 * a));
                     paint.setColor(0xFFFFFFFF);
                     paint.setAlpha((int) (230 * a));
                     c.drawCircle(px * w, py * h, d * 1.6f, paint);
@@ -267,10 +264,7 @@ public class ParticlesView extends View {
                     float flick = 0.85f + 0.15f * (float) Math.sin(time * 5f * v[i] + ph[i] * 3f);
                     float depth = 0.55f + 0.45f * sz[i] / 1.5f;
                     paint.setStyle(Paint.Style.FILL);
-                    paint.setShader(new RadialGradient(px, py, s * 3.2f, ((int) (110 * flick * depth) << 24) | 0xFFA030,
-                            0x00FFA030, Shader.TileMode.CLAMP));
-                    c.drawCircle(px, py, s * 3.2f, paint);
-                    paint.setShader(null);
+                    glow(c, px, py, s * 3.2f, 0xFFA030, (int) (110 * flick * depth));
                     rect.set(px - s * 0.62f, py - s * 0.8f, px + s * 0.62f, py + s * 0.8f);
                     paint.setColor(0xFFFFB347);
                     paint.setAlpha((int) (235 * depth));
@@ -292,10 +286,7 @@ public class ParticlesView extends View {
                     float a = (float) Math.sin(Math.PI * life) * (0.45f + 0.55f * tw);
                     float s = d * (3f + 5f * sz[i]) * (0.6f + 0.6f * tw);
                     paint.setStyle(Paint.Style.FILL);
-                    paint.setShader(new RadialGradient(px, py, s * 3f, ((int) (90 * a) << 24) | 0xFFD76A,
-                            0x00FFD76A, Shader.TileMode.CLAMP));
-                    c.drawCircle(px, py, s * 3f, paint);
-                    paint.setShader(null);
+                    glow(c, px, py, s * 3f, 0xFFD76A, (int) (90 * a));
                     paint.setColor(i % 5 == 0 ? tint : 0xFFFFE9A8);
                     paint.setAlpha((int) (255 * a));
                     petal.reset();
@@ -314,10 +305,7 @@ public class ParticlesView extends View {
                     float a = 0.4f + 0.6f * (0.5f + 0.5f * (float) Math.sin(time * 0.8f * v[i] + ph[i]));
                     float s = d * (2f + 4f * sz[i]);
                     paint.setStyle(Paint.Style.FILL);
-                    paint.setShader(new RadialGradient(x[i] * w, y[i] * h, s * 4f, ((int) (75 * a) << 24) | 0xFF3B30,
-                            0x00FF3B30, Shader.TileMode.CLAMP));
-                    c.drawCircle(x[i] * w, y[i] * h, s * 4f, paint);
-                    paint.setShader(null);
+                    glow(c, x[i] * w, y[i] * h, s * 4f, 0xFF3B30, (int) (75 * a));
                     paint.setColor(0xFFFFB0A8);
                     paint.setAlpha((int) (170 * a));
                     c.drawCircle(x[i] * w, y[i] * h, s * 0.5f, paint);
@@ -331,10 +319,7 @@ public class ParticlesView extends View {
                         float a = 0.55f + 0.45f * (float) Math.sin(time * 3f * v[i] + ph[i]);
                         float s = d * (4f + 3f * sz[i]);
                         paint.setStyle(Paint.Style.FILL);
-                        paint.setShader(new RadialGradient(x[i] * w, y[i] * h, s * 3.2f, ((int) (90 * a) << 24) | 0xC6FF3A,
-                                0x00C6FF3A, Shader.TileMode.CLAMP));
-                        c.drawCircle(x[i] * w, y[i] * h, s * 3.2f, paint);
-                        paint.setShader(null);
+                        glow(c, x[i] * w, y[i] * h, s * 3.2f, 0xC6FF3A, (int) (90 * a));
                         paint.setColor(a > 0.75f ? 0xFFE8FF6A : 0xFF7CE82A);
                         paint.setAlpha(240);
                         float q = s * 0.5f;
@@ -432,10 +417,7 @@ public class ParticlesView extends View {
                         int col = i % 4 == 1 ? 0xFFE0242B : 0xFF3F7BFF;
                         float s = d * (2.5f + 3.5f * sz[i]) * (0.6f + 0.6f * tw);
                         paint.setStyle(Paint.Style.FILL);
-                        paint.setShader(new RadialGradient(x[i] * w, y[i] * h, s * 3f, ((int) (100 * tw) << 24) | (col & 0xFFFFFF),
-                                col & 0x00FFFFFF, Shader.TileMode.CLAMP));
-                        c.drawCircle(x[i] * w, y[i] * h, s * 3f, paint);
-                        paint.setShader(null);
+                        glow(c, x[i] * w, y[i] * h, s * 3f, (col & 0xFFFFFF), (int) (100 * tw));
                         paint.setStyle(Paint.Style.STROKE);
                         paint.setStrokeWidth(d * 0.9f);
                         paint.setColor(0xFFFFFFFF);
@@ -497,6 +479,27 @@ public class ParticlesView extends View {
         }
         endFrame(c, w, h);
         postInvalidateOnAnimation();
+    }
+
+    private final java.util.HashMap<Integer, RadialGradient> glows = new java.util.HashMap<>();
+
+    /** A soft round glow: one cached unit gradient per colour, scaled and tinted by alpha, so nothing is allocated per frame. */
+    private void glow(Canvas c, float cx, float cy, float r, int rgb, int alpha) {
+        rgb &= 0xFFFFFF;
+        RadialGradient g = glows.get(rgb);
+        if (g == null) {
+            g = new RadialGradient(0f, 0f, 1f, 0xFF000000 | rgb, rgb, Shader.TileMode.CLAMP);
+            glows.put(rgb, g);
+        }
+        paint.setStyle(Paint.Style.FILL);
+        paint.setShader(g);
+        paint.setAlpha(Math.max(0, Math.min(255, alpha)));
+        c.save();
+        c.translate(cx, cy);
+        c.scale(r, r);
+        c.drawCircle(0f, 0f, 1f, paint);
+        c.restore();
+        paint.setShader(null);
     }
 
     private static final int[] BLOCKS = {0xFF7A5230, 0xFF8A8A8A, 0xFF4AEDD9, 0xFFE0242B, 0xFFF0C93A, 0xFF5DA130};
