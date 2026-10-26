@@ -44,6 +44,15 @@
         android:alpha="0"
         android:importantForAccessibility="no" />
 
+    <!-- Floating particles (Settings > Glow & effects), behind everything else. -->
+    <com.gathin.tvhome.ParticlesView
+        android:id="@+id/particles"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:alpha="0"
+        android:visibility="gone"
+        android:importantForAccessibility="no" />
+
     <!-- Spotify lyrics: under the depth PNG, so the "character" of the wallpaper stands in front of the words. -->
     <com.gathin.tvhome.LyricsView
         android:id="@+id/lyricsView"
@@ -120,6 +129,14 @@
         android:layout_height="wrap_content"
         android:layout_gravity="start|top"
         android:layout_marginStart="56dp"
+        android:importantForAccessibility="no" />
+
+    <!-- The depth PNG again, clipped to the widget columns, when widgets should sit behind the wallpaper character. -->
+    <com.gathin.tvhome.DepthOverlayView
+        android:id="@+id/depthWidgets"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone"
         android:importantForAccessibility="no" />
 
     <!-- Clock, date and top buttons. Fades out while the full app list (or arrange mode) is showing. -->

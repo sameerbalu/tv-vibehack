@@ -15,6 +15,10 @@ public class ColorBar extends View {
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF rect = new RectF();
     private float frac;
+    private float shown = -1f;          // fill actually drawn (eases towards frac)
+    private android.animation.ValueAnimator grow;
+    private android.animation.ValueAnimator shine;
+    private float shineT = -1f;
     private int c1 = 0xFFFFFFFF, c2 = 0xFFFFFFFF;
     private boolean shaderDirty = true;
     private int shaderW = -1;
@@ -29,7 +33,21 @@ public class ColorBar extends View {
     }
 
     void set(float f, int startColor, int endColor) {
-        frac = Math.max(0f, Math.min(1f, f));
+        float target = Math.max(0f, Math.min(1f, f));
+        if (shown < 0f || !isAttachedToWindow()) {
+            shown = target;
+        } else if (Math.abs(target - frac) > 0.002f) {
+            if (grow != null) grow.cancel();
+            grow = android.animation.ValueAnimator.ofFloat(shown, target);
+            grow.setDuration(700);
+            grow.setInterpolator(new android.view.animation.DecelerateInterpolator(2f));
+            grow.addUpdateListener(a -> {
+                shown = (Float) a.getAnimatedValue();
+                invalidate();
+            });
+            grow.start();
+        }
+        frac = target;
         if (startColor != c1 || endColor != c2) {
             c1 = startColor;
             c2 = endColor;
@@ -45,7 +63,7 @@ public class ColorBar extends View {
         float r = h / 2f;
         rect.set(0, 0, w, h);
         canvas.drawRoundRect(rect, r, r, track);
-        float fw = Math.max(h, w * frac);
+        float fw = Math.max(h, w * (shown < 0f ? frac : shown));
         if (shaderDirty || shaderW != w) {
             fill.setShader(new LinearGradient(0, 0, w, 0, c1, c2, Shader.TileMode.CLAMP));
             shaderDirty = false;
@@ -53,5 +71,42 @@ public class ColorBar extends View {
         }
         rect.set(0, 0, fw, h);
         canvas.drawRoundRect(rect, r, r, fill);
+        if (shineT >= 0f && shineT <= 1f) {                    // a soft light that runs along the fill now and then
+            int save = canvas.save();
+            canvas.clipRect(0, 0, fw, h);
+            float x = -h * 3 + (fw + h * 6) * shineT;
+            shinePaint.setShader(new LinearGradient(x - h * 3, 0, x + h * 3, 0,
+                    new int[]{0x00FFFFFF, 0x66FFFFFF, 0x00FFFFFF}, null, Shader.TileMode.CLAMP));
+            canvas.drawRoundRect(rect, r, r, shinePaint);
+            canvas.restoreToCount(save);
+        }
+    }
+
+    private final Paint shinePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        shine = android.animation.ValueAnimator.ofFloat(0f, 1f);
+        shine.setDuration(4200);
+        shine.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+        shine.setInterpolator(new android.view.animation.LinearInterpolator());
+        final float offset = (System.identityHashCode(this) % 100) / 100f * 0.4f;
+        shine.addUpdateListener(a -> {
+            float v = ((Float) a.getAnimatedValue() + offset) % 1f;
+            float n = v < 0.45f ? v / 0.45f : -1f;               // shines for the first part of each cycle only
+            if (n != shineT) {
+                shineT = n;
+                if (n >= 0f || shineT < 0f) invalidate();
+            }
+        });
+        shine.start();
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        if (shine != null) shine.cancel();
+        if (grow != null) grow.cancel();
     }
 }

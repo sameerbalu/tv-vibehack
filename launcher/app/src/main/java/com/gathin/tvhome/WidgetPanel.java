@@ -64,6 +64,7 @@ public class WidgetPanel extends LinearLayout {
     private static final String KEY_ON = "widgets_on_v6";
     private static final String KEY_LEFT = "widgets_left_v1";      // widgets placed on the left side
     private static final String KEY_WX = "weather_cache_v1";
+    private static final String KEY_WX_MANUAL = "weather_city_manual_v1";
     private static final java.util.concurrent.ExecutorService WX_IO = java.util.concurrent.Executors.newSingleThreadExecutor();
     private static volatile long wxTried;
     private static volatile boolean wxFetching;
@@ -71,13 +72,16 @@ public class WidgetPanel extends LinearLayout {
     private final SharedPreferences prefs;
     private final float d;
     private Typeface font;
+    private final java.util.ArrayList<Sweep> sweeps = new java.util.ArrayList<>();
+    private android.animation.ValueAnimator sweepAnim;
     private final Map<String, View> cards = new LinkedHashMap<>();
     private int maxCards = 5;
     private int shown;
     private boolean playing;
     private boolean left;               // this panel is the left column
     private WidgetPanel peer;            // the other column; music and weather updates go to both
-    private TextView wxIcon, wxTemp, wxText, wxRange, sunValue;
+    private WeatherView wxView;
+    private TextView wxTemp, wxText, wxRange, sunValue;
     private ColorBar sunBar;
     private final TextView[] weekLetter = new TextView[7];
     private final TextView[] weekNum = new TextView[7];
@@ -126,6 +130,8 @@ public class WidgetPanel extends LinearLayout {
             LayoutParams lp = new LayoutParams((int) (WIDTH_DP * d), (int) (heightDp * d));
             lp.bottomMargin = (int) (GAP_DP * d);
             addView(c, lp);
+            sweeps.add(new Sweep(c, sweeps.size()));
+            c.setForeground(sweeps.get(sweeps.size() - 1));
         }
         applyVisibility();
     }
@@ -237,7 +243,12 @@ public class WidgetPanel extends LinearLayout {
                 c.setVisibility(vis);
                 if (show) {
                     c.setAlpha(0f);
-                    c.animate().alpha(1f).setDuration(350).start();
+                    c.setTranslationY(14 * d);
+                    c.setScaleX(0.96f);
+                    c.setScaleY(0.96f);
+                    c.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f)
+                            .setStartDelay(Math.min(5, count) * 70L).setDuration(520)
+                            .setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f)).start();
                 }
             }
         }
@@ -362,9 +373,66 @@ public class WidgetPanel extends LinearLayout {
         }
     };
 
+    /** A soft diagonal highlight that glides across one card now and then (cards take turns). */
+    private final class Sweep extends android.graphics.drawable.Drawable {
+        private static final long CYCLE = 9000L, RUN = 1300L;
+        private final View card;
+        private final long start;
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final android.graphics.Path clip = new android.graphics.Path();
+        private final RectF r = new RectF();
+        private float progress = -1f;
+
+        Sweep(View card, int index) {
+            this.card = card;
+            this.start = (index * 800L) % CYCLE;
+        }
+
+        /** Returns true while this card's sweep is running. */
+        boolean tick(long now) {
+            long local = ((now % CYCLE) - start + CYCLE) % CYCLE;
+            float p = local < RUN ? local / (float) RUN : -1f;
+            boolean changed = p != progress;
+            progress = p;
+            if (changed && card.getVisibility() == VISIBLE) invalidateSelf();
+            return p >= 0f;
+        }
+
+        @Override
+        public void draw(Canvas c) {
+            if (progress < 0f) return;
+            int w = getBounds().width(), h = getBounds().height();
+            if (w <= 0 || h <= 0) return;
+            float band = w * 0.45f;
+            float x = -band + (w + band * 2) * progress;
+            paint.setShader(new android.graphics.LinearGradient(x - band, 0, x + band, h * 0.6f,
+                    new int[]{0x00FFFFFF, 0x2EFFFFFF, 0x00FFFFFF}, null, android.graphics.Shader.TileMode.CLAMP));
+            r.set(0, 0, w, h);
+            clip.reset();
+            clip.addRoundRect(r, 16 * d, 16 * d, android.graphics.Path.Direction.CW);
+            c.save();
+            c.clipPath(clip);
+            c.drawRect(r, paint);
+            c.restore();
+        }
+
+        @Override public void setAlpha(int alpha) { }
+        @Override public void setColorFilter(android.graphics.ColorFilter cf) { }
+        @Override public int getOpacity() { return android.graphics.PixelFormat.TRANSLUCENT; }
+    }
+
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
+        sweepAnim = android.animation.ValueAnimator.ofFloat(0f, 1f);
+        sweepAnim.setDuration(1000);
+        sweepAnim.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+        sweepAnim.setInterpolator(new android.view.animation.LinearInterpolator());
+        sweepAnim.addUpdateListener(a -> {
+            long now = SystemClock.uptimeMillis();
+            for (Sweep sw : sweeps) sw.tick(now);
+        });
+        sweepAnim.start();
         try {
             getContext().registerReceiver(volumeReceiver, new IntentFilter("android.media.VOLUME_CHANGED_ACTION"));
         } catch (RuntimeException ignored) {
@@ -373,6 +441,10 @@ public class WidgetPanel extends LinearLayout {
 
     @Override
     protected void onDetachedFromWindow() {
+        if (sweepAnim != null) {
+            sweepAnim.cancel();
+            sweepAnim = null;
+        }
         try {
             getContext().unregisterReceiver(volumeReceiver);
         } catch (RuntimeException ignored) {
@@ -677,11 +749,10 @@ public class WidgetPanel extends LinearLayout {
 
     private void buildWeather() {
         LinearLayout c = card(true, 0xFFFBBF24);
-        wxIcon = text(30, Color.WHITE, false);
-        wxIcon.setText("\u2601\uFE0F");
-        LayoutParams il = new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        wxView = new WeatherView(getContext());
+        LayoutParams il = new LayoutParams((int) (46 * d), (int) (46 * d));
         il.setMarginEnd((int) (8 * d));
-        c.addView(wxIcon, il);
+        c.addView(wxView, il);
         wxTemp = text(30, Color.WHITE, false);
         wxTemp.setTypeface(font, Typeface.BOLD);
         LayoutParams tl = new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -771,7 +842,7 @@ public class WidgetPanel extends LinearLayout {
     private void showWeather() {
         JSONObject o = readWx();
         if (o == null) {
-            wxIcon.setText("\u2601\uFE0F");
+            wxView.setCondition(3, true);
             wxTemp.setText("--");
             wxText.setText("Getting the weather");
             wxRange.setText("");
@@ -779,11 +850,17 @@ public class WidgetPanel extends LinearLayout {
         }
         int code = o.optInt("code");
         String city = o.optString("city");
-        wxIcon.setText(weatherIcon(code));
+        boolean isDay = o.has("day") ? o.optBoolean("day", true) : dayByClock();
+        wxView.setCondition(code, isDay);
         wxTemp.setText(Math.round(o.optDouble("temp")) + "\u00B0");
-        wxText.setText(weatherText(code));
+        wxText.setText(!isDay && code <= 1 ? "Clear night" : weatherText(code));
         wxRange.setText((city.isEmpty() ? "" : city + "  \u00B7  ") + "H " + Math.round(o.optDouble("hi"))
                 + "\u00B0  L " + Math.round(o.optDouble("lo")) + "\u00B0");
+    }
+
+    private static boolean dayByClock() {
+        int h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
+        return h >= 6 && h < 18;
     }
 
     private static String weatherIcon(int c) {
@@ -813,6 +890,49 @@ public class WidgetPanel extends LinearLayout {
         return "Cloudy";
     }
 
+    /** The city the user picked for the weather, or "" for automatic. */
+    String weatherCity() {
+        try {
+            String m = prefs.getString(KEY_WX_MANUAL, null);
+            return m == null ? "" : new JSONObject(m).optString("city");
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /** Sets the weather city (blank = automatic). Looks the name up online; the callback gets the city found or null. */
+    void setWeatherCity(final String name, final java.util.function.Consumer<String> done) {
+        WX_IO.execute(() -> {
+            String found = "";
+            boolean ok = true;
+            try {
+                String q = name == null ? "" : name.trim();
+                if (q.isEmpty()) {
+                    prefs.edit().remove(KEY_WX_MANUAL).remove(KEY_WX).apply();
+                } else {
+                    JSONObject g = new JSONObject(http("https://geocoding-api.open-meteo.com/v1/search?count=1&name="
+                            + java.net.URLEncoder.encode(q, "UTF-8")));
+                    JSONObject r = g.getJSONArray("results").getJSONObject(0);
+                    JSONObject m = new JSONObject();
+                    m.put("lat", r.getDouble("latitude"));
+                    m.put("lon", r.getDouble("longitude"));
+                    found = r.optString("name", q);
+                    m.put("city", found);
+                    prefs.edit().putString(KEY_WX_MANUAL, m.toString()).remove(KEY_WX).apply();
+                }
+            } catch (Exception e) {
+                ok = false;
+            }
+            final boolean good = ok;
+            final String city = found;
+            wxTried = 0;
+            post(() -> {
+                if (good) maybeFetchWeather();
+                if (done != null) done.accept(good ? city : null);
+            });
+        });
+    }
+
     private void maybeFetchWeather() {
         long now = System.currentTimeMillis();
         if (wxFetching || now - wxTried < 30 * 60_000L) return;
@@ -824,13 +944,13 @@ public class WidgetPanel extends LinearLayout {
             try {
                 double lat = Double.NaN, lon = Double.NaN;
                 String city = "";
-                JSONObject old = readWx();
-                if (old != null) {
-                    lat = old.optDouble("lat");
-                    lon = old.optDouble("lon");
-                    city = old.optString("city");
-                }
-                if (Double.isNaN(lat) || Double.isNaN(lon)) {
+                String manual = prefs.getString(KEY_WX_MANUAL, null);
+                if (manual != null) {
+                    JSONObject m = new JSONObject(manual);
+                    lat = m.optDouble("lat");
+                    lon = m.optDouble("lon");
+                    city = m.optString("city");
+                } else {
                     Location loc = lastKnown(app);
                     if (loc != null) {
                         lat = loc.getLatitude();
@@ -844,7 +964,7 @@ public class WidgetPanel extends LinearLayout {
                 }
                 if (!Double.isNaN(lat) && !Double.isNaN(lon)) {
                     JSONObject w = new JSONObject(http("https://api.open-meteo.com/v1/forecast?latitude=" + lat
-                            + "&longitude=" + lon + "&current=temperature_2m,weather_code"
+                            + "&longitude=" + lon + "&current=temperature_2m,weather_code,is_day"
                             + "&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1"));
                     JSONObject cur = w.getJSONObject("current");
                     JSONObject daily = w.getJSONObject("daily");
@@ -854,6 +974,7 @@ public class WidgetPanel extends LinearLayout {
                     out.put("city", city);
                     out.put("temp", cur.getDouble("temperature_2m"));
                     out.put("code", cur.getInt("weather_code"));
+                    out.put("day", cur.optInt("is_day", dayByClock() ? 1 : 0) == 1);
                     out.put("hi", daily.getJSONArray("temperature_2m_max").getDouble(0));
                     out.put("lo", daily.getJSONArray("temperature_2m_min").getDouble(0));
                     prefs.edit().putString(KEY_WX, out.toString()).apply();

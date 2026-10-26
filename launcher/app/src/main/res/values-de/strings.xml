@@ -80,6 +80,9 @@
     <string name="fx_drift">Drift</string>
     <string name="fx_shimmer">Shimmer</string>
     <string name="fx_rainbow">Rainbow</string>
+    <string name="fx_flicker">Flicker</string>
+    <string name="fx_wave">Wave</string>
+    <string name="fx_aurora">Aurora</string>
     <string name="depth_front">Depth foreground (PNG)</string>
     <string name="depth_remove">Remove depth foreground</string>
     <string name="wallpaper_tab">Hintergrund</string>

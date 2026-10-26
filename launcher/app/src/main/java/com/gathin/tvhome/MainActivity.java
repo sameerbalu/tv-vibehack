@@ -142,6 +142,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private final float[] hsvTmp = new float[3];
     private boolean fxGlowOn = true;        // Settings > Glow & effects
     private int fxStyle = 1;                // 0 steady, 1 breathing, 2 heartbeat, 3 drift, 4 shimmer, 5 rainbow
+    private int fxColor = 0;                // 0 = follow the app, else a fixed colour from FX_COLORS
+    private int fxPos = 1;                  // where the glow sits: left, dock, centre, right
+    private int fxParticles = 0;            // 0 off, then stars, snow, fireflies, rain, bubbles, embers
+    private boolean widgetsDepth;           // widgets sit behind the depth PNG
+    private ParticlesView particles;
+    private DepthOverlayView depthWidgets;
     private int fxLevel = 1;                // 0 soft, 1 normal, 2 strong
     private float ambientBaseRadius;
     // Spotify: album colour while a song plays (0 = nothing playing)
@@ -307,6 +313,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         glass = findViewById(R.id.glass);
         heroName = findViewById(R.id.heroName);
         ambient = findViewById(R.id.ambient);
+        particles = findViewById(R.id.particles);
+        depthWidgets = findViewById(R.id.depthWidgets);
         ambientGlow = new GradientDrawable();
         ambientGlow.setGradientType(GradientDrawable.RADIAL_GRADIENT);
         ambientGlow.setGradientCenter(0.32f, 0.42f);
@@ -477,8 +485,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         heroName.setTranslationX(0f);
         heroName.setAlpha(0f);
         ambient.animate().cancel();
+        particles.animate().cancel();
         if (ambientAnim != null) ambientAnim.cancel();
         ambient.setAlpha(0f);
+        particles.setAlpha(0f);
         // Start in the dock state; focusing a tile in the app list switches to the blurred state again.
         // (If we left from the full app list, its look stays exactly as it was: no flash of the dock state.)
         arranging = false;
@@ -488,6 +498,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         allAppsScrim.animate().cancel();
         wallpaperFront.animate().cancel();
         wallpaperFrontTop.animate().cancel();
+        depthWidgets.animate().cancel();
         header.animate().cancel();
         allAppsMode = keepAll;
         overlayApplied = keepAll;
@@ -497,6 +508,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         allAppsScrim.setAlpha(keepAll ? 1f : 0f);
         wallpaperFront.setAlpha(keepAll ? 0f : 1f);
         wallpaperFrontTop.setAlpha(keepAll ? 0f : 1f);
+        depthWidgets.setAlpha(keepAll ? 0f : 1f);
         header.setAlpha(keepAll ? 0f : 1f);
         header.setVisibility(keepAll ? View.INVISIBLE : View.VISIBLE);
         grid.animate().cancel();
@@ -548,6 +560,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         fxGlowOn = fx.getBoolean("fx_glow", true);
         fxStyle = Math.max(0, Math.min(STYLE_NAMES.length - 1, fx.getInt("fx_style", 1)));
         fxLevel = Math.max(0, Math.min(2, fx.getInt("fx_level", 1)));
+        fxColor = Math.max(0, Math.min(FX_COLORS.length - 1, fx.getInt("fx_color", 0)));
+        fxPos = Math.max(0, Math.min(FX_POS.length - 1, fx.getInt("fx_pos", 1)));
+        fxParticles = Math.max(0, Math.min(ParticlesView.COUNT - 1, fx.getInt("fx_particles", 0)));
+        widgetsDepth = fx.getBoolean("widgets_depth", false);
+        particles.setMode(fxParticles);
         syncPulse();
 
         // Return to the app we left from, or the same slot if that app is gone. Always refocus: after
@@ -706,6 +723,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             allAppsScrim.animate().alpha(overlay ? 1f : 0f).setDuration(350).start();
             wallpaperFront.animate().alpha(overlay ? 0f : 1f).setDuration(350).start();
             wallpaperFrontTop.animate().alpha(overlay ? 0f : 1f).setDuration(350).start();
+            depthWidgets.animate().alpha(overlay ? 0f : 1f).setDuration(350).start();
             setHeaderShown(!overlay);
         }
         if (allUiChanged) setAllUiShown(allUi);
@@ -815,6 +833,24 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         widgetsLeft.setMaxCards(fit);
         widgetsLeft.setY(bottom - widgetsLeft.contentHeight());
         positionLyrics(top, bottom);
+        updateDepthWidgets();
+    }
+
+    /** Draws the depth PNG over the widget columns (when switched on), so the widgets sit behind it. */
+    private void updateDepthWidgets() {
+        if (depthWidgets == null || widgets == null) return;
+        boolean on = widgetsDepth && depthWidgets.hasBitmap();
+        depthWidgets.setVisibility(on ? View.VISIBLE : View.GONE);
+        if (!on) return;
+        java.util.List<Rect> list = new java.util.ArrayList<>();
+        for (WidgetPanel panel : new WidgetPanel[]{widgets, widgetsLeft}) {
+            int h = panel.contentHeight();
+            if (h <= 0 || panel.getWidth() <= 0) continue;
+            int left = (int) panel.getX();
+            int top = (int) panel.getY();
+            list.add(new Rect(left, top, left + panel.getWidth(), top + h));
+        }
+        depthWidgets.setRects(list);
     }
 
     /**
@@ -1052,6 +1088,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             if (ambientAnim != null) ambientAnim.cancel();
             applyAmbientColor(ambientFor(position));
             ambient.animate().alpha(1f).setDuration(600).start();
+            particles.animate().alpha(1f).setDuration(900).start();
             heroShown = true;
         } else {
             animateAmbient(ambientFor(position), 600);   // cross-fade to the next app's colour
@@ -1060,6 +1097,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
 
     /** While a Spotify song plays the glow follows the album colour; otherwise it follows the focused app. */
     private int ambientFor(int position) {
+        if (fxColor > 0) return FX_COLORS[fxColor];
         return musicColor != 0 ? musicColor : adapter.ambientColorAt(position);
     }
 
@@ -1080,9 +1118,17 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     }
 
     /** Soft radial glow behind the dock, darker than the app's own colour so it stays easy on the eyes. */
-    private static final long[] STYLE_MS = {0, 4800, 1500, 9000, 7000, 24000};
+    private static final long[] STYLE_MS = {0, 4800, 1500, 9000, 7000, 24000, 3200, 8000, 30000};
+    private static final float[] FX_POS = {0.12f, 0.32f, 0.5f, 0.78f};
+    private static final String[] FX_POS_NAMES = {"Left", "Dock", "Centre", "Right"};
+    private static final int[] FX_COLORS = {0, 0xFFEF4444, 0xFFF97316, 0xFFFBBF24, 0xFF22C55E, 0xFF06B6D4, 0xFF3B82F6,
+            0xFFA855F7, 0xFFEC4899, 0xFFFFFFFF};
+    private static final String[] FX_COLOR_NAMES = {"Auto (app colour)", "Red", "Orange", "Gold", "Green", "Cyan", "Blue",
+            "Purple", "Pink", "White"};
+    private static final String[] FX_PARTICLE_NAMES = {"Off", "Stars", "Snow", "Fireflies", "Rain", "Bubbles", "Embers"};
     private static final int[] STYLE_NAMES = {R.string.fx_steady, R.string.fx_breathing, R.string.fx_heartbeat,
-            R.string.fx_drift, R.string.fx_shimmer, R.string.fx_rainbow};
+            R.string.fx_drift, R.string.fx_shimmer, R.string.fx_rainbow, R.string.fx_flicker, R.string.fx_wave,
+            R.string.fx_aurora};
 
     private static float bump(float t, float center, float width) {
         float x = (t - center) / width;
@@ -1101,7 +1147,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         boolean music = musicColor != 0;
         float k = 1f;            // brightness
         float swing = 1f;        // size
-        float cx = 0.32f;        // horizontal centre
+        float basePos = FX_POS[fxPos];
+        float cx = basePos;      // horizontal centre
         int shown = color;
         if (ambientPulse != null) {
             float t = pulseT;
@@ -1119,7 +1166,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
                     break;
                 }
                 case 3:          // drift: the glow sways slowly from side to side
-                    cx = 0.32f + 0.16f * (float) Math.sin(2 * Math.PI * t);
+                    cx = basePos + 0.16f * (float) Math.sin(2 * Math.PI * t);
                     break;
                 case 4:          // shimmer: the colour wavers a little either way
                     shown = shiftHue(color, 30f * (float) Math.sin(2 * Math.PI * t));
@@ -1128,6 +1175,27 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
                 case 5:          // rainbow: the colour slowly goes all the way round
                     shown = shiftHue(color, 360f * t);
                     break;
+                case 6: {        // flicker: like firelight, uneven and warm
+                    double a = 2 * Math.PI * t;
+                    float f = (float) (0.5 * Math.sin(3 * a) + 0.3 * Math.sin(7 * a + 1) + 0.2 * Math.sin(11 * a + 2));
+                    k = 0.9f + 0.22f * f;
+                    swing = 0.97f + 0.05f * f;
+                    break;
+                }
+                case 7: {        // wave: the glow rolls from side to side and swells
+                    double a = 2 * Math.PI * t;
+                    cx = basePos + 0.2f * (float) Math.sin(a);
+                    swing = 0.96f + 0.1f * (float) Math.sin(2 * a);
+                    k = 1f + 0.08f * (float) Math.sin(2 * a + 1);
+                    break;
+                }
+                case 8: {        // aurora: colour and place drift together like northern lights
+                    double a = 2 * Math.PI * t;
+                    shown = shiftHue(color, 70f * (float) Math.sin(a));
+                    cx = basePos + 0.22f * (float) Math.sin(2 * a);
+                    swing = 1.02f + 0.08f * (float) Math.sin(3 * a);
+                    break;
+                }
                 default:
                     break;
             }
@@ -1137,6 +1205,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         int a1 = Math.min(255, (int) (0x50 * k));
         int a2 = Math.min(255, (int) (0x20 * k));
         ambientGlow.setColors(new int[]{(a1 << 24) | c, (a2 << 24) | c, c});
+        if (particles != null) particles.setTint(shown);
         ambientGlow.setGradientCenter(cx, 0.42f);
         if (ambientBaseRadius > 0) ambientGlow.setGradientRadius(ambientBaseRadius * swing);
         ambient.invalidate();
@@ -1175,7 +1244,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         pulseT = 0f;
         if (ambientBaseRadius > 0) {
             ambientGlow.setGradientRadius(ambientBaseRadius);
-            ambientGlow.setGradientCenter(0.32f, 0.42f);
+            ambientGlow.setGradientCenter(FX_POS[fxPos], 0.42f);
         }
     }
 
@@ -1218,6 +1287,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         if (!heroShown) return;
         heroShown = false;
         ambient.animate().alpha(0f).setDuration(300).start();
+        particles.animate().alpha(0f).setDuration(300).start();
     }
 
     private void hideGlass() {
@@ -1502,6 +1572,32 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         LinearLayout rows = panel.findViewById(R.id.rows);
         int minWidth = (int) (320 * density);
         final PopupWindow popup = newDropdown(panel, minWidth);
+        final View depthRow = getLayoutInflater().inflate(R.layout.item_input, rows, false);
+        setMenuIcon(depthRow, MenuIcons.DEPTH);
+        ((TextView) depthRow.findViewById(R.id.title)).setText("Behind wallpaper (depth)");
+        updateWidgetRow(depthRow, widgetsDepth);
+        depthRow.setOnClickListener(v -> {
+            if (!WallpaperStore.hasFront(this)) {
+                Toast.makeText(this, "Add a depth PNG first: Settings > Wallpaper", Toast.LENGTH_LONG).show();
+                return;
+            }
+            widgetsDepth = !widgetsDepth;
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean("widgets_depth", widgetsDepth).apply();
+            updateWidgetRow(depthRow, widgetsDepth);
+            updateDepthWidgets();
+        });
+        rows.addView(depthRow);
+        final View cityRow = getLayoutInflater().inflate(R.layout.item_input, rows, false);
+        setMenuIcon(cityRow, MenuIcons.WIDGETS);
+        ((TextView) cityRow.findViewById(R.id.title)).setText("Weather city");
+        final String curCity = widgets.weatherCity();
+        ((TextView) cityRow.findViewById(R.id.status)).setText(curCity.isEmpty() ? "Auto" : curCity);
+        cityRow.findViewById(R.id.dot).setVisibility(curCity.isEmpty() ? View.GONE : View.VISIBLE);
+        cityRow.setOnClickListener(v -> {
+            popup.dismiss();
+            askWeatherCity(curCity);
+        });
+        rows.addView(cityRow);
         for (final String id : WidgetPanel.IDS) {
             final View row = getLayoutInflater().inflate(R.layout.item_input, rows, false);
             setMenuIcon(row, MenuIcons.WIDGETS);
@@ -1520,6 +1616,26 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         }
         fitScroll(panel);
         showDropdown(popup, panel, anchor, minWidth, true);
+    }
+
+    /** Asks for a city name for the weather widget (empty = automatic). */
+    private void askWeatherCity(String current) {
+        final android.widget.EditText input = new android.widget.EditText(this);
+        input.setSingleLine(true);
+        input.setText(current);
+        input.setSelection(input.getText().length());
+        input.setHint("City, e.g. Mumbai (empty = automatic)");
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("Weather city")
+                .setView(input)
+                .setPositiveButton("Save", (d, w) -> widgets.setWeatherCity(input.getText().toString(), city -> {
+                    Toast.makeText(this, city == null ? "City not found"
+                            : city.isEmpty() ? "Weather location: automatic" : "Weather: " + city, Toast.LENGTH_SHORT).show();
+                    widgets.refresh();
+                    if (widgetsLeft != null) widgetsLeft.refresh();
+                }))
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     /** Glow & effects: breathing on/off and how strong the background glow is. */
@@ -1549,6 +1665,37 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         updateStrengthRow(strength);
         rows.addView(strength);
 
+        final View colorRow = getLayoutInflater().inflate(R.layout.item_input, rows, false);
+        setMenuIcon(colorRow, MenuIcons.BRUSH);
+        ((TextView) colorRow.findViewById(R.id.title)).setText("Glow colour");
+        rows.addView(colorRow);
+        final View posRow = getLayoutInflater().inflate(R.layout.item_input, rows, false);
+        setMenuIcon(posRow, MenuIcons.LEVELS);
+        ((TextView) posRow.findViewById(R.id.title)).setText("Glow position");
+        rows.addView(posRow);
+        final View partRow = getLayoutInflater().inflate(R.layout.item_input, rows, false);
+        setMenuIcon(partRow, MenuIcons.GLOW);
+        ((TextView) partRow.findViewById(R.id.title)).setText("Particles");
+        rows.addView(partRow);
+        updateFxRows(colorRow, posRow, partRow);
+        colorRow.setOnClickListener(v -> {
+            fxColor = (fxColor + 1) % FX_COLORS.length;
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putInt("fx_color", fxColor).apply();
+            updateFxRows(colorRow, posRow, partRow);
+            if (heroShown && lastFocused >= 0) animateAmbient(ambientFor(lastFocused), 400);
+        });
+        posRow.setOnClickListener(v -> {
+            fxPos = (fxPos + 1) % FX_POS.length;
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putInt("fx_pos", fxPos).apply();
+            updateFxRows(colorRow, posRow, partRow);
+            syncPulse();
+        });
+        partRow.setOnClickListener(v -> {
+            fxParticles = (fxParticles + 1) % ParticlesView.COUNT;
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putInt("fx_particles", fxParticles).apply();
+            particles.setMode(fxParticles);
+            updateFxRows(colorRow, posRow, partRow);
+        });
         glowRow.setOnClickListener(v -> {
             fxGlowOn = !fxGlowOn;
             getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean("fx_glow", fxGlowOn).apply();
@@ -1571,6 +1718,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
 
         fitScroll(panel);
         showDropdown(popup, panel, anchor, minWidth, true);
+    }
+
+    private void updateFxRows(View colorRow, View posRow, View partRow) {
+        ((TextView) colorRow.findViewById(R.id.status)).setText(FX_COLOR_NAMES[fxColor]);
+        colorRow.findViewById(R.id.dot).setVisibility(View.VISIBLE);
+        ((TextView) posRow.findViewById(R.id.status)).setText(FX_POS_NAMES[fxPos]);
+        posRow.findViewById(R.id.dot).setVisibility(View.VISIBLE);
+        ((TextView) partRow.findViewById(R.id.status)).setText(FX_PARTICLE_NAMES[fxParticles]);
+        partRow.findViewById(R.id.dot).setVisibility(fxParticles == 0 ? View.GONE : View.VISIBLE);
     }
 
     private void updateStyleRow(View row) {
@@ -1731,6 +1887,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         wallpaperFront.setVisibility(View.GONE);
         wallpaperFrontTop.setImageDrawable(null);
         wallpaperFrontTop.setVisibility(View.GONE);
+        depthWidgets.setBitmap(null);
+        updateDepthWidgets();
     }
 
     /** Shows the transparent depth PNG over the glow (and over the picture), under the apps. */
@@ -1761,7 +1919,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             wallpaperFrontTop.setImageBitmap(bitmap);
             wallpaperFrontTop.setColorFilter(0x73000000, android.graphics.PorterDuff.Mode.SRC_ATOP);
             wallpaperFrontTop.setVisibility(View.VISIBLE);
+            depthWidgets.setBitmap(bitmap);
             root.post(this::updateFrontTopClip);
+            root.post(this::updateDepthWidgets);
         } catch (Exception | OutOfMemoryError e) {
             wallpaperFront.setVisibility(View.GONE);
             Toast.makeText(this, R.string.wallpaper_failed, Toast.LENGTH_SHORT).show();
