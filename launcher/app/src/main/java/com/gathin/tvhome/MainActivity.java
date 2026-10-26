@@ -271,7 +271,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             widgets.refresh();
             positionWidgets();
             // Posters older than 48 hours drop out (only while the row is out of sight, so nothing moves under the cursor).
-            if (!allAppsMode && !arranging && continueAdapter.refresh()) layoutContinue();
+            if (!allAppsMode && !arranging) continueAdapter.refreshAsync(() -> {
+                if (!allAppsMode && !arranging) layoutContinue();
+            });
             handler.postDelayed(this, MINUTE_MS);
         }
     };
@@ -536,9 +538,16 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             grid.clearAnimation();
             for (int i = 0; i < grid.getChildCount(); i++) grid.getChildAt(i).clearAnimation();
         } else {
-            if (adapter.reloadIfChanged()) grid.scheduleLayoutAnimation();
+            adapter.reloadIfChangedAsync(() -> {
+                if (paused || isFinishing()) return;
+                grid.scheduleLayoutAnimation();
+                grid.post(restoreFocus);
+            });
         }
-        continueAdapter.refresh();
+        continueAdapter.refreshAsync(() -> {
+            layoutContinue();
+            grid.invalidateItemDecorations();
+        });
         layoutContinue();
         grid.invalidateItemDecorations();
         updateGreeting();
@@ -554,7 +563,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         widgetsLeft.animate().cancel();
         widgetsLeft.setAlpha(keepAll ? 0f : 1f);
         widgetsLeft.setVisibility(keepAll ? View.INVISIBLE : View.VISIBLE);
-        widgets.refresh();
+        handler.removeCallbacks(lateResume);
+        handler.postDelayed(lateResume, 450);       // the heavier refreshes wait until the home screen is on screen
         positionWidgets();
         applyLyricsVisibility();
         IntentFilter bt = new IntentFilter();
@@ -568,7 +578,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             btPermissionAsked = true;
             requestPermissions(new String[]{Manifest.permission.BLUETOOTH_CONNECT}, REQUEST_BT);
         }
-        startMusicWatch();
         SharedPreferences fx = getSharedPreferences(PREFS, MODE_PRIVATE);
         fxGlowOn = fx.getBoolean("fx_glow", true);
         fxStyle = Math.max(0, Math.min(STYLE_NAMES.length - 1, fx.getInt("fx_style", 1)));
@@ -578,13 +587,21 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         fxParticles = Math.max(0, Math.min(ParticlesView.COUNT - 1, fx.getInt("fx_particles", 0)));
         widgetsDepth = Math.max(0, Math.min(3, fx.getInt("widgets_depth_side", 0)));
         particles.setMode(fxParticles);
-        syncPulse();
+        if (Perf.paused) pauseBackground(false);
+        else syncPulse();
 
         // Return to the app we left from, or the same slot if that app is gone. Always refocus: after
         // reload() the view that holds focus may no longer show the app it had.
         grid.post(restoreFocus);
         handler.postDelayed(() -> restorePending = false, 1500);   // never leave focus handling blocked
     }
+
+    /** Work that is not needed for the first frame after Home: widget data and the media session watch. */
+    private final Runnable lateResume = () -> {
+        if (paused || isFinishing()) return;
+        widgets.refresh();
+        startMusicWatch();
+    };
 
     private String returnKey;
     private int returnSlot;
@@ -619,6 +636,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         super.onPause();
         handler.removeCallbacks(restoreFocus);
         handler.removeCallbacks(minuteTick);
+        handler.removeCallbacks(lateResume);
         stopClockLoop();
         handler.removeCallbacks(idleSaver);
         if (controlCenter != null) controlCenter.dismissNow();
@@ -639,6 +657,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             }
         }
         paused = true;
+        pauseBackground(true);
         try {
             unregisterReceiver(btReceiver);
         } catch (IllegalArgumentException ignored) {
@@ -692,59 +711,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     }
 
     @Override
-    protected void onStart() {
-        super.onStart();
-        handler.removeCallbacks(releaseMemory);
-    }
-
-    @Override
-    protected void onStop() {
-        super.onStop();
-        // Another app is in front: hand the RAM back to it (pictures come back by themselves on Home).
-        handler.removeCallbacks(releaseMemory);
-        // nothing is released here: Home must be instant
-    }
-
-    @Override
-    public void onTrimMemory(int level) {
-        super.onTrimMemory(level);
-        if (continueAdapter != null && level >= TRIM_MEMORY_RUNNING_LOW) continueAdapter.trimMemory();
-    }
-
-    private final Runnable releaseMemory = () -> {
-        if (!paused) return;
-        long[] m = TvTools.memory(this);
-        if (m[1] < m[0] / 5) releaseHeavyBitmaps();   // only when less than 20% RAM is free: otherwise Home stays instant
-    };
-
-    /** Drops every big bitmap (wallpaper, blurs, depth PNG, dock PNG, poster caches). onResume loads them again. */
-    private void releaseHeavyBitmaps() {
-        if (wallpaperView == null || !paused) return;
-        wallpaperView.setImageDrawable(null);
-        wallpaperView.setVisibility(View.GONE);
-        wallpaperBlurView.setImageDrawable(null);
-        wallpaperBlurView.setVisibility(View.GONE);
-        wallpaperFront.setImageDrawable(null);
-        wallpaperFront.setVisibility(View.GONE);
-        wallpaperFrontTop.setImageDrawable(null);
-        wallpaperFrontTop.setVisibility(View.GONE);
-        if (depthWidgets != null) depthWidgets.setBitmap(null);
-        if (dockPng != null) dockPng.setBitmap(null);
-        if (menuVeilImg != null) menuVeilImg.setImageDrawable(null);
-        menuBackdrop = null;
-        veilBackdrop = null;
-        if (dockDecoration != null) dockDecoration.setBackdrop(null);
-        if (appsPanel != null) appsPanel.setBackdrop(null);
-        if (allAppsPanel != null) allAppsPanel.setBackdrop(null);
-        if (continueAdapter != null) continueAdapter.trimMemory();
-        System.gc();
-    }
-
-    @Override
     protected void onDestroy() {
         super.onDestroy();
         handler.removeCallbacks(clipRunnable);
-        handler.removeCallbacks(releaseMemory);
     }
 
     @Override
@@ -2104,6 +2073,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     }
 
     private void clearWallpaperViews() {
+        wallGen++;
         wallpaperView.setImageDrawable(null);
         wallpaperView.setVisibility(View.GONE);
         wallpaperBlurView.setImageDrawable(null);
@@ -2130,6 +2100,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
 
     private void removeFront() {
         WallpaperStore.deleteFront(this);
+        frontGen++;
         wallpaperFront.setImageDrawable(null);
         wallpaperFront.setVisibility(View.GONE);
         wallpaperFrontTop.setImageDrawable(null);
@@ -2138,41 +2109,63 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         updateDepthWidgets();
     }
 
-    /** Shows the transparent depth PNG over the glow (and over the picture), under the apps. */
-    private void applyFront() {
-        try {
-            Uri uri = WallpaperStore.frontUri(this);
-            BitmapFactory.Options bounds = new BitmapFactory.Options();
-            bounds.inJustDecodeBounds = true;
-            try (java.io.InputStream in = getContentResolver().openInputStream(uri)) {
-                BitmapFactory.decodeStream(in, null, bounds);
-            }
-            int tw = Math.max(1, getResources().getDisplayMetrics().widthPixels);
-            int th = Math.max(1, getResources().getDisplayMetrics().heightPixels);
-            int sample = 1;
-            while (bounds.outWidth / sample > tw || bounds.outHeight / sample > th) sample *= 2;
-            BitmapFactory.Options options = new BitmapFactory.Options();
-            options.inSampleSize = sample;                       // ARGB_8888: keeps the transparency
-            Bitmap bitmap;
-            try (java.io.InputStream in = getContentResolver().openInputStream(uri)) {
-                bitmap = BitmapFactory.decodeStream(in, null, options);
-            }
-            if (bitmap == null) throw new IllegalArgumentException("Unable to decode image");
-            wallpaperFront.setImageBitmap(bitmap);
-            // The picture behind it is dimmed a bit; match that so the cut-out does not look pasted on.
-            wallpaperFront.setColorFilter(0x73000000, android.graphics.PorterDuff.Mode.SRC_ATOP);
-            wallpaperFront.setVisibility(View.VISIBLE);
-            // Second copy over the clock and date: they end up behind the character, like on a phone lock screen.
-            wallpaperFrontTop.setImageBitmap(bitmap);
-            wallpaperFrontTop.setColorFilter(0x73000000, android.graphics.PorterDuff.Mode.SRC_ATOP);
-            wallpaperFrontTop.setVisibility(View.VISIBLE);
-            depthWidgets.setBitmap(bitmap);
-            root.post(this::updateFrontTopClip);
-            root.post(this::updateDepthWidgets);
-        } catch (Exception | OutOfMemoryError e) {
-            wallpaperFront.setVisibility(View.GONE);
-            Toast.makeText(this, R.string.wallpaper_failed, Toast.LENGTH_SHORT).show();
+    private static final java.util.concurrent.ExecutorService IMG = java.util.concurrent.Executors.newSingleThreadExecutor();
+    private int frontGen, wallGen;
+    private boolean dockLoading, frontLoadingNow;
+
+    /** Decodes an image no bigger than the screen (times scale), off the main thread's work queue. */
+    private Bitmap decodeScaled(Uri uri, String path, int maxW, int maxH, Bitmap.Config config) throws java.io.IOException {
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        if (path != null) BitmapFactory.decodeFile(path, bounds);
+        else try (java.io.InputStream in = getContentResolver().openInputStream(uri)) {
+            BitmapFactory.decodeStream(in, null, bounds);
         }
+        int sample = 1;
+        while (bounds.outWidth / sample > maxW || bounds.outHeight / sample > maxH) sample *= 2;
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inSampleSize = sample;
+        if (config != null) options.inPreferredConfig = config;
+        if (path != null) return BitmapFactory.decodeFile(path, options);
+        try (java.io.InputStream in = getContentResolver().openInputStream(uri)) {
+            return BitmapFactory.decodeStream(in, null, options);
+        }
+    }
+
+    /** Shows the transparent depth PNG over the glow (and over the picture), under the apps. Decoded in the background. */
+    private void applyFront() {
+        final int gen = ++frontGen;
+        final Uri uri = WallpaperStore.frontUri(this);
+        final int tw = Math.max(1, getResources().getDisplayMetrics().widthPixels);
+        final int th = Math.max(1, getResources().getDisplayMetrics().heightPixels);
+        IMG.execute(() -> {
+            Bitmap bmp = null;
+            try {
+                bmp = decodeScaled(uri, null, tw, th, null);       // ARGB_8888: keeps the transparency
+            } catch (Exception | OutOfMemoryError ignored) {
+            }
+            final Bitmap bitmap = bmp;
+            runOnUiThread(() -> {
+                frontLoadingNow = false;
+                if (isDestroyed() || gen != frontGen) return;
+                if (bitmap == null) {
+                    wallpaperFront.setVisibility(View.GONE);
+                    Toast.makeText(this, R.string.wallpaper_failed, Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                wallpaperFront.setImageBitmap(bitmap);
+                // The picture behind it is dimmed a bit; match that so the cut-out does not look pasted on.
+                wallpaperFront.setColorFilter(0x73000000, android.graphics.PorterDuff.Mode.SRC_ATOP);
+                wallpaperFront.setVisibility(View.VISIBLE);
+                // Second copy over the clock and date: they end up behind the character, like on a phone lock screen.
+                wallpaperFrontTop.setImageBitmap(bitmap);
+                wallpaperFrontTop.setColorFilter(0x73000000, android.graphics.PorterDuff.Mode.SRC_ATOP);
+                wallpaperFrontTop.setVisibility(View.VISIBLE);
+                depthWidgets.setBitmap(bitmap);
+                root.post(this::updateFrontTopClip);
+                root.post(this::updateDepthWidgets);
+            });
+        });
     }
 
     private void updateFrontTopClip() {
@@ -2183,23 +2176,26 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         wallpaperFrontTop.setClipBounds(r);
     }
 
-    /** Loads the saved PNG for the dock (kept in the app's own storage, so it survives a restart). */
+    /** Loads the saved PNG for the dock (kept in the app's own storage, so it survives a restart). Decoded in the background. */
     private void loadDockPng() {
-        if (dockPng == null || dockPng.hasBitmap() || !WallpaperStore.hasDock(this)) return;
-        try {
-            String path = WallpaperStore.dockPath(this);
-            BitmapFactory.Options bounds = new BitmapFactory.Options();
-            bounds.inJustDecodeBounds = true;
-            BitmapFactory.decodeFile(path, bounds);
-            int limit = Math.max(1, getResources().getDisplayMetrics().widthPixels);
-            int sample = 1;
-            while (bounds.outWidth / sample > limit || bounds.outHeight / sample > limit) sample *= 2;
-            BitmapFactory.Options options = new BitmapFactory.Options();
-            options.inSampleSize = sample;                       // ARGB_8888: keeps the transparency
-            Bitmap bitmap = BitmapFactory.decodeFile(path, options);
-            if (bitmap != null) dockPng.setBitmap(bitmap);
-        } catch (Exception | OutOfMemoryError ignored) {
-        }
+        if (dockPng == null || dockPng.hasBitmap() || dockLoading || !WallpaperStore.hasDock(this)) return;
+        dockLoading = true;
+        final String path = WallpaperStore.dockPath(this);
+        final int limit = Math.max(1, getResources().getDisplayMetrics().widthPixels) * 2;
+        IMG.execute(() -> {
+            Bitmap bmp = null;
+            try {
+                bmp = decodeScaled(null, path, limit, limit, null);
+            } catch (Exception | OutOfMemoryError ignored) {
+            }
+            final Bitmap bitmap = bmp;
+            runOnUiThread(() -> {
+                dockLoading = false;
+                if (isDestroyed()) return;
+                if (bitmap != null && !dockPng.hasBitmap()) dockPng.setBitmap(bitmap);
+                if (grid != null) grid.invalidate();
+            });
+        });
     }
 
     private void setDockPngOn(boolean on) {
@@ -2227,66 +2223,85 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     }
 
     private void restoreFront() {
-        if (!WallpaperStore.hasFront(this) || wallpaperFront.getVisibility() == View.VISIBLE) return;
+        if (!WallpaperStore.hasFront(this) || wallpaperFront.getVisibility() == View.VISIBLE || frontLoadingNow) return;
+        frontLoadingNow = true;
         applyFront();
     }
 
     private void restoreWallpaper() {
         loadDockPng();
         restoreFront();
-        if (!WallpaperStore.exists(this)) {
-            // Wallpaper chosen in an older version: move it into the app once, if its link still opens.
-            String legacy = getSharedPreferences(PREFS, MODE_PRIVATE).getString(WALLPAPER_URI, null);
-            if (legacy == null) return;
-            try {
-                WallpaperStore.copyFrom(this, Uri.parse(legacy));
-            } catch (Exception e) {
-                return;                       // keep the saved link so the next start can try again
+        if (wallpaperLoadingNow) return;
+        wallpaperLoadingNow = true;
+        final int gen = ++wallGen;
+        final boolean had = WallpaperStore.exists(this);
+        IMG.execute(() -> {
+            if (!had) {
+                // Wallpaper chosen in an older version: move it into the app once, if its link still opens.
+                String legacy = getSharedPreferences(PREFS, MODE_PRIVATE).getString(WALLPAPER_URI, null);
+                if (legacy == null) {
+                    runOnUiThread(() -> wallpaperLoadingNow = false);
+                    return;
+                }
+                try {
+                    WallpaperStore.copyFrom(this, Uri.parse(legacy));
+                } catch (Exception e) {
+                    runOnUiThread(() -> wallpaperLoadingNow = false);      // keep the saved link so the next start can try again
+                    return;
+                }
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(WALLPAPER_URI).apply();
             }
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(WALLPAPER_URI).apply();
-        }
-        applyWallpaper(WallpaperStore.uri(this));
+            decodeWallpaper(WallpaperStore.uri(this), gen);
+        });
     }
 
-    private void applyWallpaper(Uri uri) {
+    private boolean wallpaperLoadingNow;
+
+    /** Shows a new wallpaper; the decoding and the blurs run in the background. */
+    private void applyWallpaper(final Uri uri) {
+        final int gen = ++wallGen;
+        wallpaperLoadingNow = true;
+        IMG.execute(() -> decodeWallpaper(uri, gen));
+    }
+
+    /** Background part: decode, blur twice, then hand the finished bitmaps to the main thread. */
+    private void decodeWallpaper(Uri uri, final int gen) {
+        Bitmap bmp = null, blur = null, veil = null;
         try {
-            BitmapFactory.Options bounds = new BitmapFactory.Options();
-            bounds.inJustDecodeBounds = true;
-            try (java.io.InputStream in = getContentResolver().openInputStream(uri)) {
-                BitmapFactory.decodeStream(in, null, bounds);
+            bmp = decodeScaled(uri, null, Math.max(1, getResources().getDisplayMetrics().widthPixels) * 2,
+                    Math.max(1, getResources().getDisplayMetrics().heightPixels) * 2, Bitmap.Config.RGB_565);
+            if (bmp != null) {
+                blur = BlurUtil.blur(bmp, 192, 12);     // heavy, smooth blur like a frosted TV home
+                veil = BlurUtil.blur(bmp, 360, 4);      // a gentle blur for the menu veil
             }
-            int targetWidth = Math.max(1, getResources().getDisplayMetrics().widthPixels);
-            int targetHeight = Math.max(1, getResources().getDisplayMetrics().heightPixels);
-            int sample = 1;
-            while (bounds.outWidth / sample > targetWidth || bounds.outHeight / sample > targetHeight) sample *= 2;   // exactly screen size: 4K screen = 4K picture, never 8K
-            BitmapFactory.Options options = new BitmapFactory.Options();
-            options.inSampleSize = sample;
-            options.inPreferredConfig = Bitmap.Config.RGB_565;
-            Bitmap bitmap;
-            try (java.io.InputStream in = getContentResolver().openInputStream(uri)) {
-                bitmap = BitmapFactory.decodeStream(in, null, options);
+        } catch (Exception | OutOfMemoryError ignored) {
+        }
+        final Bitmap bitmap = bmp, blurred = blur, v = veil;
+        runOnUiThread(() -> {
+            wallpaperLoadingNow = false;
+            if (isDestroyed() || gen != wallGen) return;
+            if (bitmap == null || blurred == null) {
+                clearWallpaperViews();
+                Toast.makeText(this, R.string.wallpaper_failed, Toast.LENGTH_SHORT).show();
+                return;
             }
-            if (bitmap == null) throw new IllegalArgumentException("Unable to decode wallpaper");
+            boolean first = wallpaperView.getVisibility() != View.VISIBLE;
             wallpaperView.setImageBitmap(bitmap);
             wallpaperView.setVisibility(View.VISIBLE);
+            if (first) {                                  // fades in instead of popping on after the first frame
+                wallpaperView.setAlpha(0f);
+                wallpaperView.animate().alpha(1f).setDuration(220).start();
+            }
             // One blurred copy serves the full-screen blur (app list) and the frosted dock band.
-            Bitmap blurred = BlurUtil.blur(bitmap, 192, 12);   // heavy, smooth blur like a frosted TV home
             wallpaperBlurView.setImageBitmap(blurred);
             wallpaperBlurView.setVisibility(View.VISIBLE);
             menuBackdrop = blurred;
-            final Bitmap src = bitmap;                          // a gentle blur for the menu veil, made off the main thread
-            new Thread(() -> {
-                final Bitmap v = BlurUtil.blur(src, 360, 4);
-                runOnUiThread(() -> veilBackdrop = v);
-            }).start();
+            veilBackdrop = v;
             if (dockDecoration != null) dockDecoration.setBackdrop(blurred);
             if (appsPanel != null) appsPanel.setBackdrop(blurred);
             if (allAppsPanel != null) allAppsPanel.setBackdrop(blurred);
             if (grid != null) grid.invalidate();
-        } catch (Exception e) {
-            clearWallpaperViews();
-            Toast.makeText(this, R.string.wallpaper_failed, Toast.LENGTH_SHORT).show();
-        }
+        });
     }
 
     // ---- Continue watching (row above the apps in All apps) ---------------------------------------

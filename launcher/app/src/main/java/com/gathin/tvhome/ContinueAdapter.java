@@ -55,27 +55,8 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
     private final Host host;
     private final float d;
     private final List<NuvioHistory.Entry> entries = new ArrayList<>();
-    // Limited by memory used, not by number of pictures: a few big posters can no longer eat the TV's RAM.
-    private final android.util.LruCache<String, Bitmap> posters = new android.util.LruCache<String, Bitmap>(24 * 1024 * 1024) {
-        @Override
-        protected int sizeOf(String key, Bitmap value) {
-            return value.getAllocationByteCount();
-        }
-    };
-    private final android.util.LruCache<String, Bitmap> blurs = new android.util.LruCache<String, Bitmap>(4 * 1024 * 1024) {
-        @Override
-        protected int sizeOf(String key, Bitmap value) {
-            return value.getAllocationByteCount();
-        }
-    };
-
-    /** Forgets every cached picture; they are decoded again when needed. */
-    void trimMemory() {
-        posters.evictAll();
-        blurs.evictAll();
-        wallpaperBmp = null;
-        wallpaperStamp = 0L;
-    }
+    private final android.util.LruCache<String, Bitmap> posters = new android.util.LruCache<>(32);
+    private final android.util.LruCache<String, Bitmap> blurs = new android.util.LruCache<>(32);
     static final float POSTER_FOCUS_SCALE = 1.07f;
     private String signature = "";
     /** The wallpaper, used as the thumbnail when an app gives no real picture (VLC only offers its own icon). */
@@ -108,14 +89,34 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
 
     /** Reloads the list from disk. Only rebinds when something changed. Returns true when it did. */
     boolean refresh() {
-        List<NuvioHistory.Entry> fresh = NuvioHistory.load(ctx);
+        File wf = wallpaperFile();
+        return applyFresh(NuvioHistory.load(ctx), findNuvio(), wf != null ? wf.lastModified() : 0L);
+    }
+
+    private static final java.util.concurrent.ExecutorService IO = java.util.concurrent.Executors.newSingleThreadExecutor();
+    private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+
+    /** Same as refresh(), but the file reading happens off the main thread; changed runs on it when the list changed. */
+    void refreshAsync(final Runnable changed) {
+        IO.execute(() -> {
+            final List<NuvioHistory.Entry> fresh = NuvioHistory.load(ctx);
+            final String pkg = findNuvio();
+            File wf = wallpaperFile();
+            final long stamp = wf != null ? wf.lastModified() : 0L;
+            main.post(() -> {
+                if (applyFresh(fresh, pkg, stamp) && changed != null) changed.run();
+            });
+        });
+    }
+
+    private boolean applyFresh(List<NuvioHistory.Entry> fresh, String pkg, long wallpaperStampNow) {
         StringBuilder sig = new StringBuilder();
         for (NuvioHistory.Entry e : fresh) {
             sig.append(e.key).append('|').append(e.poster).append('|').append(e.position / 15000L)
                     .append('|').append(e.duration).append(';');
         }
-        nuvioPkg = findNuvio();
-        sig.append("w").append(wallpaperFile() != null ? wallpaperFile().lastModified() : 0L);
+        nuvioPkg = pkg;
+        sig.append("w").append(wallpaperStampNow);
         if (sig.toString().equals(signature)) return false;
         signature = sig.toString();
         entries.clear();
@@ -335,13 +336,14 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         if (apps == null) return false;
         AppAdapter.Entry ae = apps.entryFor(resolvePkg(e));
         if (ae == null) return false;
-        if (ae.packIcon == null && ae.banner != null) {
+        AppAdapter.TileArt art = apps.artFor(ae);
+        if (art.packIcon == null && art.banner != null) {
             h.posterBg.setImageDrawable(null);
             h.poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            h.poster.setImageDrawable(copyOf(ae.banner));
+            h.poster.setImageDrawable(copyOf(art.banner));
             return true;
         }
-        Drawable icon = copyOf(ae.packIcon != null ? ae.packIcon : ae.icon);
+        Drawable icon = copyOf(art.packIcon != null ? art.packIcon : art.icon);
         if (icon == null) return false;
         int color = apps.ambientOf(ae);
         h.posterBg.setScaleType(ImageView.ScaleType.FIT_XY);

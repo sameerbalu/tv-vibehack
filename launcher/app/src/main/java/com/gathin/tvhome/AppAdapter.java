@@ -12,10 +12,14 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Outline;
 import android.graphics.Rect;
+import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.provider.Settings;
+import android.os.Handler;
+import android.os.Looper;
+import android.util.LruCache;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -32,12 +36,21 @@ import androidx.recyclerview.widget.RecyclerView;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 /** App tiles. The first dockSize positions are pinned favourites, followed by alphabetical apps. */
 public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
+
+    private static final ExecutorService APP_LOADER = Executors.newSingleThreadExecutor(r -> {
+        Thread thread = new Thread(r, "tvhome-app-loader");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     interface TileListener {
         void onTileFocused(int position, View card);
@@ -65,19 +78,37 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         final ComponentName component;
         final String pkg;
         final String key;
-        final Drawable banner;
-        final Drawable icon;
-        /** Icon from the selected icon pack, or null when the pack has none for this app. */
-        Drawable packIcon;
         int ambient;
 
-        Entry(String label, ComponentName component, Drawable banner, Drawable icon) {
+        Entry(String label, ComponentName component) {
             this.label = label;
             this.component = component;
             this.pkg = component.getPackageName();
             this.key = component.flattenToShortString();
+        }
+    }
+
+    static final class TileArt {
+        final Drawable banner;
+        final Drawable icon;
+        final Drawable packIcon;
+
+        TileArt(Drawable banner, Drawable icon, Drawable packIcon) {
             this.banner = banner;
             this.icon = icon;
+            this.packIcon = packIcon;
+        }
+
+        int memoryBytes() {
+            return drawableBytes(banner, true) + drawableBytes(icon, false) + drawableBytes(packIcon, false);
+        }
+
+        private static int drawableBytes(Drawable drawable, boolean banner) {
+            if (drawable == null) return 0;
+            if (drawable instanceof BitmapDrawable) {
+                return Math.max(1, ((BitmapDrawable) drawable).getBitmap().getAllocationByteCount());
+            }
+            return banner ? 256 * 1024 : 64 * 1024;
         }
     }
 
@@ -96,6 +127,13 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
     private final Set<String> hidden;
     private final List<Entry> items = new ArrayList<>();
     private final Set<String> userHidden = new HashSet<>();
+    private final LruCache<String, TileArt> artCache = new LruCache<String, TileArt>(
+            Math.max(2 * 1024 * 1024, Math.min(16 * 1024 * 1024, (int) (Runtime.getRuntime().maxMemory() / 12)))) {
+        @Override
+        protected int sizeOf(String key, TileArt value) {
+            return value.memoryBytes();
+        }
+    };
     /** Saved order of all apps (component keys), or null while the default order is in use. */
     private List<String> order;
     private String iconPackPkg = "";
@@ -129,7 +167,10 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         setHasStableIds(true);
     }
 
-    private String lastSignature = "";
+    private volatile String lastSignature = "";
+    private volatile boolean hasLoadedEntries;
+    private final AtomicInteger reloadGeneration = new AtomicInteger();
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private String signatureOf(List<ResolveInfo> found) {
         StringBuilder sig = new StringBuilder();
@@ -149,48 +190,75 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
     boolean reloadIfChanged() {
         Intent probe = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
         String now = signatureOf(ctx.getPackageManager().queryIntentActivities(probe, 0));
-        if (now.equals(lastSignature) && !items.isEmpty()) return false;
+        if (now.equals(lastSignature) && hasLoadedEntries) return false;
         reload();
         return true;
     }
 
+    /** Checks installed apps and loads changed tiles away from the UI thread. */
+    void reloadIfChangedAsync(Runnable onChanged) {
+        final int generation = reloadGeneration.incrementAndGet();
+        APP_LOADER.execute(() -> {
+            PackageManager pm = ctx.getPackageManager();
+            Intent probe = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
+            List<ResolveInfo> found = pm.queryIntentActivities(probe, 0);
+            String signature = signatureOf(found);
+            if (signature.equals(lastSignature) && hasLoadedEntries) return;
+            List<Entry> fresh = buildEntries(found);
+            mainHandler.post(() -> {
+                if (generation != reloadGeneration.get()) return;
+                lastSignature = signature;
+                applyEntries(fresh);
+                if (onChanged != null) onChanged.run();
+            });
+        });
+    }
+
     /** Same as reload(), but the slow part (loading every icon) runs off the main thread so the screen never stalls. */
     void reloadAsync() {
-        new Thread(() -> {
-            final List<Entry> fresh = buildEntries();
-            new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> applyEntries(fresh));
-        }).start();
+        final int generation = reloadGeneration.incrementAndGet();
+        APP_LOADER.execute(() -> {
+            PackageManager pm = ctx.getPackageManager();
+            Intent probe = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
+            List<ResolveInfo> found = pm.queryIntentActivities(probe, 0);
+            final String signature = signatureOf(found);
+            final List<Entry> fresh = buildEntries(found);
+            mainHandler.post(() -> {
+                if (generation != reloadGeneration.get()) return;
+                lastSignature = signature;
+                applyEntries(fresh);
+            });
+        });
     }
 
     void reload() {
-        applyEntries(buildEntries());
+        reloadGeneration.incrementAndGet();
+        PackageManager pm = ctx.getPackageManager();
+        Intent probe = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
+        List<ResolveInfo> found = pm.queryIntentActivities(probe, 0);
+        lastSignature = signatureOf(found);
+        applyEntries(buildEntries(found));
     }
 
     private List<Entry> buildEntries() {
         PackageManager pm = ctx.getPackageManager();
         Intent probe = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
-        List<ResolveInfo> found = pm.queryIntentActivities(probe, 0);
-        lastSignature = signatureOf(found);
+        return buildEntries(pm.queryIntentActivities(probe, 0));
+    }
+
+    private List<Entry> buildEntries(List<ResolveInfo> found) {
+        PackageManager pm = ctx.getPackageManager();
+        artCache.evictAll();
         List<Entry> fresh = new ArrayList<>();
         if (iconPackPkg.isEmpty()) pack = null;
         else if (pack == null || !pack.pkg.equals(iconPackPkg)) pack = IconPack.load(ctx, iconPackPkg);
-        final float density = ctx.getResources().getDisplayMetrics().density;
-        final int iconPx = Math.max(64, (int) (64 * density));
         for (ResolveInfo ri : found) {
             if (ri.activityInfo == null) continue;
             String pkg = ri.activityInfo.packageName;
             if (pkg.equals(ctx.getPackageName()) || hidden.contains(pkg) || userHidden.contains(pkg)) continue;
-            Drawable banner = ri.activityInfo.loadBanner(pm);
-            if (banner == null) banner = ri.activityInfo.applicationInfo.loadBanner(pm);
-            Drawable icon = IconShapes.shape(ctx, ri.loadIcon(pm), iconShape, iconPx);
             String label = String.valueOf(ri.loadLabel(pm));
             ComponentName component = new ComponentName(pkg, ri.activityInfo.name);
-            Entry entry = new Entry(label, component, banner, icon);
-            if (pack != null) {
-                Drawable packed = pack.iconFor(component);
-                if (packed != null) entry.packIcon = IconShapes.shape(ctx, packed, iconShape, iconPx);
-            }
-            fresh.add(entry);
+            fresh.add(new Entry(label, component));
         }
         final List<String> ord = order;
         Collections.sort(fresh, (a, b) -> {
@@ -211,12 +279,44 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
             }
             return a.label.compareToIgnoreCase(b.label);
         });
+        // Keep artwork for the dock and first app rows warm; later rows load on demand into the bounded cache.
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            for (int i = 0; i < Math.min(24, fresh.size()); i++) artFor(fresh.get(i));
+        }
         return fresh;
+    }
+
+    TileArt artFor(Entry entry) {
+        TileArt cached = artCache.get(entry.key);
+        if (cached != null) return cached;
+        PackageManager pm = ctx.getPackageManager();
+        Drawable banner = null;
+        Drawable icon = null;
+        Drawable packIcon = null;
+        int iconPx = Math.max(64, (int) (64 * ctx.getResources().getDisplayMetrics().density));
+        try {
+            android.content.pm.ActivityInfo info = pm.getActivityInfo(entry.component, 0);
+            if (pack != null) {
+                Drawable packed = pack.iconFor(entry.component);
+                if (packed != null) packIcon = IconShapes.shape(ctx, packed, iconShape, iconPx);
+            }
+            if (packIcon == null) {
+                banner = info.loadBanner(pm);
+                if (banner == null) banner = info.applicationInfo.loadBanner(pm);
+            }
+            // A banner tile never displays the regular icon, so don't allocate a duplicate drawable.
+            if (banner == null && packIcon == null) icon = IconShapes.shape(ctx, pm.getActivityIcon(entry.component), iconShape, iconPx);
+        } catch (Exception ignored) {
+        }
+        TileArt loaded = new TileArt(banner, icon, packIcon);
+        artCache.put(entry.key, loaded);
+        return loaded;
     }
 
     private void applyEntries(List<Entry> fresh) {
         items.clear();
         items.addAll(fresh);
+        hasLoadedEntries = true;
         notifyDataSetChanged();
     }
 
@@ -305,8 +405,9 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         h.name.setAlpha(focused ? 1f : 0f);
         h.card.setScaleX(focused ? FOCUS_SCALE : 1f);
         h.card.setScaleY(focused ? FOCUS_SCALE : 1f);
-        applyVisual(h.banner, h.icon, h.label, e);
-        if (e.packIcon == null && e.banner == null) {
+        TileArt art = artFor(e);
+        applyVisual(h.banner, h.icon, h.label, e.label, art);
+        if (art.packIcon == null && art.banner == null) {
             // Icon-only tile: a gradient in the app's own colour instead of flat grey.
             int c = ambientColorAt(position);
             GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
@@ -330,21 +431,21 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
     }
 
     /** Shows the tile content: the icon-pack icon if there is one, else the banner, else the (shaped) app icon. */
-    static void applyVisual(ImageView banner, ImageView icon, TextView label, Entry e) {
+    static void applyVisual(ImageView banner, ImageView icon, TextView label, String title, TileArt art) {
         float d = banner.getResources().getDisplayMetrics().density;
         ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) icon.getLayoutParams();
-        if (e.packIcon != null) {
+        if (art.packIcon != null) {
             banner.setImageDrawable(null);
             banner.setVisibility(View.GONE);
             lp.width = lp.height = (int) (60 * d);
             lp.bottomMargin = (int) (14 * d);
             icon.setLayoutParams(lp);
-            icon.setImageDrawable(e.packIcon);
+            icon.setImageDrawable(art.packIcon);
             icon.setVisibility(View.VISIBLE);
-            label.setText(e.label);
+            label.setText(title);
             label.setVisibility(View.VISIBLE);
-        } else if (e.banner != null) {
-            banner.setImageDrawable(e.banner);
+        } else if (art.banner != null) {
+            banner.setImageDrawable(art.banner);
             banner.setVisibility(View.VISIBLE);
             icon.setVisibility(View.GONE);
             label.setVisibility(View.GONE);
@@ -354,9 +455,9 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
             lp.width = lp.height = (int) (48 * d);
             lp.bottomMargin = (int) (14 * d);
             icon.setLayoutParams(lp);
-            icon.setImageDrawable(e.icon);
+            icon.setImageDrawable(art.icon);
             icon.setVisibility(View.VISIBLE);
-            label.setText(e.label);
+            label.setText(title);
             label.setVisibility(View.VISIBLE);
         }
     }
@@ -375,6 +476,7 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
     void setIconPack(String pkg) {
         iconPackPkg = pkg == null ? "" : pkg;
         pack = null;
+        artCache.evictAll();
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(ICON_PACK, iconPackPkg).apply();
     }
 
@@ -428,14 +530,20 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
     }
 
     int ambientOf(Entry e) {
-        if (e.ambient == 0) e.ambient = vividColor(e.packIcon != null ? e.packIcon : (e.banner != null ? e.banner : e.icon));
+        if (e.ambient == 0) {
+            TileArt art = artFor(e);
+            e.ambient = vividColor(art.packIcon != null ? art.packIcon : (art.banner != null ? art.banner : art.icon));
+        }
         return e.ambient;
     }
 
     int ambientColorAt(int position) {
         if (position < 0 || position >= items.size()) return 0xFF444444;
         Entry e = items.get(position);
-        if (e.ambient == 0) e.ambient = vividColor(e.packIcon != null ? e.packIcon : (e.banner != null ? e.banner : e.icon));
+        if (e.ambient == 0) {
+            TileArt art = artFor(e);
+            e.ambient = vividColor(art.packIcon != null ? art.packIcon : (art.banner != null ? art.banner : art.icon));
+        }
         return e.ambient;
     }
 

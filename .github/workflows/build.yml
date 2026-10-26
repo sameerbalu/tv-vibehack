@@ -5,8 +5,6 @@ on:
     paths:
       - 'launcher/**'
       - '.github/workflows/build.yml'
-permissions:
-  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -16,23 +14,12 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-          cache: gradle
       - name: Build
         working-directory: launcher
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --console=plain
-      - name: Name the APK
-        run: cp launcher/app/build/outputs/apk/debug/app-debug.apk tvhome-v65.apk
       - uses: actions/upload-artifact@v4
         with:
           name: tvhome-v65-apk
-          path: tvhome-v65.apk
-      - name: Publish release (direct download link)
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release delete latest --yes --cleanup-tag || true
-          gh release create latest tvhome-v65.apk --target "${{ github.sha }}" \
-            --title "TV Home v65 (latest)" \
-            --notes "Low-memory build: pictures released when another app opens, screen-size 4K wallpaper, size-limited caches."
+          path: launcher/app/build/outputs/apk/debug/app-debug.apk
