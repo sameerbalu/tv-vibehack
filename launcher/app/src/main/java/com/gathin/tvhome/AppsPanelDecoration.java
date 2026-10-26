@@ -35,6 +35,9 @@ final class AppsPanelDecoration extends RecyclerView.ItemDecoration {
     private int lastRows = -1;           // rows at the last drawn frame; -1 while hidden
     private float rowPitch;              // distance from one row to the next, measured when it can be
     private float extra;                 // eased offset of the bottom edge after rows were added or removed
+    private final RectF glass = new RectF();         // the visible glass panel behind everything
+    private float margin;                // distance of the dark panel from the glass edges, on every side
+    private float innerGap;              // distance from the apps to the dark panel's top and bottom edge
 
     AppsPanelDecoration(int columns, float density) {
         this.columns = columns;
@@ -59,6 +62,13 @@ final class AppsPanelDecoration extends RecyclerView.ItemDecoration {
         alpha = a;
     }
 
+    /** The visible glass panel (grid coordinates), the gap to keep to its edges, and the gap around the apps. */
+    void setGlass(float l, float t, float r, float b, float marginPx, float innerGapPx) {
+        glass.set(l, t, r, b);
+        margin = marginPx;
+        innerGap = innerGapPx;
+    }
+
     @Override
     public void onDraw(@NonNull Canvas c, @NonNull RecyclerView parent, @NonNull RecyclerView.State state) {
         if (alpha <= 0.01f) {
@@ -78,6 +88,7 @@ final class AppsPanelDecoration extends RecyclerView.ItemDecoration {
         int lastStart = columns + (rows - 1) * columns;
 
         float firstTop = Float.MAX_VALUE, lastTop = Float.MAX_VALUE, lastBottom = -Float.MAX_VALUE;
+        float firstCardTop = Float.MAX_VALUE;
         boolean haveFirst = false, haveLast = false;
         for (int i = 0; i < parent.getChildCount(); i++) {
             View child = parent.getChildAt(i);
@@ -88,11 +99,12 @@ final class AppsPanelDecoration extends RecyclerView.ItemDecoration {
             if (pos < columns * 2) {
                 haveFirst = true;
                 firstTop = Math.min(firstTop, t);
+                firstCardTop = Math.min(firstCardTop, t + child.getPaddingTop());      // where the tiles really begin
             }
             if (pos >= lastStart) {
                 haveLast = true;
                 lastTop = Math.min(lastTop, t);
-                lastBottom = Math.max(lastBottom, b);
+                lastBottom = Math.max(lastBottom, b - child.getPaddingBottom());       // down to the app name
             }
         }
 
@@ -116,11 +128,15 @@ final class AppsPanelDecoration extends RecyclerView.ItemDecoration {
 
         float radius = 22 * d;
         float beyond = 3 * radius;                                      // an end that is off screen is pushed out of view
-        float top = haveFirst ? firstTop - 4 * d : -beyond;
-        float bottom = haveLast ? lastBottom + 6 * d + extra : parent.getHeight() + beyond;
+        float top = haveFirst ? firstCardTop - innerGap : -beyond;
+        float bottom = haveLast ? lastBottom + innerGap + extra : parent.getHeight() + beyond;
         if (bottom < top + 2 * radius) bottom = top + 2 * radius;
-        rect.set(parent.getPaddingLeft() - 12 * d, top, parent.getWidth() - parent.getPaddingRight() + 12 * d, bottom);
+        // Same distance from the glass panel on the left, right and top; the bottom keeps it too when the apps run on.
+        float cl = glass.left + margin, ct = glass.top + margin, cr = glass.right - margin, cb = glass.bottom - margin;
+        rect.set(cl, top, cr, bottom);
 
+        int clip = c.save();
+        c.clipRect(cl, ct, cr, cb);                                     // never outside the glass panel
         int a = Math.round(alpha * 255);
         base.setColor(0xFF0C0C0E);
         base.setAlpha(Math.round(a * (backdrop != null ? 1f : 0.88f)));
@@ -140,5 +156,6 @@ final class AppsPanelDecoration extends RecyclerView.ItemDecoration {
         edge.setColor(0x26FFFFFF);
         edge.setAlpha(Math.round(a * 0.15f));
         c.drawRoundRect(rect, radius, radius, edge);
+        c.restoreToCount(clip);
     }
 }

@@ -2454,6 +2454,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     /** The dark panel behind the All apps rows fades in and out with the All apps section. */
     private void syncAppsPanel() {
         if (grid == null || appsPanel == null) return;
+        syncAppsPanelBounds();
         float target = allAppsMode && allUiApplied && !arranging && sectionsActive() ? 1f : 0f;
         if (appsPanelFade == target) return;
         appsPanelFade = target > appsPanelFade ? Math.min(target, appsPanelFade + 0.1f)
@@ -2462,42 +2463,27 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         grid.invalidate();
     }
 
-    private final RectF dockBand = new RectF();
+    /** Tells the dark panel where the glass panel is (it draws 1dp inside its view) so both keep an even gap. */
+    private void syncAppsPanelBounds() {
+        if (appsPanel == null || allAppsPanel == null) return;
+        float inset = density;                                            // GlassPanelView draws 1dp inside its bounds
+        float margin = 10 * density;
+        // The first row sits ROW_INSET inside the panel and its tiles another 8dp (item padding) below that.
+        float innerGap = (ROW_INSET_DP + 8 - 1 - 10) * density;
+        appsPanel.setGlass(allAppsPanel.getLeft() + inset, allAppsPanel.getTop() + inset,
+                allAppsPanel.getRight() - inset, allAppsPanel.getBottom() - inset, margin, innerGap);
+    }
 
-    /** Keeps the PNG over the dock glued to the dock's glass band; it fades with the dock. */
+    /** The PNG over the dock fades together with the dock (it is not shown in the All apps section). */
     private void syncDockPng() {
-        if (dockPng == null || grid == null) return;
+        if (dockPng == null) return;
         boolean want = dockPngOn && dockPng.hasBitmap();
         if (!want) {
             if (dockPng.getVisibility() != View.GONE) dockPng.setVisibility(View.GONE);
             return;
         }
-        boolean any = false;
-        for (int i = 0; i < grid.getChildCount(); i++) {
-            View child = grid.getChildAt(i);
-            int pos = grid.getChildAdapterPosition(child);
-            if (pos < 0 || pos >= COLUMNS) continue;
-            View card = child.findViewById(R.id.card);
-            if (card == null) continue;
-            float l = child.getLeft() + card.getLeft();
-            float t = child.getTop() + card.getTop() + child.getTranslationY();
-            float r = l + card.getWidth();
-            float b = t + card.getHeight();
-            if (!any) {
-                dockBand.set(l, t, r, b);
-                any = true;
-            } else {
-                dockBand.union(l, t, r, b);
-            }
-        }
-        float a = any ? dockFade : 0f;
         if (dockPng.getVisibility() != View.VISIBLE) dockPng.setVisibility(View.VISIBLE);
-        if (dockPng.getAlpha() != a) dockPng.setAlpha(a);
-        if (!any) return;
-        float pad = 18 * density;                                  // the same band the dock's glass is drawn with
-        dockBand.inset(-pad, -pad);
-        dockBand.offset(grid.getX(), grid.getY());
-        dockPng.setBand(dockBand);
+        if (dockPng.getAlpha() != dockFade) dockPng.setAlpha(dockFade);
     }
 
     private boolean rowsFaded;

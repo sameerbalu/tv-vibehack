@@ -5,19 +5,17 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Matrix;
 import android.graphics.Paint;
-import android.graphics.RectF;
 import android.util.AttributeSet;
 import android.view.View;
 
 /**
- * A transparent PNG drawn over the dock: as wide as the dock's glass band, bottom edge on the band's bottom edge,
- * so the dock's blurred background and the dock apps sit behind it. It never takes focus or touches.
+ * A transparent PNG laid over the whole screen the same way the depth foreground is (scaled to cover the screen,
+ * centred), but above the dock, its apps and the cursor, so they all sit behind it. It never takes focus or touches.
  */
 public class DockPngView extends View {
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final Matrix matrix = new Matrix();
-    private final RectF band = new RectF();
     private Bitmap bitmap;
 
     public DockPngView(Context c, AttributeSet a) {
@@ -37,21 +35,12 @@ public class DockPngView extends View {
         return bitmap != null;
     }
 
-    /** The dock band in this view's coordinates. Only redraws when it really moved. */
-    void setBand(RectF r) {
-        if (Math.abs(band.left - r.left) < 0.5f && Math.abs(band.top - r.top) < 0.5f
-                && Math.abs(band.right - r.right) < 0.5f && Math.abs(band.bottom - r.bottom) < 0.5f) return;
-        band.set(r);
-        invalidate();
-    }
-
     @Override
     protected void onDraw(Canvas canvas) {
-        if (bitmap == null || band.width() <= 1f) return;
-        float s = band.width() / bitmap.getWidth();
-        float h = bitmap.getHeight() * s;
+        if (bitmap == null || getWidth() == 0 || getHeight() == 0) return;
+        float s = Math.max(getWidth() / (float) bitmap.getWidth(), getHeight() / (float) bitmap.getHeight());
         matrix.setScale(s, s);
-        matrix.postTranslate(band.left, band.bottom - h);
+        matrix.postTranslate((getWidth() - bitmap.getWidth() * s) / 2f, (getHeight() - bitmap.getHeight() * s) / 2f);
         canvas.drawBitmap(bitmap, matrix, paint);
     }
 }

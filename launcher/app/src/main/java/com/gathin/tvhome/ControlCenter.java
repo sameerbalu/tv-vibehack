@@ -388,8 +388,8 @@ final class ControlCenter {
         StateListDrawable sl = new StateListDrawable();
         sl.addState(new int[]{android.R.attr.state_focused}, glass(radiusDp, oval, true, on, ring));
         sl.addState(new int[0], glass(radiusDp, oval, false, on, ring));
-        sl.setEnterFadeDuration(130);
-        sl.setExitFadeDuration(200);
+        sl.setEnterFadeDuration(70);
+        sl.setExitFadeDuration(110);
         return sl;
     }
 
@@ -475,6 +475,7 @@ final class ControlCenter {
         v.setClipChildren(false);
         v.setClipToPadding(false);
         v.setMinimumHeight((int) (96 * d));
+        v.setLayerType(View.LAYER_TYPE_HARDWARE, null);   // cached while it scales and fades: no stutter on a TV GPU
         v.setPadding((int) (14 * d), (int) (12 * d), (int) (12 * d), (int) (12 * d));
         v.setBackground(states(26f, false, on, badgeColor));
         v.setFocusable(true);
@@ -509,7 +510,7 @@ final class ControlCenter {
             LinearLayout.LayoutParams swp = new LinearLayout.LayoutParams((int) (40 * d), (int) (26 * d));
             swp.setMarginEnd(-(int) (4 * d));              // the track sits in the tile's corner, the glow has room
             top.addView(sw, swp);
-            if (on) sw.revealOn(560);                      // slides on once the card has opened
+            sw.setOn(on, false);                           // the real state from the first frame: no slide-on animation
         }
         v.addView(top, new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT));
 
