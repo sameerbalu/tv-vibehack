@@ -150,4 +150,7 @@
     <string name="widget_lyrics">Spotify lyrics (behind the wallpaper)</string>
     <string name="widget_right">Right</string>
     <string name="widget_left">Left</string>
+    <string name="dock_png">PNG over dock</string>
+    <string name="dock_png_choose">Choose dock PNG</string>
+    <string name="dock_png_remove">Remove dock PNG</string>
 </resources>

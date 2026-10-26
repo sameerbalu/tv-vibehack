@@ -32,6 +32,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.ColorDrawable;
@@ -107,6 +108,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private static final int REQUEST_WALLPAPER = 71;
     private static final int REQUEST_BT = 72;
     private static final int REQUEST_FRONT = 73;
+    private static final int REQUEST_DOCK_PNG = 74;
+    private static final String KEY_DOCK_PNG_ON = "dock_png_on";
     private static final String PREFS = "launcher_preferences";
     private static final String WALLPAPER_URI = "wallpaper_uri";
 
@@ -149,6 +152,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private int widgetsDepth;               // widgets behind the depth PNG: 0 off, 1 right, 2 left, 3 both
     private ParticlesView particles;
     private DepthOverlayView depthWidgets;
+    private DockPngView dockPng;
+    private boolean dockPngOn;
+    private AppsPanelDecoration appsPanel;
+    private float appsPanelFade;
     private int fxLevel = 1;                // 0 soft, 1 normal, 2 strong
     private float ambientBaseRadius;
     // Spotify: album colour while a song plays (0 = nothing playing)
@@ -316,6 +323,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         ambient = findViewById(R.id.ambient);
         particles = findViewById(R.id.particles);
         depthWidgets = findViewById(R.id.depthWidgets);
+        dockPng = findViewById(R.id.dockPng);
+        dockPngOn = getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_DOCK_PNG_ON, false);
+        loadDockPng();                                           // the saved PNG is back right after a restart
         ambientGlow = new GradientDrawable();
         ambientGlow.setGradientType(GradientDrawable.RADIAL_GRADIENT);
         ambientGlow.setGradientCenter(0.32f, 0.42f);
@@ -355,6 +365,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         grid.setItemAnimator(null);
         dockDecoration = new DockDecoration(COLUMNS, density);
         grid.addItemDecoration(dockDecoration);
+        appsPanel = new AppsPanelDecoration(COLUMNS, density);   // dark panel behind the All apps rows
+        grid.addItemDecoration(appsPanel);
         // Room above the first row of apps for the Continue watching row (which floats over that gap).
         grid.addItemDecoration(new RecyclerView.ItemDecoration() {
             @Override
@@ -647,6 +659,18 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         if (resultCode != RESULT_OK || data == null) return;
         Uri uri = data.getData();
         if (uri == null) return;
+        if (requestCode == REQUEST_DOCK_PNG) {
+            try {
+                WallpaperStore.copyDock(this, uri);
+                dockPng.setBitmap(null);
+                loadDockPng();
+                if (!dockPng.hasBitmap()) throw new IllegalArgumentException("Unable to decode image");
+                setDockPngOn(true);
+            } catch (Exception | OutOfMemoryError e) {
+                Toast.makeText(this, R.string.wallpaper_failed, Toast.LENGTH_SHORT).show();
+            }
+            return;
+        }
         if (requestCode == REQUEST_FRONT) {
             try {
                 WallpaperStore.copyFront(this, uri);
@@ -1638,6 +1662,25 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         if (WallpaperStore.hasFront(this)) {
             addInputRow(rows, popup, MenuIcons.TRASH, getString(R.string.depth_remove), -1, this::removeFront);
         }
+        // PNG over the dock: a switch, plus choose / remove.
+        final View dockRow = getLayoutInflater().inflate(R.layout.item_input, rows, false);
+        setMenuIcon(dockRow, MenuIcons.DEPTH);
+        ((TextView) dockRow.findViewById(R.id.title)).setText(R.string.dock_png);
+        updateWidgetRow(dockRow, dockPngOn && dockPng.hasBitmap());
+        dockRow.setOnClickListener(v -> {
+            if (!dockPng.hasBitmap()) {                       // nothing picked yet: pick one first
+                popup.dismiss();
+                chooseDockPng();
+                return;
+            }
+            setDockPngOn(!dockPngOn);
+            updateWidgetRow(dockRow, dockPngOn);
+        });
+        rows.addView(dockRow);
+        addInputRow(rows, popup, MenuIcons.WALLPAPER, getString(R.string.dock_png_choose), -1, this::chooseDockPng);
+        if (WallpaperStore.hasDock(this)) {
+            addInputRow(rows, popup, MenuIcons.TRASH, getString(R.string.dock_png_remove), -1, this::removeDockPng);
+        }
         fitScroll(panel);
         showDropdown(popup, panel, anchor, minWidth, true);
     }
@@ -1680,7 +1723,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         ((TextView) cityRow.findViewById(R.id.title)).setText("Weather city");
         final String curCity = widgets.weatherCity();
         ((TextView) cityRow.findViewById(R.id.status)).setText(curCity.isEmpty() ? "Auto" : curCity);
-        cityRow.findViewById(R.id.dot).setVisibility(curCity.isEmpty() ? View.GONE : View.VISIBLE);
+        noIndicator(cityRow);                            // a value (Auto / city), not an on/off
         cityRow.setOnClickListener(v -> {
             popup.dismiss();
             askWeatherCity(curCity);
@@ -1808,6 +1851,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         showDropdown(popup, panel, anchor, minWidth, true);
     }
 
+    /** A row that shows a value rather than on/off: no switch at all. */
+    private void noIndicator(View row) {
+        View dot = row.findViewById(R.id.dot);
+        if (dot instanceof SwitchView) ((SwitchView) dot).setIndicatorHidden(true);
+        else dot.setVisibility(View.GONE);
+    }
+
     private void updateDepthRow(View row) {
         String[] names = {"Off", "Right side", "Left side", "Both sides"};
         ((TextView) row.findViewById(R.id.status)).setText(names[widgetsDepth]);
@@ -1818,23 +1868,23 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
 
     private void updateFxRows(View colorRow, View posRow, View partRow) {
         ((TextView) colorRow.findViewById(R.id.status)).setText(FX_COLOR_NAMES[fxColor]);
-        colorRow.findViewById(R.id.dot).setVisibility(View.VISIBLE);
+        noIndicator(colorRow);
         ((TextView) posRow.findViewById(R.id.status)).setText(FX_POS_NAMES[fxPos]);
-        posRow.findViewById(R.id.dot).setVisibility(View.VISIBLE);
+        noIndicator(posRow);
         ((TextView) partRow.findViewById(R.id.status)).setText(FX_PARTICLE_NAMES[fxParticles]);
         partRow.findViewById(R.id.dot).setVisibility(fxParticles == 0 ? View.GONE : View.VISIBLE);
     }
 
     private void updateStyleRow(View row) {
         ((TextView) row.findViewById(R.id.status)).setText(STYLE_NAMES[fxStyle]);
-        row.findViewById(R.id.dot).setVisibility(View.VISIBLE);
+        noIndicator(row);
         row.setAlpha(fxGlowOn ? 1f : 0.45f);
     }
 
     private void updateStrengthRow(View row) {
         ((TextView) row.findViewById(R.id.status)).setText(
                 fxLevel == 0 ? R.string.fx_soft : fxLevel == 2 ? R.string.fx_strong : R.string.fx_normal);
-        row.findViewById(R.id.dot).setVisibility(View.VISIBLE);
+        noIndicator(row);
     }
 
     private void updateWidgetSideRow(View row, int state) {
@@ -1869,6 +1919,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         ((TextView) row.findViewById(R.id.title)).setText(title);
         TextView status = row.findViewById(R.id.status);
         View dot = row.findViewById(R.id.dot);
+        if (dot instanceof SwitchView) ((SwitchView) dot).setCheckStyle(true);   // "selected" tick, not a switch
         if (selected) {
             status.setText(R.string.selected);
             dot.setVisibility(View.VISIBLE);
@@ -1960,6 +2011,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         menuBackdrop = null;
         veilBackdrop = null;
         if (dockDecoration != null) dockDecoration.setBackdrop(null);
+        if (appsPanel != null) appsPanel.setBackdrop(null);
         if (allAppsPanel != null) allAppsPanel.setBackdrop(null);
         if (grid != null) grid.invalidate();
     }
@@ -2031,12 +2083,56 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         wallpaperFrontTop.setClipBounds(r);
     }
 
+    /** Loads the saved PNG for the dock (kept in the app's own storage, so it survives a restart). */
+    private void loadDockPng() {
+        if (dockPng == null || dockPng.hasBitmap() || !WallpaperStore.hasDock(this)) return;
+        try {
+            String path = WallpaperStore.dockPath(this);
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(path, bounds);
+            int limit = Math.max(1, getResources().getDisplayMetrics().widthPixels);
+            int sample = 1;
+            while (bounds.outWidth / sample > limit * 2 || bounds.outHeight / sample > limit * 2) sample *= 2;
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inSampleSize = sample;                       // ARGB_8888: keeps the transparency
+            Bitmap bitmap = BitmapFactory.decodeFile(path, options);
+            if (bitmap != null) dockPng.setBitmap(bitmap);
+        } catch (Exception | OutOfMemoryError ignored) {
+        }
+    }
+
+    private void setDockPngOn(boolean on) {
+        dockPngOn = on;
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_DOCK_PNG_ON, on).apply();
+        if (grid != null) grid.invalidate();
+    }
+
+    private void chooseDockPng() {
+        Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        pick.addCategory(Intent.CATEGORY_OPENABLE);
+        pick.setType("image/*");
+        pick.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try {
+            startActivityForResult(pick, REQUEST_DOCK_PNG);
+        } catch (ActivityNotFoundException e) {
+            Toast.makeText(this, R.string.not_available, Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void removeDockPng() {
+        WallpaperStore.deleteDock(this);
+        dockPng.setBitmap(null);
+        setDockPngOn(false);
+    }
+
     private void restoreFront() {
         if (!WallpaperStore.hasFront(this) || wallpaperFront.getVisibility() == View.VISIBLE) return;
         applyFront();
     }
 
     private void restoreWallpaper() {
+        loadDockPng();
         restoreFront();
         if (!WallpaperStore.exists(this)) {
             // Wallpaper chosen in an older version: move it into the app once, if its link still opens.
@@ -2084,6 +2180,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
                 runOnUiThread(() -> veilBackdrop = v);
             }).start();
             if (dockDecoration != null) dockDecoration.setBackdrop(blurred);
+            if (appsPanel != null) appsPanel.setBackdrop(blurred);
             if (allAppsPanel != null) allAppsPanel.setBackdrop(blurred);
             if (grid != null) grid.invalidate();
         } catch (Exception e) {
@@ -2172,6 +2269,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         // The row floats over the gap above the first row of apps and follows the grid (scroll, fades, clip).
         grid.getViewTreeObserver().addOnPreDrawListener(() -> {
             syncContinueRow();
+            trackPosterCursor();
             return true;
         });
         continueRow.addOnScrollListener(new RecyclerView.OnScrollListener() {
@@ -2353,6 +2451,55 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         if (changed) grid.invalidate();
     }
 
+    /** The dark panel behind the All apps rows fades in and out with the All apps section. */
+    private void syncAppsPanel() {
+        if (grid == null || appsPanel == null) return;
+        float target = allAppsMode && allUiApplied && !arranging && sectionsActive() ? 1f : 0f;
+        if (appsPanelFade == target) return;
+        appsPanelFade = target > appsPanelFade ? Math.min(target, appsPanelFade + 0.1f)
+                : Math.max(target, appsPanelFade - 0.2f);
+        appsPanel.setAlpha(appsPanelFade);
+        grid.invalidate();
+    }
+
+    private final RectF dockBand = new RectF();
+
+    /** Keeps the PNG over the dock glued to the dock's glass band; it fades with the dock. */
+    private void syncDockPng() {
+        if (dockPng == null || grid == null) return;
+        boolean want = dockPngOn && dockPng.hasBitmap();
+        if (!want) {
+            if (dockPng.getVisibility() != View.GONE) dockPng.setVisibility(View.GONE);
+            return;
+        }
+        boolean any = false;
+        for (int i = 0; i < grid.getChildCount(); i++) {
+            View child = grid.getChildAt(i);
+            int pos = grid.getChildAdapterPosition(child);
+            if (pos < 0 || pos >= COLUMNS) continue;
+            View card = child.findViewById(R.id.card);
+            if (card == null) continue;
+            float l = child.getLeft() + card.getLeft();
+            float t = child.getTop() + card.getTop() + child.getTranslationY();
+            float r = l + card.getWidth();
+            float b = t + card.getHeight();
+            if (!any) {
+                dockBand.set(l, t, r, b);
+                any = true;
+            } else {
+                dockBand.union(l, t, r, b);
+            }
+        }
+        float a = any ? dockFade : 0f;
+        if (dockPng.getVisibility() != View.VISIBLE) dockPng.setVisibility(View.VISIBLE);
+        if (dockPng.getAlpha() != a) dockPng.setAlpha(a);
+        if (!any) return;
+        float pad = 18 * density;                                  // the same band the dock's glass is drawn with
+        dockBand.inset(-pad, -pad);
+        dockBand.offset(grid.getX(), grid.getY());
+        dockPng.setBand(dockBand);
+    }
+
     private boolean rowsFaded;
 
     /**
@@ -2361,7 +2508,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
      */
     private void syncRowFade() {
         if (grid == null) return;
-        boolean on = allAppsMode && allUiApplied && !arranging && sectionsActive();
+        // Also while snapping back to the dock: the bottom apps must stay faded the whole way, not pop to full.
+        boolean on = ((allAppsMode && allUiApplied) || snapActive) && !arranging && sectionsActive();
         if (!on && !rowsFaded) return;
         float bottomLimit = grid.getHeight() - (PANEL_BOTTOM_DP + 8) * density;
         float topLimit = panelTopPx() + 6 * density;
@@ -2387,8 +2535,28 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private final Rect contClip = new Rect();
     private boolean contClipSet;
 
+    private View trackedPoster;
+    private long trackUntil;
+
+    /**
+     * Right after the focus lands on a poster the row, the grid and the glass are all still settling (scroll,
+     * fades, relayout). For a short while the cursor is re-aimed at the poster's real position every frame, so it
+     * ends exactly on the poster instead of keeping a small offset from the first frame.
+     */
+    private void trackPosterCursor() {
+        View c = trackedPoster;
+        if (c == null) return;
+        if (SystemClock.uptimeMillis() > trackUntil || getCurrentFocus() != c || !c.isAttachedToWindow()) {
+            trackedPoster = null;
+            return;
+        }
+        moveGlassTo(c, true);
+    }
+
     private void syncContinueRow() {
         syncDock();
+        syncAppsPanel();
+        syncDockPng();
         syncRowFade();
         if (continueRow == null) return;
         boolean active = continueActive();
@@ -2528,6 +2696,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         syncContinueRow();                                 // the row must be in place before the cursor is measured against it
         glass.setColor(posterCursorColor(), glassShown);   // red cursor on the posters (light when the wallpaper is red too)
         moveGlassTo(card, true);
+        trackedPoster = card;
+        trackUntil = SystemClock.uptimeMillis() + 900;
         refreshChrome();
         hideHero();
         RecyclerView.ViewHolder vh = grid.findViewHolderForAdapterPosition(COLUMNS);
@@ -3380,7 +3550,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             dot.setVisibility(View.GONE);
         } else {
             status.setVisibility(View.GONE);
-            dot.setVisibility(View.GONE);
+            noIndicator(row);                                // state unknown: show nothing rather than a wrong switch
         }
         row.setOnClickListener(v -> {
             popup.dismiss();

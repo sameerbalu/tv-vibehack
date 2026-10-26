@@ -73,6 +73,11 @@ final class ControlCenter {
     private Dialog dialog;
     private MediaController controller;
     private ImageView playBtn;
+    private ImageView artView;
+    private TextView titleTv, artistTv;
+    private Bitmap shownArt;
+    private MediaController.Callback mediaCb;
+    private MediaSessionManager.OnActiveSessionsChangedListener sessionsCb;
 
     ControlCenter(Context ctx) {
         this.ctx = ctx;
@@ -154,17 +159,18 @@ final class ControlCenter {
         View header = controller != null ? nowPlayingHeader() : greetingHeader();
         card.addView(header, new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT));
         pop.add(header);
+        startLive();
 
         // ---- six tiles, three per row -------------------------------------------------------------------
         boolean wifiOn = isWifiUp();
         boolean btOn = isBluetoothOn();
         View[] tiles = {
-                tile(0, MenuIcons.WIFI, 0xFF0A84FF, wifiOn, ctx.getString(R.string.cc_wifi), wifiState(), a.wifi),
-                tile(0, MenuIcons.BLUETOOTH, 0xFF0A84FF, btOn, ctx.getString(R.string.bluetooth), bluetoothState(), a.bluetooth),
-                tile(0, MenuIcons.SPARKLE, 0xFFAF52DE, info.effectsOn, ctx.getString(R.string.fx_title), info.effectsValue, a.effects),
-                tile(0, MenuIcons.WALLPAPER, 0xFFFF2D55, info.wallpaperOn, ctx.getString(R.string.wallpaper_tab), info.wallpaperValue, a.wallpaper),
-                tile(0, MenuIcons.WIDGETS, 0xFFFF9500, true, ctx.getString(R.string.widgets), ctx.getString(R.string.cc_manage), a.widgets),
-                tile(0, MenuIcons.EYE, 0xFF34C759, true, ctx.getString(R.string.hide_apps), ctx.getString(R.string.cc_manage), a.hideApps)};
+                tile(0, MenuIcons.WIFI, 0xFF0A84FF, wifiOn, true, ctx.getString(R.string.cc_wifi), wifiState(), a.wifi),
+                tile(0, MenuIcons.BLUETOOTH, 0xFF0A84FF, btOn, true, ctx.getString(R.string.bluetooth), bluetoothState(), a.bluetooth),
+                tile(0, MenuIcons.SPARKLE, 0xFFAF52DE, info.effectsOn, true, ctx.getString(R.string.fx_title), info.effectsValue, a.effects),
+                tile(0, MenuIcons.WALLPAPER, 0xFFFF2D55, info.wallpaperOn, true, ctx.getString(R.string.wallpaper_tab), info.wallpaperValue, a.wallpaper),
+                tile(0, MenuIcons.WIDGETS, 0xFFFF9500, true, false, ctx.getString(R.string.widgets), ctx.getString(R.string.cc_manage), a.widgets),
+                tile(0, MenuIcons.EYE, 0xFF34C759, true, false, ctx.getString(R.string.hide_apps), ctx.getString(R.string.cc_manage), a.hideApps)};
         View first = null;
         for (int i = 0; i < tiles.length; i++) {
             if (i % 3 == 0) {
@@ -233,6 +239,7 @@ final class ControlCenter {
             return true;                                   // Back closes with the animation, not instantly
         });
         dialog.setOnDismissListener(di -> {
+            stopLive();
             cardView = null;
             for (PillIcon p : icons) p.rest();
             icons.clear();
@@ -460,7 +467,7 @@ final class ControlCenter {
     }
 
     /** A rounded tile: coloured badge top-left, title and value underneath. "On" tiles are light with dark text. */
-    private View tile(int vectorRes, int iconKind, final int badgeColor, final boolean on, String title, String value,
+    private View tile(int vectorRes, int iconKind, final int badgeColor, final boolean on, boolean toggle, String title, String value,
                       final Runnable action) {
         LinearLayout v = new LinearLayout(ctx);
         v.setOrientation(LinearLayout.VERTICAL);
@@ -489,7 +496,22 @@ final class ControlCenter {
         }
         int is = (int) (16 * d);
         badge.addView(iv, new FrameLayout.LayoutParams(is, is, Gravity.CENTER));
-        v.addView(badge, new LinearLayout.LayoutParams((int) (30 * d), (int) (30 * d)));
+        // Top line: the coloured badge, and for real on/off tiles a small switch in the corner.
+        LinearLayout top = new LinearLayout(ctx);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        top.setClipChildren(false);
+        top.addView(badge, new LinearLayout.LayoutParams((int) (30 * d), (int) (30 * d)));
+        if (toggle) {
+            top.addView(new View(ctx), new LinearLayout.LayoutParams(0, 1, 1f));
+            SwitchView sw = new SwitchView(ctx);
+            sw.setAccent(badgeColor);
+            LinearLayout.LayoutParams swp = new LinearLayout.LayoutParams((int) (40 * d), (int) (26 * d));
+            swp.setMarginEnd(-(int) (4 * d));              // the track sits in the tile's corner, the glow has room
+            top.addView(sw, swp);
+            if (on) sw.revealOn(560);                      // slides on once the card has opened
+        }
+        v.addView(top, new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         final int titleRest = 0xFFFFFFFF;
         final int valueRest = on ? 0xCCFFFFFF : 0xB3FFFFFF;
@@ -721,6 +743,8 @@ final class ControlCenter {
         });
         art.setClipToOutline(true);
         Bitmap bmp = m == null ? null : SongColors.artOf(m);
+        shownArt = bmp;
+        artView = art;
         if (bmp != null) art.setImageBitmap(bmp);
         else art.setBackground(glass(12f, false, false, false, 0));
         h.addView(art, new LinearLayout.LayoutParams((int) (56 * d), (int) (56 * d)));
@@ -729,10 +753,12 @@ final class ControlCenter {
         col.setOrientation(LinearLayout.VERTICAL);
         String t = m == null ? null : m.getString(MediaMetadata.METADATA_KEY_TITLE);
         String ar = m == null ? null : m.getString(MediaMetadata.METADATA_KEY_ARTIST);
-        col.addView(text(t != null ? t : ctx.getString(R.string.cc_idle), 16f, 600, 0xFFFFFFFF));
+        titleTv = text(t != null ? t : ctx.getString(R.string.cc_idle), 16f, 600, 0xFFFFFFFF);
+        col.addView(titleTv);
         LinearLayout.LayoutParams ap = new LinearLayout.LayoutParams(-2, -2);
         ap.topMargin = (int) (3 * d);
-        col.addView(text(ar == null ? ctx.getString(R.string.cc_now_playing) : ar, 12f, 400, 0xB3FFFFFF), ap);
+        artistTv = text(ar == null ? ctx.getString(R.string.cc_now_playing) : ar, 12f, 400, 0xB3FFFFFF);
+        col.addView(artistTv, ap);
         LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         cp.setMarginStart((int) (12 * d));
         h.addView(col, cp);
@@ -756,6 +782,110 @@ final class ControlCenter {
         np.setMarginStart((int) (4 * d));
         h.addView(next, np);
         return h;
+    }
+
+    // ---- live updates while the control center is open ----------------------------------------------------
+
+    /** Follows the player: a new song, new artwork or play/pause shows up at once, without reopening. */
+    private void startLive() {
+        if (titleTv == null || controller == null) return;
+        attachCallback();
+        try {
+            MediaSessionManager sm = (MediaSessionManager) ctx.getSystemService(Context.MEDIA_SESSION_SERVICE);
+            sessionsCb = list -> {
+                MediaController next = pickController();
+                if (next == null || controller == null || titleTv == null) return;
+                if (!next.getSessionToken().equals(controller.getSessionToken())) {   // another app took over
+                    detachCallback();
+                    controller = next;
+                    attachCallback();
+                    refreshHeader();
+                }
+            };
+            sm.addOnActiveSessionsChangedListener(sessionsCb, new ComponentName(ctx, MediaListener.class), ui);
+        } catch (RuntimeException ignored) {
+            sessionsCb = null;
+        }
+    }
+
+    private void attachCallback() {
+        if (controller == null) return;
+        mediaCb = new MediaController.Callback() {
+            @Override
+            public void onMetadataChanged(MediaMetadata metadata) {
+                refreshHeader();
+            }
+
+            @Override
+            public void onPlaybackStateChanged(PlaybackState state) {
+                refreshHeader();
+            }
+        };
+        try {
+            controller.registerCallback(mediaCb, ui);
+        } catch (RuntimeException ignored) {
+            mediaCb = null;
+        }
+    }
+
+    private void detachCallback() {
+        if (controller != null && mediaCb != null) {
+            try {
+                controller.unregisterCallback(mediaCb);
+            } catch (RuntimeException ignored) {
+            }
+        }
+        mediaCb = null;
+    }
+
+    private void stopLive() {
+        detachCallback();
+        if (sessionsCb != null) {
+            try {
+                MediaSessionManager sm = (MediaSessionManager) ctx.getSystemService(Context.MEDIA_SESSION_SERVICE);
+                sm.removeOnActiveSessionsChangedListener(sessionsCb);
+            } catch (RuntimeException ignored) {
+            }
+            sessionsCb = null;
+        }
+        titleTv = null;
+        artistTv = null;
+        artView = null;
+        shownArt = null;
+    }
+
+    private void refreshHeader() {
+        if (controller == null || titleTv == null || artistTv == null || artView == null) return;
+        MediaMetadata m = controller.getMetadata();
+        String t = m == null ? null : m.getString(MediaMetadata.METADATA_KEY_TITLE);
+        String ar = m == null ? null : m.getString(MediaMetadata.METADATA_KEY_ARTIST);
+        swapText(titleTv, t != null ? t : ctx.getString(R.string.cc_idle));
+        swapText(artistTv, ar == null ? ctx.getString(R.string.cc_now_playing) : ar);
+        Bitmap bmp = m == null ? null : SongColors.artOf(m);
+        if (bmp != shownArt) {
+            shownArt = bmp;
+            artView.animate().cancel();
+            artView.setAlpha(0.15f);
+            if (bmp != null) {
+                artView.setBackground(null);
+                artView.setImageBitmap(bmp);
+            } else {
+                artView.setImageDrawable(null);
+                artView.setBackground(glass(12f, false, false, false, 0));
+            }
+            artView.animate().alpha(1f).setStartDelay(0).setDuration(260).start();
+        }
+        if (playBtn != null) playBtn.setImageResource(isPlaying() ? R.drawable.ic_pause : R.drawable.ic_play);
+    }
+
+    /** Changes a line of text with a quick cross-fade (nothing happens when it is the same). */
+    private void swapText(final TextView tv, final String s) {
+        if (s.contentEquals(tv.getText())) return;
+        tv.animate().cancel();
+        tv.animate().alpha(0f).setStartDelay(0).setDuration(90).withEndAction(() -> {
+            tv.setText(s);
+            tv.animate().alpha(1f).setStartDelay(0).setDuration(170).start();
+        }).start();
     }
 
     private ImageView ctl(int res) {

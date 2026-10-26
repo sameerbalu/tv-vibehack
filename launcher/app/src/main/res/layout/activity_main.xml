@@ -139,6 +139,16 @@
         android:visibility="gone"
         android:importantForAccessibility="no" />
 
+    <!-- Transparent PNG over the dock (Wallpaper tab). Never focusable, never clickable. -->
+    <com.gathin.tvhome.DockPngView
+        android:id="@+id/dockPng"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone"
+        android:focusable="false"
+        android:clickable="false"
+        android:importantForAccessibility="no" />
+
     <!-- Clock, date and top buttons. Fades out while the full app list (or arrange mode) is showing. -->
     <LinearLayout
         android:id="@+id/header"

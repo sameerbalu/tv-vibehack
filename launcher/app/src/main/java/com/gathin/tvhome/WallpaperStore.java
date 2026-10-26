@@ -50,6 +50,40 @@ final class WallpaperStore {
         if (!tmp.renameTo(dst)) throw new IOException("Cannot save wallpaper");
     }
 
+    // ---- PNG over the dock: a transparent PNG drawn over the dock and its apps ----
+
+    private static File dock(Context c) {
+        return new File(c.getFilesDir(), "dock_overlay.png");
+    }
+
+    static boolean hasDock(Context c) {
+        File f = dock(c);
+        return f.isFile() && f.length() > 0;
+    }
+
+    static String dockPath(Context c) {
+        return dock(c).getAbsolutePath();
+    }
+
+    static void deleteDock(Context c) {
+        dock(c).delete();
+    }
+
+    /** Copies the picked PNG as it is, so its transparency is kept. */
+    static void copyDock(Context c, Uri source) throws IOException {
+        File tmp = new File(c.getFilesDir(), "dock_overlay.tmp");
+        try (InputStream in = c.getContentResolver().openInputStream(source);
+             OutputStream out = new FileOutputStream(tmp)) {
+            if (in == null) throw new IOException("Cannot open image");
+            byte[] buf = new byte[64 * 1024];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+        }
+        File dst = dock(c);
+        dst.delete();
+        if (!tmp.renameTo(dst)) throw new IOException("Cannot save image");
+    }
+
     // ---- depth foreground: a transparent PNG drawn over the glow, under the apps ----
 
     private static File front(Context c) {
