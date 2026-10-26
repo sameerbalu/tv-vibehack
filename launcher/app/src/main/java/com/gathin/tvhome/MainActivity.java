@@ -32,6 +32,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Rect;
+import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
@@ -145,7 +146,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private int fxColor = 0;                // 0 = follow the app, else a fixed colour from FX_COLORS
     private int fxPos = 1;                  // where the glow sits: left, dock, centre, right
     private int fxParticles = 0;            // 0 off, then stars, snow, fireflies, rain, bubbles, embers
-    private boolean widgetsDepth;           // widgets sit behind the depth PNG
+    private int widgetsDepth;               // widgets behind the depth PNG: 0 off, 1 right, 2 left, 3 both
     private ParticlesView particles;
     private DepthOverlayView depthWidgets;
     private int fxLevel = 1;                // 0 soft, 1 normal, 2 strong
@@ -222,7 +223,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             if (BluetoothDevice.ACTION_ACL_CONNECTED.equals(intent.getAction())) {
                 try {
                     BluetoothDevice d = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
-                    if (d != null) rememberBt(d.getAddress(), d.getName());
+                    if (d != null) rememberBt(d.getAddress(), btLabel(d));
                 } catch (RuntimeException ignored) {
                 }
             }
@@ -563,7 +564,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         fxColor = Math.max(0, Math.min(FX_COLORS.length - 1, fx.getInt("fx_color", 0)));
         fxPos = Math.max(0, Math.min(FX_POS.length - 1, fx.getInt("fx_pos", 1)));
         fxParticles = Math.max(0, Math.min(ParticlesView.COUNT - 1, fx.getInt("fx_particles", 0)));
-        widgetsDepth = fx.getBoolean("widgets_depth", false);
+        widgetsDepth = Math.max(0, Math.min(3, fx.getInt("widgets_depth_side", 0)));
         particles.setMode(fxParticles);
         syncPulse();
 
@@ -839,11 +840,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     /** Draws the depth PNG over the widget columns (when switched on), so the widgets sit behind it. */
     private void updateDepthWidgets() {
         if (depthWidgets == null || widgets == null) return;
-        boolean on = widgetsDepth && depthWidgets.hasBitmap();
+        boolean on = widgetsDepth != 0 && depthWidgets.hasBitmap();
         depthWidgets.setVisibility(on ? View.VISIBLE : View.GONE);
         if (!on) return;
         java.util.List<Rect> list = new java.util.ArrayList<>();
         for (WidgetPanel panel : new WidgetPanel[]{widgets, widgetsLeft}) {
+            boolean isLeftPanel = panel == widgetsLeft;
+            if (!(widgetsDepth == 3 || (widgetsDepth == 2 && isLeftPanel) || (widgetsDepth == 1 && !isLeftPanel))) continue;
             int h = panel.contentHeight();
             if (h <= 0 || panel.getWidth() <= 0) continue;
             int left = (int) panel.getX();
@@ -1125,7 +1128,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             0xFFA855F7, 0xFFEC4899, 0xFFFFFFFF};
     private static final String[] FX_COLOR_NAMES = {"Auto (app colour)", "Red", "Orange", "Gold", "Green", "Cyan", "Blue",
             "Purple", "Pink", "White"};
-    private static final String[] FX_PARTICLE_NAMES = {"Off", "Stars", "Snow", "Fireflies", "Rain", "Bubbles", "Embers"};
+    private static final String[] FX_PARTICLE_NAMES = {"Off", "Stars", "Snow", "Fireflies", "Rain", "Bubbles", "Embers", "Bats", "Spider web"};
     private static final int[] STYLE_NAMES = {R.string.fx_steady, R.string.fx_breathing, R.string.fx_heartbeat,
             R.string.fx_drift, R.string.fx_shimmer, R.string.fx_rainbow, R.string.fx_flicker, R.string.fx_wave,
             R.string.fx_aurora};
@@ -1265,11 +1268,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             tv.setShadowLayer(0f, 0f, 0f, 0);
             tv.invalidate();
         }
-    }
-
-    private void setClockBackdrop(Bitmap b) {
-        View c = findViewById(R.id.clock);
-        if (c instanceof GlassClockView) ((GlassClockView) c).setBackdrop(b);
     }
 
     private void stopClockLoop() {
@@ -1443,9 +1441,84 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
 
     private ControlCenter controlCenter;
 
+    // ---- small frosted notice (replaces the plain toast for "working ... done") ----------------------------
+
+    private LinearLayout noticePanel;
+    private TextView noticeText;
+    private View noticeDots;
+    private final Runnable hideNotice = () -> {
+        if (noticePanel == null) return;
+        final View p = noticePanel;
+        p.animate().alpha(0f).translationY(-10 * density).setDuration(260).withEndAction(() -> {
+            if (p.getParent() == root) root.removeView(p);
+            if (noticePanel == p) {
+                noticePanel = null;
+                noticeText = null;
+                noticeDots = null;
+            }
+        }).start();
+    };
+
+    /** Shows a blurred glass notice at the top of the screen, like the menus; sticky ones stay until replaced. */
+    private void showNotice(String text, boolean sticky) {
+        handler.removeCallbacks(hideNotice);
+        if (noticePanel == null || noticePanel.getParent() != root) {
+            final LinearLayout panel = new LinearLayout(this);
+            panel.setOrientation(LinearLayout.HORIZONTAL);
+            panel.setGravity(Gravity.CENTER_VERTICAL);
+            int px = (int) (26 * density), py = (int) (16 * density);
+            panel.setPadding(px, py, px, py);
+            panel.setBackground(new BlurPanelDrawable(density, menuBackdrop, root, panel));
+            panel.setElevation(0f);
+            noticeDots = new View(this);
+            GradientDrawable dot = new GradientDrawable();
+            dot.setShape(GradientDrawable.OVAL);
+            dot.setColor(0xFFFFFFFF);
+            noticeDots.setBackground(dot);
+            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams((int) (9 * density), (int) (9 * density));
+            dlp.setMarginEnd((int) (14 * density));
+            panel.addView(noticeDots, dlp);
+            noticeText = new TextView(this);
+            noticeText.setTextColor(0xFFFFFFFF);
+            noticeText.setTextSize(17f);
+            try {
+                noticeText.setTypeface(getResources().getFont(R.font.outfit), Typeface.NORMAL);
+            } catch (Exception ignored) {
+            }
+            panel.addView(noticeText);
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL | Gravity.TOP);
+            lp.topMargin = (int) (72 * density);
+            root.addView(panel, lp);
+            panel.setAlpha(0f);
+            panel.setTranslationY(-14 * density);
+            panel.animate().alpha(1f).translationY(0f).setDuration(260)
+                    .setInterpolator(new DecelerateInterpolator(1.6f)).start();
+            noticePanel = panel;
+        }
+        noticePanel.animate().cancel();
+        noticePanel.setAlpha(1f);
+        noticePanel.setTranslationY(0f);
+        noticeText.setText(text);
+        noticeDots.animate().cancel();
+        if (sticky) {                                    // a dot that breathes while the work runs
+            noticeDots.setAlpha(1f);
+            noticeDots.animate().alpha(0.2f).setDuration(650).withEndAction(new Runnable() {
+                @Override public void run() {
+                    if (noticeDots == null || noticePanel == null) return;
+                    float next = noticeDots.getAlpha() < 0.5f ? 1f : 0.2f;
+                    noticeDots.animate().alpha(next).setDuration(650).withEndAction(this).start();
+                }
+            }).start();
+        } else {
+            noticeDots.setAlpha(1f);
+            handler.postDelayed(hideNotice, 2600);
+        }
+    }
+
     /** Memory row of the settings screen: stop the apps running in the background. */
     private void quickStopApps() {
-        Toast.makeText(this, R.string.tc_working, Toast.LENGTH_SHORT).show();
+        showNotice(getString(R.string.tc_working), true);
         new Thread(() -> {
             int n = 0;
             try {
@@ -1453,7 +1526,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             } catch (Exception ignored) {
             }
             final int count = n;
-            runOnUiThread(() -> Toast.makeText(this, getString(R.string.tc_stopped, count), Toast.LENGTH_LONG).show());
+            runOnUiThread(() -> showNotice(getString(R.string.tc_stopped, count), false));
         }).start();
     }
 
@@ -1517,7 +1590,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private void quickClearCache() {
         View gear = findViewById(R.id.btnSettings);
         gear.animate().rotationBy(360f).setDuration(600).start();
-        Toast.makeText(this, R.string.tc_working, Toast.LENGTH_SHORT).show();
+        showNotice(getString(R.string.tc_working), true);
         new Thread(() -> {
             long before = TvTools.storage()[1];
             boolean ok = true;
@@ -1530,9 +1603,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             final boolean fok = ok;
             final long freed = after - before;
             runOnUiThread(() -> {
-                if (!fok) Toast.makeText(this, R.string.tc_refused, Toast.LENGTH_SHORT).show();
-                else if (freed > 0) Toast.makeText(this, getString(R.string.tc_cache_done, TvTools.fmt(after)), Toast.LENGTH_LONG).show();
-                else Toast.makeText(this, R.string.tc_cache_none, Toast.LENGTH_LONG).show();
+                if (!fok) showNotice(getString(R.string.tc_refused), false);
+                else if (freed > 0) showNotice(getString(R.string.tc_cache_done, TvTools.fmt(after)), false);
+                else showNotice(getString(R.string.tc_cache_none), false);
             });
         }).start();
     }
@@ -1574,16 +1647,16 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         final PopupWindow popup = newDropdown(panel, minWidth);
         final View depthRow = getLayoutInflater().inflate(R.layout.item_input, rows, false);
         setMenuIcon(depthRow, MenuIcons.DEPTH);
-        ((TextView) depthRow.findViewById(R.id.title)).setText("Behind wallpaper (depth)");
-        updateWidgetRow(depthRow, widgetsDepth);
+        ((TextView) depthRow.findViewById(R.id.title)).setText("Depth (behind wallpaper)");
+        updateDepthRow(depthRow);
         depthRow.setOnClickListener(v -> {
             if (!WallpaperStore.hasFront(this)) {
                 Toast.makeText(this, "Add a depth PNG first: Settings > Wallpaper", Toast.LENGTH_LONG).show();
                 return;
             }
-            widgetsDepth = !widgetsDepth;
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean("widgets_depth", widgetsDepth).apply();
-            updateWidgetRow(depthRow, widgetsDepth);
+            widgetsDepth = (widgetsDepth + 1) % 4;                    // off -> right -> left -> both
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putInt("widgets_depth_side", widgetsDepth).apply();
+            updateDepthRow(depthRow);
             updateDepthWidgets();
         });
         rows.addView(depthRow);
@@ -1718,6 +1791,14 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
 
         fitScroll(panel);
         showDropdown(popup, panel, anchor, minWidth, true);
+    }
+
+    private void updateDepthRow(View row) {
+        String[] names = {"Off", "Right side", "Left side", "Both sides"};
+        ((TextView) row.findViewById(R.id.status)).setText(names[widgetsDepth]);
+        row.findViewById(R.id.dot).setVisibility(widgetsDepth == 0 ? View.GONE : View.VISIBLE);
+        row.findViewById(R.id.title).setAlpha(widgetsDepth == 0 ? 0.45f : 1f);
+        row.findViewById(R.id.icon).setAlpha(widgetsDepth == 0 ? 0.45f : 1f);
     }
 
     private void updateFxRows(View colorRow, View posRow, View partRow) {
@@ -1862,7 +1943,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         wallpaperBlurView.setImageDrawable(null);
         wallpaperBlurView.setVisibility(View.GONE);
         menuBackdrop = null;
-        setClockBackdrop(null);
         veilBackdrop = null;
         if (dockDecoration != null) dockDecoration.setBackdrop(null);
         if (allAppsPanel != null) allAppsPanel.setBackdrop(null);
@@ -1983,7 +2063,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             wallpaperBlurView.setImageBitmap(blurred);
             wallpaperBlurView.setVisibility(View.VISIBLE);
             menuBackdrop = blurred;
-            setClockBackdrop(blurred);
             final Bitmap src = bitmap;                          // a gentle blur for the menu veil, made off the main thread
             new Thread(() -> {
                 final Bitmap v = BlurUtil.blur(src, 360, 4);
@@ -2652,7 +2731,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
                 try {
                     List<BluetoothDevice> devices = proxy.getConnectedDevices();
                     if (devices != null && !devices.isEmpty()) {
-                        String n = devices.get(0).getName();
+                        String n = btLabel(devices.get(0));
                         if (n != null && !n.trim().isEmpty()) found = n.trim();
                     }
                 } catch (RuntimeException ignored) {
@@ -2719,7 +2798,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
                 try {
                     Object connected = BluetoothDevice.class.getMethod("isConnected").invoke(dev);
                     if (Boolean.TRUE.equals(connected)) {
-                        String n = dev.getName();
+                        String n = btLabel(dev);
                         if (n != null && n.trim().length() > 0) return n.trim();
                     }
                 } catch (Exception ignored) {
@@ -2731,6 +2810,16 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     }
 
     /** Keeps a list of every Bluetooth device that has been connected here, to show in the Bluetooth menu. */
+    /** The name you gave the device on the TV (its alias), else the name it calls itself. */
+    private static String btLabel(BluetoothDevice dev) {
+        try {
+            Object alias = BluetoothDevice.class.getMethod("getAlias").invoke(dev);
+            if (alias instanceof String && ((String) alias).trim().length() > 0) return ((String) alias).trim();
+        } catch (Exception ignored) {
+        }
+        return dev.getName();
+    }
+
     private void rememberBt(String address, String name) {
         if (address == null || name == null || name.trim().isEmpty()) return;
         try {
@@ -2775,13 +2864,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             try {
                 Map<String, Boolean> audio = connectedAudioNames();
                 for (BluetoothDevice dev : ba.getBondedDevices()) {
-                    String n = dev.getName();
+                    String n = btLabel(dev);
+                    String orig = dev.getName();
                     BtDev b = new BtDev(n == null || n.trim().isEmpty() ? dev.getAddress() : n.trim(), dev.getAddress());
                     try {
                         b.connected = Boolean.TRUE.equals(BluetoothDevice.class.getMethod("isConnected").invoke(dev));
                     } catch (Exception ignored) {
                     }
-                    if (!b.connected && audio.containsKey(b.name.toLowerCase())) b.connected = true;
+                    if (!b.connected && (audio.containsKey(b.name.toLowerCase())
+                            || (orig != null && audio.containsKey(orig.trim().toLowerCase())))) b.connected = true;
                     if (b.connected) rememberBt(b.address, b.name);
                     devices.add(b);
                 }
@@ -3097,10 +3188,16 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
                     tunerId = info.getId();
                 }
                 if (!info.isPassthroughInput()) continue;
+                CharSequence custom = null;
+                try {
+                    custom = info.loadCustomLabel(this);              // the name you gave the input (e.g. "PS4")
+                } catch (RuntimeException ignored) {
+                }
                 CharSequence l = info.loadLabel(this);
                 String label = l == null ? info.getId() : l.toString();
                 boolean hdmi = info.getType() == TvInputInfo.TYPE_HDMI;
-                if (hdmi && !label.toUpperCase().contains("HDMI")) label = "HDMI " + label;
+                if (custom != null && custom.toString().trim().length() > 0) label = custom.toString().trim();
+                else if (hdmi && !label.toUpperCase().contains("HDMI")) label = "HDMI " + label;
                 final String id = info.getId();
                 int state = hdmi && hdmiStateBogus ? -1 : tim.getInputState(id);
                 if (!hdmi && rows.getChildCount() > 0 && !sawNonHdmi) addSeparator(rows);

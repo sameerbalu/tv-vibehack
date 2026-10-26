@@ -84,9 +84,26 @@ public class ColorBar extends View {
 
     private final Paint shinePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
+    private boolean shineOn;
+
+    /** Turns on the light that runs along the fill (off by default). */
+    void setShine(boolean on) {
+        shineOn = on;
+        if (isAttachedToWindow()) {
+            if (shine != null) shine.cancel();
+            shineT = -1f;
+            if (on) startShine();
+            invalidate();
+        }
+    }
+
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
+        if (shineOn) startShine();
+    }
+
+    private void startShine() {
         shine = android.animation.ValueAnimator.ofFloat(0f, 1f);
         shine.setDuration(4200);
         shine.setRepeatCount(android.animation.ValueAnimator.INFINITE);

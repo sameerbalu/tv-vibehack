@@ -130,8 +130,10 @@ public class WidgetPanel extends LinearLayout {
             LayoutParams lp = new LayoutParams((int) (WIDTH_DP * d), (int) (heightDp * d));
             lp.bottomMargin = (int) (GAP_DP * d);
             addView(c, lp);
-            sweeps.add(new Sweep(c, sweeps.size()));
-            c.setForeground(sweeps.get(sweeps.size() - 1));
+            if (id.equals("now_playing")) {              // the light sweep is only for the music card
+                sweeps.add(new Sweep(c, 0));
+                c.setForeground(sweeps.get(0));
+            }
         }
         applyVisibility();
     }
@@ -375,7 +377,7 @@ public class WidgetPanel extends LinearLayout {
 
     /** A soft diagonal highlight that glides across one card now and then (cards take turns). */
     private final class Sweep extends android.graphics.drawable.Drawable {
-        private static final long CYCLE = 9000L, RUN = 1300L;
+        private static final long CYCLE = 6000L, RUN = 1400L;
         private final View card;
         private final long start;
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -620,6 +622,7 @@ public class WidgetPanel extends LinearLayout {
         col.addView(npArtist, al);
 
         npBar = new ColorBar(getContext());
+        npBar.setShine(true);
         LayoutParams bl = new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (4 * d));
         bl.topMargin = (int) (10 * d);
         col.addView(npBar, bl);
