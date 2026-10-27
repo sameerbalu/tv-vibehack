@@ -15,7 +15,7 @@ final class MenuIcons {
 
     static final int WALLPAPER = 1, DEPTH = 2, EYE = 3, WIDGETS = 4, SPARKLE = 5, MOON = 6, BELL = 7, GEAR = 8,
             TRASH = 9, PLAY = 10, OPEN = 11, CLEAR = 12, GLOW = 13, BRUSH = 14, LEVELS = 15, TV = 16,
-            BLUETOOTH = 17, SOURCE = 18, WIFI = 19, CLOCK = 20, SHIELD = 21, POWER = 22, RESTART = 23;
+            BLUETOOTH = 17, SOURCE = 18, WIFI = 19, CLOCK = 20, SHIELD = 21;
 
     private MenuIcons() {
     }
@@ -45,8 +45,6 @@ final class MenuIcons {
             case WIFI: return new Wifi(density, white);
             case CLOCK: return new Clock(density, white);
             case SHIELD: return new Shield(density, white);
-            case POWER: return new Power(density, white);
-            case RESTART: return new Restart(density, white);
             case BLUETOOTH: return new PillIcon.Bluetooth(density, white);
             default: return new PillIcon.Input(density, white);
         }
@@ -624,55 +622,6 @@ final class MenuIcons {
             fill();
             ink(1f);
             c.drawCircle(cx, cy, 1.4f, paint);
-            line();
-            c.restore();
-        }
-    }
-
-    // ---- power: the ring glows, the line presses in ----------------------------------------------------------------
-    static final class Power extends Menu {
-        private final RectF oval = new RectF(4.5f, 5.5f, 19.5f, 20.5f);
-
-        Power(float d, ColorStateList c) {
-            super(d, c, 2200);
-        }
-
-        @Override
-        void drawIcon(Canvas c) {
-            ink(0.72f + 0.28f * bump(0.28f, 0.5f));
-            c.drawArc(oval, 300f, 300f, false, paint);
-            float k = bump(0.04f, 0.4f);
-            ink(1f);
-            c.drawLine(12f, 3.6f + 1.4f * k, 12f, 11.4f, paint);
-        }
-    }
-
-    // ---- restart: the arrow goes once round, in place ---------------------------------------------------------------
-    static final class Restart extends Menu {
-        private final RectF oval = new RectF(4.5f, 4.5f, 19.5f, 19.5f);
-        private final Path head = new Path();
-
-        Restart(float d, ColorStateList c) {
-            super(d, c, 2400);
-            double a = Math.toRadians(240);
-            float ex = 12f + 7.5f * (float) Math.cos(a), ey = 12f + 7.5f * (float) Math.sin(a);
-            float tx = -(float) Math.sin(a), ty = (float) Math.cos(a);      // clockwise direction at the end
-            float nx = (float) Math.cos(a), ny = (float) Math.sin(a);       // outwards
-            head.moveTo(ex + tx * 3.2f, ey + ty * 3.2f);
-            head.lineTo(ex + nx * 3.1f, ey + ny * 3.1f);
-            head.lineTo(ex - nx * 3.1f, ey - ny * 3.1f);
-            head.close();
-        }
-
-        @Override
-        void drawIcon(Canvas c) {
-            float rot = 360f * ease(prog(0.05f, 0.7f));
-            c.save();
-            c.rotate(rot, 12f, 12f);
-            ink(1f);
-            c.drawArc(oval, -40f, 280f, false, paint);
-            fill();
-            c.drawPath(head, paint);
             line();
             c.restore();
         }

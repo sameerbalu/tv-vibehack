@@ -153,13 +153,4 @@
     <string name="dock_png">PNG over dock</string>
     <string name="dock_png_choose">Choose dock PNG</string>
     <string name="dock_png_remove">Remove dock PNG</string>
-    <string name="power_menu_title">Power</string>
-    <string name="power_sleep">Sleep</string>
-    <string name="power_restart">Restart</string>
-    <string name="power_off">Power off</string>
-    <string name="power_hint">Back to cancel</string>
-    <string name="power_service_label">Power menu helper</string>
-    <string name="power_service_desc">Lets the launcher open the TV’s own power menu and press Sleep, Restart or Power off for you. It does nothing else.</string>
-    <string name="power_need_access">Allow Power menu helper in Accessibility to use the power menu</string>
-    <string name="power_pick_system">Choose it in the TV’s power menu</string>
 </resources>

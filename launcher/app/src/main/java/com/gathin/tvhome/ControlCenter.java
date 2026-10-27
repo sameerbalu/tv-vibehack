@@ -56,7 +56,7 @@ final class ControlCenter {
     /** What the controls do (each may be null = hidden). */
     static final class Actions {
         Runnable wallpaper, hideApps, effects, widgets, saver, bluetooth, wifi, system, about, sound, clockStyle, adBlock, musicAccess,
-                clearCache, stopApps, power;
+                clearCache, stopApps;
     }
 
     /** Values shown on the tiles. */
@@ -221,7 +221,6 @@ final class ControlCenter {
         if (a.musicAccess != null) rb.add(round(MenuIcons.BELL, a.musicAccess));
         rb.add(round(MenuIcons.TV, a.about));
         rb.add(round(MenuIcons.GEAR, a.system));
-        if (a.power != null) rb.add(round(MenuIcons.POWER, a.power));
         for (View v : rb) {
             FrameLayout cell = new FrameLayout(ctx);
             cell.setClipChildren(false);
