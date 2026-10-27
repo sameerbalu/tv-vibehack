@@ -19,7 +19,8 @@ import android.view.animation.LinearInterpolator;
  */
 public class WeatherView extends View {
 
-    static final int CLEAR = 0, PARTLY = 1, CLOUDY = 2, FOG = 3, RAIN = 4, SNOW = 5, STORM = 6;
+    static final int CLEAR = 0, PARTLY = 1, CLOUDY = 2, FOG = 3, RAIN = 4, SNOW = 5, STORM = 6,
+            MAINLY = 7, DRIZZLE = 8, HEAVY = 9, SHOWERS = 10, FREEZING = 11, HEAVY_SNOW = 12, GRAINS = 13, HAIL = 14;
 
     private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path = new Path();
@@ -41,13 +42,21 @@ public class WeatherView extends View {
     /** Sets what is drawn from the WMO weather code (Open-Meteo) and whether it is daytime. */
     void setCondition(int wmo, boolean isDay) {
         int k;
-        if (wmo <= 1) k = CLEAR;
+        if (wmo == 0) k = CLEAR;
+        else if (wmo == 1) k = MAINLY;
         else if (wmo == 2) k = PARTLY;
         else if (wmo == 3) k = CLOUDY;
         else if (wmo == 45 || wmo == 48) k = FOG;
+        else if (wmo >= 51 && wmo <= 55) k = DRIZZLE;
+        else if (wmo == 56 || wmo == 57 || wmo == 66 || wmo == 67) k = FREEZING;
+        else if (wmo == 65 || wmo == 82) k = HEAVY;
+        else if (wmo == 80 || wmo == 81) k = SHOWERS;
+        else if (wmo >= 60 && wmo < 70) k = RAIN;
+        else if (wmo == 75 || wmo == 86) k = HEAVY_SNOW;
+        else if (wmo == 77) k = GRAINS;
+        else if (wmo == 71 || wmo == 73 || wmo == 85) k = SNOW;
+        else if (wmo == 96 || wmo == 99) k = HAIL;
         else if (wmo >= 95) k = STORM;
-        else if ((wmo >= 71 && wmo <= 77) || wmo == 85 || wmo == 86) k = SNOW;
-        else if (wmo >= 51) k = RAIN;
         else k = CLOUDY;
         kind = k;
         day = isDay;
@@ -63,7 +72,7 @@ public class WeatherView extends View {
             anim.setRepeatCount(ValueAnimator.INFINITE);
             anim.setInterpolator(new LinearInterpolator());
             anim.addUpdateListener(a -> {
-                if (Perf.paused) return;
+                if (Perf.paused || !isShown()) return;
                 t = (Float) a.getAnimatedValue();
                 invalidate();
             });
@@ -92,6 +101,11 @@ public class WeatherView extends View {
                 if (day) sun(c, s * .5f, s * .5f, s * .21f, s);
                 else moon(c, s * .5f, s * .5f, s * .22f, s, true);
                 break;
+            case MAINLY:
+                if (day) sun(c, s * .44f, s * .4f, s * .19f, s);
+                else moon(c, s * .44f, s * .4f, s * .2f, s, true);
+                cloud(c, s * (-.5f + 1.3f * t), s * .5f, s * .46f, day ? 0xF2FFFFFF : 0xE6C9D2E3);     // one small cloud drifts across
+                break;
             case PARTLY:
                 if (day) sun(c, s * .38f, s * .36f, s * .16f, s);
                 else moon(c, s * .38f, s * .36f, s * .17f, s, false);
@@ -115,9 +129,46 @@ public class WeatherView extends View {
                 cloud(c, s * .1f, s * .08f, s * .8f, day ? 0xFFC4CDDA : 0xFF8590A6);
                 rain(c, s, 5, false);
                 break;
+            case DRIZZLE:
+                cloud(c, s * (.1f + .02f * (float) Math.sin(t * TAU)), s * .1f, s * .8f, day ? 0xFFD0D8E4 : 0xFF8F9AAF);
+                drops(c, s, 8, 0.9f, .06f, .022f, 0xB38AD7FF, .02f);
+                break;
+            case HEAVY:
+                cloud(c, s * .1f, s * .04f, s * .82f, day ? 0xFF9AA6B8 : 0xFF6C778C);
+                drops(c, s, 9, 2.8f, .14f, .045f, 0xFF63C3F5, .07f);
+                splashes(c, s);
+                break;
+            case SHOWERS:
+                if (day) {
+                    rainbow(c, s);
+                    sun(c, s * .3f, s * .3f, s * .13f, s);
+                } else {
+                    moon(c, s * .3f, s * .3f, s * .14f, s, false);
+                }
+                cloud(c, s * (.2f + .03f * (float) Math.sin(t * TAU)), s * .26f, s * .72f, day ? 0xFFD3DAE6 : 0xFF8590A6);
+                drops(c, s, 5, 1.7f, .1f, .04f, 0xFF7DD3FC, .04f, .62f);
+                break;
+            case FREEZING:
+                cloud(c, s * .1f, s * .08f, s * .8f, day ? 0xFFC3D6EA : 0xFF7D93AF);
+                drops(c, s, 4, 1.2f, .09f, .035f, 0xFFA5E1FF, .04f);
+                crystals(c, s);
+                break;
+            case HEAVY_SNOW:
+                cloud(c, s * .08f, s * .06f, s * .84f, day ? 0xFFC9D2E0 : 0xFF8590A6);
+                flakes(c, s, 12, 1.5f, .036f, .06f);
+                break;
+            case GRAINS:
+                cloud(c, s * .1f, s * .08f, s * .8f, day ? 0xFFDCE3EE : 0xFF9AA5BA);
+                flakes(c, s, 16, 2.4f, .016f, .015f);
+                break;
+            case HAIL:
+                cloud(c, s * .1f, s * .05f, s * .8f, 0xFF6F7A8F);
+                hail(c, s);
+                storm(c, s);
+                break;
             case SNOW:
                 cloud(c, s * .1f, s * .08f, s * .8f, day ? 0xFFDCE3EE : 0xFF9AA5BA);
-                snow(c, s);
+                flakes(c, s, 7, 1.0f, .03f, .035f);
                 break;
             default:
                 cloud(c, s * .1f, s * .06f, s * .8f, 0xFF7C8699);
@@ -252,5 +303,124 @@ public class WeatherView extends View {
         p.setAlpha((int) (140 + 115 * flash));
         c.drawPath(path, p);
         p.setAlpha(255);
+    }
+
+    /** Slanted raindrops of any kind. top = where they start (share of the height). */
+    private void drops(Canvas c, float s, int n, float speed, float len, float width, int color, float slant) {
+        drops(c, s, n, speed, len, width, color, slant, .5f);
+    }
+
+    private void drops(Canvas c, float s, int n, float speed, float len, float width, int color, float slant, float top) {
+        p.setStyle(Paint.Style.STROKE);
+        p.setStrokeCap(Paint.Cap.ROUND);
+        p.setStrokeWidth(s * width);
+        p.setColor(color);
+        int base = color >>> 24;
+        float span = .96f - top;
+        for (int i = 0; i < n; i++) {
+            float ph = (t * speed + i * .6180339f) % 1f;                 // golden-ratio spacing: no two drops in step
+            float x = s * (.2f + .6f * ((i * .37f + .11f) % 1f)) - ph * s * slant;
+            float y = s * (top + ph * span);
+            p.setAlpha((int) (base * (1f - ph * ph)));
+            c.drawLine(x, y, x - s * slant * len / .1f * .35f, y + s * len, p);
+        }
+        p.setAlpha(255);
+        p.setStyle(Paint.Style.FILL);
+    }
+
+    /** Little rings spreading where heavy rain hits the ground. */
+    private void splashes(Canvas c, float s) {
+        p.setStyle(Paint.Style.STROKE);
+        p.setStrokeWidth(s * .02f);
+        for (int i = 0; i < 4; i++) {
+            float ph = (t * 2.8f + i * .27f) % 1f;
+            float x = s * (.22f + i * .18f);
+            float w = s * (.02f + .07f * ph);
+            p.setColor(0xFF9BDDFB);
+            p.setAlpha((int) (200 * (1f - ph)));
+            rf.set(x - w, s * .955f - w * .3f, x + w, s * .955f + w * .3f);
+            c.drawOval(rf, p);
+        }
+        p.setAlpha(255);
+        p.setStyle(Paint.Style.FILL);
+    }
+
+    /** Snowflakes (or grains) falling and swaying. */
+    private void flakes(Canvas c, float s, int n, float speed, float size, float sway) {
+        double TAU = Math.PI * 2;
+        p.setStyle(Paint.Style.FILL);
+        p.setColor(0xFFFFFFFF);
+        for (int i = 0; i < n; i++) {
+            float ph = (t * speed + i * .6180339f) % 1f;
+            float x = s * (.16f + .68f * ((i * .41f + .07f) % 1f)) + s * sway * (float) Math.sin((t * 2 + i * .37f) * TAU);
+            float y = s * (.5f + ph * .46f);
+            float r = s * (size + size * .35f * (i % 3) / 2f);
+            p.setAlpha((int) (255 * (1f - ph * ph)));
+            c.drawCircle(x, y, r, p);
+        }
+        p.setAlpha(255);
+    }
+
+    /** Ice crystals: small diamonds that turn while they fall. */
+    private void crystals(Canvas c, float s) {
+        p.setStyle(Paint.Style.FILL);
+        for (int i = 0; i < 4; i++) {
+            float ph = (t * .9f + i * .31f) % 1f;
+            float x = s * (.28f + i * .15f) + s * .02f * (float) Math.sin((t * 2 + i) * Math.PI * 2);
+            float y = s * (.5f + ph * .44f);
+            float r = s * .045f;
+            c.save();
+            c.rotate(t * 360f + i * 50f, x, y);
+            path.reset();
+            path.moveTo(x, y - r);
+            path.lineTo(x + r * .6f, y);
+            path.lineTo(x, y + r);
+            path.lineTo(x - r * .6f, y);
+            path.close();
+            p.setColor(0xFFE8F6FF);
+            p.setAlpha((int) (255 * (1f - ph * ph)));
+            c.drawPath(path, p);
+            c.restore();
+        }
+        p.setAlpha(255);
+    }
+
+    /** Hailstones: they fall fast, hit the ground and bounce. */
+    private void hail(Canvas c, float s) {
+        p.setStyle(Paint.Style.FILL);
+        for (int i = 0; i < 6; i++) {
+            float ph = (t * 2.2f + i * .19f) % 1f;
+            float x = s * (.2f + i * .12f) - ph * s * .03f;
+            float y;
+            float a = 1f;
+            if (ph < .78f) {
+                y = s * (.5f + ph / .78f * .42f);
+            } else {
+                float b = (ph - .78f) / .22f;
+                y = s * (.92f - .12f * (float) Math.sin(b * Math.PI));
+                a = 1f - b * .6f;
+            }
+            p.setColor(0xFFEAF6FF);
+            p.setAlpha((int) (255 * a));
+            c.drawCircle(x, y, s * (.03f + .008f * (i % 2)), p);
+        }
+        p.setAlpha(255);
+    }
+
+    /** A rainbow that fades in and out behind the sun-and-rain scene. */
+    private void rainbow(Canvas c, float s) {
+        float a = .28f + .22f * (0.5f + 0.5f * (float) Math.sin(t * Math.PI * 2));
+        int[] cols = {0xFFFF6B6B, 0xFFFFC857, 0xFF7BE495, 0xFF5BB8FF};
+        p.setStyle(Paint.Style.STROKE);
+        p.setStrokeWidth(s * .035f);
+        for (int i = 0; i < cols.length; i++) {
+            float r = s * (.40f - i * .04f);
+            rf.set(s * .6f - r, s * .78f - r, s * .6f + r, s * .78f + r);
+            p.setColor(cols[i]);
+            p.setAlpha((int) (255 * a));
+            c.drawArc(rf, 200f, 140f, false, p);
+        }
+        p.setAlpha(255);
+        p.setStyle(Paint.Style.FILL);
     }
 }

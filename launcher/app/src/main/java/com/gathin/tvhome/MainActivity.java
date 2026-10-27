@@ -327,7 +327,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         depthWidgets = findViewById(R.id.depthWidgets);
         dockPng = findViewById(R.id.dockPng);
         dockPngOn = getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_DOCK_PNG_ON, false);
-        loadDockPng();                                           // the saved PNG is back right after a restart
+        wallpaperShown = !WallpaperStore.exists(this);             // the depth layers wait for the saved wallpaper
+        if (!wallpaperShown) handler.postDelayed(this::markWallpaperReady, 6000);   // never wait forever
         ambientGlow = new GradientDrawable();
         ambientGlow.setGradientType(GradientDrawable.RADIAL_GRADIENT);
         ambientGlow.setGradientCenter(0.32f, 0.42f);
@@ -905,7 +906,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     /** Draws the depth PNG over the widget columns (when switched on), so the widgets sit behind it. */
     private void updateDepthWidgets() {
         if (depthWidgets == null || widgets == null) return;
-        boolean on = widgetsDepth != 0 && depthWidgets.hasBitmap();
+        boolean on = widgetsDepth != 0 && depthWidgets.hasBitmap() && wallpaperShown;
         depthWidgets.setVisibility(on ? View.VISIBLE : View.GONE);
         if (!on) return;
         java.util.List<Rect> list = new java.util.ArrayList<>();
@@ -2233,6 +2234,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         if (appsPanel != null) appsPanel.setBackdrop(null);
         if (allAppsPanel != null) allAppsPanel.setBackdrop(null);
         if (grid != null) grid.invalidate();
+        markWallpaperReady();          // no wallpaper any more: nothing left to wait for
     }
 
     private void chooseFront() {
@@ -2305,11 +2307,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
                 wallpaperFront.setImageBitmap(bitmap);
                 // The picture behind it is dimmed a bit; match that so the cut-out does not look pasted on.
                 wallpaperFront.setColorFilter(0x73000000, android.graphics.PorterDuff.Mode.SRC_ATOP);
-                wallpaperFront.setVisibility(View.VISIBLE);
+                wallpaperFront.setVisibility(wallpaperShown ? View.VISIBLE : View.INVISIBLE);   // waits for the wallpaper at start
                 // Second copy over the clock and date: they end up behind the character, like on a phone lock screen.
                 wallpaperFrontTop.setImageBitmap(bitmap);
                 wallpaperFrontTop.setColorFilter(0x73000000, android.graphics.PorterDuff.Mode.SRC_ATOP);
-                wallpaperFrontTop.setVisibility(View.VISIBLE);
+                wallpaperFrontTop.setVisibility(wallpaperShown ? View.VISIBLE : View.INVISIBLE);
                 depthWidgets.setBitmap(bitmap);
                 root.post(this::updateFrontTopClip);
                 root.post(this::updateDepthWidgets);
@@ -2390,15 +2392,20 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     }
 
     private void restoreFront() {
-        if (!WallpaperStore.hasFront(this) || wallpaperFront.getVisibility() == View.VISIBLE || frontLoadingNow) return;
+        if (!WallpaperStore.hasFront(this) || wallpaperFront.getVisibility() != View.GONE || frontLoadingNow) return;
         frontLoadingNow = true;
         applyFront();
     }
 
     private void restoreWallpaper() {
-        loadDockPng();
+        if (!wallpaperLoadingNow) {
+            queueSavedWallpaper();
+        }
+        loadDockPng();                  // queued behind the wallpaper: the picture comes first
         restoreFront();
-        if (wallpaperLoadingNow) return;
+    }
+
+    private void queueSavedWallpaper() {
         wallpaperLoadingNow = true;
         final int gen = ++wallGen;
         final boolean had = WallpaperStore.exists(this);
@@ -2431,34 +2438,99 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         IMG.execute(() -> decodeWallpaper(uri, gen));
     }
 
-    /** Background part: decode, blur twice, then hand the finished bitmaps to the main thread. */
+    private static final String KEY_WALL_CACHE = "wall_cache_sig";
+    /** False only while the saved wallpaper is still loading at start: the depth layers wait for it. */
+    private boolean wallpaperShown = true;
+
+    /** Lets the depth foreground, its widget copy and the PNG over the dock appear (together with the wallpaper). */
+    private void markWallpaperReady() {
+        if (wallpaperShown) return;
+        wallpaperShown = true;
+        for (ImageView v : new ImageView[]{wallpaperFront, wallpaperFrontTop}) {
+            if (v != null && v.getVisibility() == View.INVISIBLE && v.getDrawable() != null) v.setVisibility(View.VISIBLE);
+        }
+        updateDepthWidgets();
+        if (grid != null) grid.invalidate();
+    }
+
+    /** Decodes so the result is at least screen sized, but no bigger than needed (a 4000 px photo opens at half size). */
+    private Bitmap decodeAtLeast(Uri uri, int minW, int minH, Bitmap.Config config) throws java.io.IOException {
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        try (java.io.InputStream in = getContentResolver().openInputStream(uri)) {
+            BitmapFactory.decodeStream(in, null, bounds);
+        }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
+        int sample = 1;
+        while (bounds.outWidth / (sample * 2) >= minW && bounds.outHeight / (sample * 2) >= minH) sample *= 2;
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inSampleSize = sample;
+        options.inPreferredConfig = config;
+        try (java.io.InputStream in = getContentResolver().openInputStream(uri)) {
+            return BitmapFactory.decodeStream(in, null, options);
+        }
+    }
+
+    /**
+     * Background part. The picture is shown as soon as it is decoded; the two blurs (dock band, app list) follow a
+     * moment later. A screen-sized copy is kept, so the next start opens that small file instead of the original.
+     */
     private void decodeWallpaper(Uri uri, final int gen) {
-        Bitmap bmp = null, blur = null, veil = null;
+        final int sw = Math.max(1, getResources().getDisplayMetrics().widthPixels);
+        final int sh = Math.max(1, getResources().getDisplayMetrics().heightPixels);
+        final java.io.File cache = new java.io.File(getFilesDir(), "wallpaper_screen.jpg");
+        String sig = null;
+        boolean fromCache = false;
+        Bitmap bmp = null;
         try {
-            bmp = decodeScaled(uri, null, Math.max(1, getResources().getDisplayMetrics().widthPixels) * 2,
-                    Math.max(1, getResources().getDisplayMetrics().heightPixels) * 2, Bitmap.Config.RGB_565);
-            if (bmp != null) {
-                blur = BlurUtil.blur(bmp, 192, 12);     // heavy, smooth blur like a frosted TV home
-                veil = BlurUtil.blur(bmp, 360, 4);      // a gentle blur for the menu veil
+            if ("file".equals(uri.getScheme()) && uri.getPath() != null) {
+                java.io.File src = new java.io.File(uri.getPath());
+                sig = src.length() + ":" + src.lastModified() + ":" + sw + "x" + sh;
+                if (cache.isFile() && sig.equals(getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_WALL_CACHE, ""))) {
+                    BitmapFactory.Options o = new BitmapFactory.Options();
+                    o.inPreferredConfig = Bitmap.Config.RGB_565;
+                    bmp = BitmapFactory.decodeFile(cache.getAbsolutePath(), o);
+                    fromCache = bmp != null;
+                }
             }
+            if (bmp == null) bmp = decodeAtLeast(uri, sw, sh, Bitmap.Config.RGB_565);
         } catch (Exception | OutOfMemoryError ignored) {
         }
-        final Bitmap bitmap = bmp, blurred = blur, v = veil;
+        final Bitmap bitmap = bmp;
         runOnUiThread(() -> {
-            wallpaperLoadingNow = false;
             if (isDestroyed() || gen != wallGen) return;
-            if (bitmap == null || blurred == null) {
+            if (bitmap == null) {
+                wallpaperLoadingNow = false;
                 clearWallpaperViews();
+                markWallpaperReady();
                 toast(R.string.wallpaper_failed, false);
                 return;
             }
             boolean first = wallpaperView.getVisibility() != View.VISIBLE;
             wallpaperView.setImageBitmap(bitmap);
             wallpaperView.setVisibility(View.VISIBLE);
-            if (first) {                                  // fades in instead of popping on after the first frame
+            // With depth layers waiting for it the picture appears at once, so they all show on the same frame.
+            if (first && wallpaperShown) {
                 wallpaperView.setAlpha(0f);
                 wallpaperView.animate().alpha(1f).setDuration(220).start();
+            } else {
+                wallpaperView.setAlpha(1f);
             }
+            markWallpaperReady();
+        });
+        if (bitmap == null) return;
+
+        Bitmap blur = null, veil = null;
+        try {
+            blur = BlurUtil.blur(bitmap, 192, 12);     // heavy, smooth blur like a frosted TV home
+            veil = BlurUtil.blur(bitmap, 360, 4);      // a gentle blur for the menu veil
+        } catch (Exception | OutOfMemoryError ignored) {
+        }
+        final Bitmap blurred = blur, v = veil;
+        runOnUiThread(() -> {
+            if (isDestroyed() || gen != wallGen) return;
+            wallpaperLoadingNow = false;
+            if (blurred == null) return;                // keep the picture, just without the frosted parts
             // One blurred copy serves the full-screen blur (app list) and the frosted dock band.
             wallpaperBlurView.setImageBitmap(blurred);
             wallpaperBlurView.setVisibility(View.VISIBLE);
@@ -2469,6 +2541,14 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             if (allAppsPanel != null) allAppsPanel.setBackdrop(blurred);
             if (grid != null) grid.invalidate();
         });
+
+        if (!fromCache && sig != null) {
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(cache)) {
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 92, out);
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_WALL_CACHE, sig).apply();
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     // ---- Continue watching (row above the apps in All apps) ---------------------------------------
@@ -2759,7 +2839,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     /** The PNG over the dock fades together with the dock (it is not shown in the All apps section). */
     private void syncDockPng() {
         if (dockPng == null) return;
-        boolean want = dockPngOn && dockPng.hasBitmap();
+        boolean want = dockPngOn && dockPng.hasBitmap() && wallpaperShown;
         if (!want) {
             if (dockPng.getVisibility() != View.GONE) dockPng.setVisibility(View.GONE);
             return;
