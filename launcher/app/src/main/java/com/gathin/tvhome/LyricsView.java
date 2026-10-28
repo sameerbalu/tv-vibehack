@@ -146,7 +146,8 @@ public class LyricsView extends View {
         int lo = Math.max(0, base - 3), hi = Math.min(n - 1, base + 4);
         if (hi < lo) return;
         float gap = 12 * d;
-        float[] centre = new float[hi - lo + 1];
+        if (centreBuf.length < hi - lo + 1) centreBuf = new float[hi - lo + 1];
+        float[] centre = centreBuf;
         float acc = 0f;
         for (int i = lo; i <= hi; i++) {
             float lh = layout(i).getHeight();
@@ -182,4 +183,6 @@ public class LyricsView extends View {
                 (int) (Color.green(a) + (Color.green(b) - Color.green(a)) * t),
                 (int) (Color.blue(a) + (Color.blue(b) - Color.blue(a)) * t));
     }
+
+    private float[] centreBuf = new float[10];   // reused every frame
 }

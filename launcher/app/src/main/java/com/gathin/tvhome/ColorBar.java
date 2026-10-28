@@ -75,14 +75,23 @@ public class ColorBar extends View {
             int save = canvas.save();
             canvas.clipRect(0, 0, fw, h);
             float x = -h * 3 + (fw + h * 6) * shineT;
-            shinePaint.setShader(new LinearGradient(x - h * 3, 0, x + h * 3, 0,
-                    new int[]{0x00FFFFFF, 0x66FFFFFF, 0x00FFFFFF}, null, Shader.TileMode.CLAMP));
+            if (shineShader == null || shineH != h) {              // built once; it only slides afterwards
+                shineShader = new LinearGradient(0, 0, h * 6, 0,
+                        new int[]{0x00FFFFFF, 0x66FFFFFF, 0x00FFFFFF}, null, Shader.TileMode.CLAMP);
+                shineH = h;
+                shinePaint.setShader(shineShader);
+            }
+            shineMx.setTranslate(x - h * 3, 0);
+            shineShader.setLocalMatrix(shineMx);
             canvas.drawRoundRect(rect, r, r, shinePaint);
             canvas.restoreToCount(save);
         }
     }
 
     private final Paint shinePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final android.graphics.Matrix shineMx = new android.graphics.Matrix();
+    private LinearGradient shineShader;
+    private int shineH;
 
     private boolean shineOn = true;
 

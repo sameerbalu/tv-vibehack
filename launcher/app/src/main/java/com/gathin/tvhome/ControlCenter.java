@@ -567,6 +567,7 @@ final class ControlCenter {
 
     /** One System row: label, a dark-red "used" bar, and what is free. The focus fill stays inside its own bounds. */
     private final class MeterRow extends View {
+        private final Paint.FontMetrics fmCache = new Paint.FontMetrics();
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF r = new RectF();
         private final String label, value;
@@ -629,7 +630,7 @@ final class ControlCenter {
             p.setShader(null);
             p.setStyle(Paint.Style.FILL);
             float padL = 12 * d, padR = 12 * d;
-            Paint.FontMetrics fm = new Paint.FontMetrics();
+            Paint.FontMetrics fm = fmCache;
 
             // label (fixed column so both bars line up)
             p.setTextSize(12.5f * d);

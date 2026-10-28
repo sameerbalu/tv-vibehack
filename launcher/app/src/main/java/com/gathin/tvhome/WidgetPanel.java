@@ -380,6 +380,9 @@ public class WidgetPanel extends LinearLayout {
         private final android.graphics.Path clip = new android.graphics.Path();
         private final RectF r = new RectF();
         private float progress = -1f;
+        private android.graphics.LinearGradient shader;
+        private final android.graphics.Matrix mx = new android.graphics.Matrix();
+        private int shW, shH;
 
         Sweep(View card, int index) {
             this.card = card;
@@ -403,11 +406,19 @@ public class WidgetPanel extends LinearLayout {
             if (w <= 0 || h <= 0) return;
             float band = w * 0.45f;
             float x = -band + (w + band * 2) * progress;
-            paint.setShader(new android.graphics.LinearGradient(x - band, 0, x + band, h * 0.6f,
-                    new int[]{0x00FFFFFF, 0x2EFFFFFF, 0x00FFFFFF}, null, android.graphics.Shader.TileMode.CLAMP));
+            if (shader == null || shW != w || shH != h) {          // built once per size; it only slides afterwards
+                shader = new android.graphics.LinearGradient(0, 0, band * 2f, h * 0.6f,
+                        new int[]{0x00FFFFFF, 0x2EFFFFFF, 0x00FFFFFF}, null, android.graphics.Shader.TileMode.CLAMP);
+                paint.setShader(shader);
+                r.set(0, 0, w, h);
+                clip.reset();
+                clip.addRoundRect(r, 16 * d, 16 * d, android.graphics.Path.Direction.CW);
+                shW = w;
+                shH = h;
+            }
+            mx.setTranslate(x - band, 0);
+            shader.setLocalMatrix(mx);
             r.set(0, 0, w, h);
-            clip.reset();
-            clip.addRoundRect(r, 16 * d, 16 * d, android.graphics.Path.Direction.CW);
             c.save();
             c.clipPath(clip);
             c.drawRect(r, paint);

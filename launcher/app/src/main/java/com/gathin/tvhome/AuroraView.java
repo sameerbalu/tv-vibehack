@@ -38,6 +38,7 @@ public class AuroraView extends View {
     private final float[] sx = new float[STARS], sy = new float[STARS], sr = new float[STARS],
             sp = new float[STARS], sw = new float[STARS];
     private final long start = SystemClock.uptimeMillis();
+    private float dens;
 
     private int[] palette = DEFAULT_PALETTE;
     private int[] prevPalette = DEFAULT_PALETTE;
@@ -160,15 +161,16 @@ public class AuroraView extends View {
             canvas.drawPath(path, ribbon);
         }
 
+        if (dens <= 0f) dens = getResources().getDisplayMetrics().density;
         for (int i = 0; i < STARS; i++) {
             float a = 0.5f + 0.5f * (float) Math.sin(t * sp[i] + sw[i]);
             star.setColor(((int) (40 + 150 * a) << 24) | 0x00FFFFFF);
             float y = (sy[i] - t * 0.004f * sp[i]) % 1f;
             if (y < 0) y += 1f;
-            canvas.drawCircle(sx[i] * w, y * h, sr[i] * getResources().getDisplayMetrics().density * 0.9f, star);
+            canvas.drawCircle(sx[i] * w, y * h, sr[i] * dens * 0.9f, star);
         }
 
         frame++;
-        postInvalidateDelayed(33);
+        postInvalidateOnAnimation();   // every screen refresh (60 fps); motion is time based, so speed stays the same
     }
 }

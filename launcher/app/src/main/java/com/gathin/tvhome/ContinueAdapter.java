@@ -58,8 +58,25 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
     private final Host host;
     private final float d;
     private final List<NuvioHistory.Entry> entries = new ArrayList<>();
-    private final android.util.LruCache<String, Bitmap> posters = new android.util.LruCache<>(32);
-    private final android.util.LruCache<String, Bitmap> blurs = new android.util.LruCache<>(32);
+    // Limited by memory used, not by number of pictures.
+    private final android.util.LruCache<String, Bitmap> posters = new android.util.LruCache<String, Bitmap>(24 * 1024 * 1024) {
+        @Override
+        protected int sizeOf(String key, Bitmap value) {
+            return value.getAllocationByteCount();
+        }
+    };
+    private final android.util.LruCache<String, Bitmap> blurs = new android.util.LruCache<String, Bitmap>(4 * 1024 * 1024) {
+        @Override
+        protected int sizeOf(String key, Bitmap value) {
+            return value.getAllocationByteCount();
+        }
+    };
+
+    /** Forgets cached posters (they are decoded again when needed). Called when Android says RAM is low. */
+    void trimMemory() {
+        posters.evictAll();
+        blurs.evictAll();
+    }
     static final float POSTER_FOCUS_SCALE = 1.07f;
     private String signature = "";
     /** The wallpaper, used as the thumbnail when an app gives no real picture (VLC only offers its own icon). */

@@ -92,6 +92,11 @@ final class TextFx {
         final int base = tv.getCurrentTextColor() | 0xFF000000;
         final long t0 = System.currentTimeMillis();
         final float[] hsv = {0f, 0.38f, 1f};
+        final LinearGradient[] cache = new LinearGradient[1];
+        final float[] hueSeen = {-100f}, bandSeen = {-1f};
+        final int[] cols = {base, base, base};
+        final float[] pos = {0f, 0.5f, 1f};
+        final Matrix mx = new Matrix();
         final ValueAnimator a = ValueAnimator.ofFloat(0f, 1f);
         a.setDuration(periodMs);
         a.setRepeatCount(ValueAnimator.INFINITE);
@@ -104,10 +109,18 @@ final class TextFx {
             float eased = sweep * sweep * (3f - 2f * sweep);
             float band = Math.max(w * 0.55f, 40f);
             float x = -band + eased * (w + band * 2f);
-            hsv[0] = ((System.currentTimeMillis() - t0) / 45f) % 360f;   // a full turn about every 16 seconds
-            int shine = android.graphics.Color.HSVToColor(hsv);
-            tv.getPaint().setShader(new LinearGradient(x, 0, x + band, 0,
-                    new int[]{base, shine, base}, new float[]{0f, 0.5f, 1f}, Shader.TileMode.CLAMP));
+            float hue = ((System.currentTimeMillis() - t0) / 45f) % 360f;   // a full turn about every 16 seconds
+            if (cache[0] == null || band != bandSeen[0] || Math.abs(hue - hueSeen[0]) >= 3f) {
+                hsv[0] = hue;
+                int shine = android.graphics.Color.HSVToColor(hsv);
+                cols[1] = shine;
+                cache[0] = new LinearGradient(0, 0, band, 0, cols, pos, Shader.TileMode.CLAMP);
+                hueSeen[0] = hue;
+                bandSeen[0] = band;
+            }
+            mx.setTranslate(x, 0);
+            cache[0].setLocalMatrix(mx);
+            tv.getPaint().setShader(cache[0]);
             tv.invalidate();
         });
         a.start();
@@ -125,6 +138,7 @@ final class TextFx {
         final float d = tv.getResources().getDisplayMetrics().density;
         final float period = Math.max(4f, 4.6f * d);         // one line plus its gap, in pixels
         final Matrix drift = new Matrix();
+        final LinearGradient[] cached = new LinearGradient[48];
         final ValueAnimator a = ValueAnimator.ofFloat(0f, 1f);
         a.setDuration(periodMs);
         a.setRepeatCount(ValueAnimator.INFINITE);
@@ -140,9 +154,15 @@ final class TextFx {
             if (duty >= 0.995f) {
                 tv.getPaint().setShader(null);
             } else {
-                LinearGradient lines = new LinearGradient(0, 0, 0, period,
-                        new int[]{base, base, clear, clear},
-                        new float[]{0f, duty, Math.min(1f, duty + 0.002f), 1f}, Shader.TileMode.REPEAT);
+                int q = Math.max(0, Math.min(47, (int) ((duty - 0.24f) / 0.76f * 48f)));   // 48 steps look smooth and can be cached
+                LinearGradient lines = cached[q];
+                if (lines == null) {
+                    float dq = 0.24f + 0.76f * q / 48f;
+                    lines = new LinearGradient(0, 0, 0, period,
+                            new int[]{base, base, clear, clear},
+                            new float[]{0f, dq, Math.min(1f, dq + 0.002f), 1f}, Shader.TileMode.REPEAT);
+                    cached[q] = lines;
+                }
                 drift.setTranslate(0f, -p * period);
                 lines.setLocalMatrix(drift);
                 tv.getPaint().setShader(lines);

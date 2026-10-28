@@ -56,7 +56,6 @@ import android.view.animation.DecelerateInterpolator;
 import android.view.animation.AccelerateDecelerateInterpolator;
 import android.view.animation.LayoutAnimationController;
 import android.view.animation.OvershootInterpolator;
-import android.view.animation.PathInterpolator;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -366,10 +365,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             }
         });
         grid.setHasFixedSize(true);
-        // Scrolling the list recycles whole rows: keep a few rows' views alive (no re-bind, no re-inflate) so a fast
-        // scroll from the dock through the apps does not stall on creating tiles.
-        grid.setItemViewCacheSize(COLUMNS * 3);
-        grid.getRecycledViewPool().setMaxRecycledViews(0, COLUMNS * 6);
+        grid.setItemViewCacheSize(COLUMNS * 3);   // rows just scrolled off come back without being re-bound
         grid.setItemAnimator(null);
         dockDecoration = new DockDecoration(COLUMNS, density);
         grid.addItemDecoration(dockDecoration);
@@ -403,7 +399,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             @Override
             public void onScrollStateChanged(@NonNull RecyclerView rv, int newState) {
                 // Safety net: once a scroll settles, make sure the cursor sits on the focused tile.
-                if (newState == RecyclerView.SCROLL_STATE_IDLE) setGlassSpring(false);
                 if (newState != RecyclerView.SCROLL_STATE_IDLE || !glassShown || snapActive) return;
                 View f = getCurrentFocus();
                 if (f != null && f.getId() == R.id.card && f.getParent() instanceof View
@@ -732,6 +727,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     }
 
     @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        if (continueAdapter != null && level >= TRIM_MEMORY_RUNNING_LOW) continueAdapter.trimMemory();
+    }
+
+    @Override
     protected void onDestroy() {
         super.onDestroy();
         handler.removeCallbacks(clipRunnable);
@@ -764,7 +765,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             int dockRow = (int) ((145 + 6 + 12) * density);   // item height plus DockDecoration offsets
             top = Math.max(0, h - dockRow - (int) (30 * density));
             bottom = Math.max((int) (40 * density), h - (int) (117 * density) - allTopPx());
-            bottom = Math.max(bottom, contBelowPx());           // room to scroll the Continue watching section into view
         }
         if (grid.getPaddingTop() != top || grid.getPaddingBottom() != bottom) {
             grid.setPadding(grid.getPaddingLeft(), top, grid.getPaddingRight(), bottom);
@@ -992,28 +992,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         applyLyricsVisibility();
     }
 
-    /** Soft start, long smooth tail (ease-out cubic): no hard kick at the beginning of a list scroll. */
-    private static final PathInterpolator SCROLL_EASE = new PathInterpolator(0.22f, 0.61f, 0.36f, 1f);
-
     private void scrollGridBy(int dy) {
         if (dy == 0) return;
-        // RecyclerView's own scroller does not follow the system animation speed; scale it by hand so the list
-        // moves in step with the fades and the cursor (which do follow it).
-        float scale = animScale();
-        int base = Math.min(420, 170 + Math.abs(dy) / 3);
-        int duration = scale <= 0.01f ? 1 : Math.max(60, Math.round(base * scale));
-        setGlassSpring(true);                  // the cursor chases a moving tile: critically damped, no wobble
-        grid.smoothScrollBy(0, dy, SCROLL_EASE, duration);
-    }
-
-    private boolean glassSpringSmooth;
-
-    private void setGlassSpring(boolean smooth) {
-        if (smooth == glassSpringSmooth || springX == null) return;
-        glassSpringSmooth = smooth;
-        for (SpringAnimation sp : new SpringAnimation[]{springX, springY}) {
-            sp.getSpring().setStiffness(smooth ? 520f : 260f).setDampingRatio(smooth ? 0.92f : 0.58f);
-        }
+        int duration = Math.min(380, 140 + Math.abs(dy) / 3);
+        grid.smoothScrollBy(0, dy, new DecelerateInterpolator(1.4f), duration);
     }
 
     /**
@@ -1339,7 +1321,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         ambientPulse.addUpdateListener(a -> {
             pulseT = (Float) a.getAnimatedValue();
             long now = android.os.SystemClock.uptimeMillis();
-            if (now - lastPulseDraw < 66) return;      // ~15 fps is plenty for a slow glow
+            if (now - lastPulseDraw < 12) return;      // every screen refresh (60 fps)
             lastPulseDraw = now;
             if (heroShown) setAmbient(ambientColor);
         });
@@ -1566,13 +1548,18 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         int target;
         if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
             if (position < COLUMNS) return false;          // dock row: let focus move to the top bar
-            target = position - COLUMNS;                    // first row of apps: up to the dock
-        } else {
-            int lastRowStart = ((count - 1) / COLUMNS) * COLUMNS;
-            if (position >= lastRowStart) {                 // last row of apps: down to Continue watching
-                if (continueActive()) focusPoster(continueAdapter.currentIndex());   // the large card, like a shelf's current pick
+            if (position < 2 * COLUMNS && continueActive()) {   // first row of apps: up to Continue watching
+                focusPoster(continueAdapter.currentIndex());     // the large card, like a shelf's current pick
                 return true;
             }
+            target = position - COLUMNS;
+        } else {
+            if (position < COLUMNS && continueActive()) {   // dock: down to Continue watching first
+                focusPoster(continueAdapter.currentIndex());     // the large card, like a shelf's current pick
+                return true;
+            }
+            int lastRowStart = ((count - 1) / COLUMNS) * COLUMNS;
+            if (position >= lastRowStart) return true;     // already on the last row
             target = Math.min(position + COLUMNS, count - 1);
         }
         focusTile(target);
@@ -2444,7 +2431,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         dockLoading = true;
         final int gen = ++dockGen;
         final String path = WallpaperStore.dockPath(this);
-        final int limit = Math.max(1, getResources().getDisplayMetrics().widthPixels) * 2;
+        final int limit = Math.max(1, getResources().getDisplayMetrics().widthPixels);   // screen size: sharp on 4K, never 8K
         IMG.execute(() -> {
             Bitmap bmp = null;
             try {
@@ -2661,8 +2648,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private PillIcon.Film contPillIcon;
     private PillIcon.Apps appsPillIcon;
     private boolean pillsRunning;
-    private int continueRowPx;
-    private static final int CONT_TOP_GAP_DP = 20;    // last row of apps -> "Continue watching" pill
+    private int continueGapPx, continueRowPx;
 
     /** True while the row is part of the layout: there is something to show and we are not arranging. */
     private boolean continueActive() {
@@ -2685,13 +2671,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
 
     /** Whole space reserved above the first row of apps, including the hidden buffer under the panel top. */
     private int gapTotalPx() {
-        return (int) (TOP_BUF_DP * density) + appsPillBlockPx();     // Continue watching now sits below the apps
-    }
-
-    /** Space needed under the last row of apps for the Continue watching section (gap, pill, posters, margin). */
-    private int contBelowPx() {
-        if (!continueActive()) return 0;
-        return (int) ((CONT_TOP_GAP_DP + 16 + PANEL_BOTTOM_DP + 9) * density) + contPillBlockPx() + continueRowPx;
+        int g = (int) (TOP_BUF_DP * density) + appsPillBlockPx();
+        if (continueActive()) g += contPillBlockPx() + continueRowPx + (int) (6 * density);
+        return g;
     }
 
     /** The part of the gap that has to be on screen when the first row of apps is shown (no hidden buffer). */
@@ -2715,6 +2697,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         continueRow.setClipChildren(false);
         continueRow.setClipToPadding(false);
         continueRow.setItemAnimator(null);
+        continueRow.setItemViewCacheSize(8);
         continueRow.setOverScrollMode(View.OVER_SCROLL_NEVER);
         continueRow.setHorizontalScrollBarEnabled(false);
         continueRow.setAdapter(continueAdapter);
@@ -2894,6 +2877,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             continueRow.setPadding(padL, 0, padEnd, 0);
         }
         int block = lh + (int) (64 * density);                 // 8 air + card + title + description + 8 air
+        continueGapPx = block + (int) (6 * density) + appsPillBlockPx();   // poster row top -> first row of apps
         if (continueRowPx != block) {
             continueRowPx = block;
             ViewGroup.LayoutParams lp = continueRow.getLayoutParams();
@@ -2901,7 +2885,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             continueRow.setLayoutParams(lp);
             grid.invalidateItemDecorations();
         }
-        updateGridPadding();                                   // the room under the last row depends on the row's height
     }
 
     /** Keeps the row and the pills glued to the gap above the first row of apps. Only draw properties change here. */
@@ -2916,7 +2899,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         if (grid == null || dockDecoration == null) return;
         float target = allAppsMode && !arranging && !snapRising && sectionsActive() ? 0f : 1f;
         if (dockFade == target && !dockTouched) return;
-        float next = target > dockFade ? Math.min(target, dockFade + 0.2f * frameStep) : Math.max(target, dockFade - 0.12f * frameStep);
+        float next = target > dockFade ? Math.min(target, dockFade + 0.2f) : Math.max(target, dockFade - 0.12f);
         boolean changed = next != dockFade;
         dockFade = next;
         dockTouched = dockFade != 1f;
@@ -2935,8 +2918,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         syncAppsPanelBounds();
         float target = allAppsMode && allUiApplied && !arranging && sectionsActive() ? 1f : 0f;
         if (appsPanelFade == target) return;
-        appsPanelFade = target > appsPanelFade ? Math.min(target, appsPanelFade + 0.1f * frameStep)
-                : Math.max(target, appsPanelFade - 0.14f * frameStep);
+        appsPanelFade = target > appsPanelFade ? Math.min(target, appsPanelFade + 0.1f)
+                : Math.max(target, appsPanelFade - 0.14f);
         appsPanel.setAlpha(appsPanelFade);
         grid.invalidate();
     }
@@ -3046,47 +3029,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         moveGlassTo(c, true);
     }
 
-    private long lastSyncMs;
-    private float frameStep = 1f;          // 1 = one 60 fps frame at normal animation speed
-    private float animScaleCached = 1f;
-    private long animScaleAt;
-
-    /** The system "Animator duration scale" (Developer options), re-read at most every 1.5 s. */
-    private float animScale() {
-        long now = SystemClock.uptimeMillis();
-        if (now - animScaleAt > 1500) {
-            animScaleAt = now;
-            try {
-                animScaleCached = Settings.Global.getFloat(getContentResolver(), Settings.Global.ANIMATOR_DURATION_SCALE, 1f);
-            } catch (RuntimeException e) {
-                animScaleCached = 1f;
-            }
-        }
-        return animScaleCached;
-    }
-
-    /**
-     * The fades driven from the draw loop (dock, dark panel) step by real time and follow the animation speed
-     * setting, like the system animators do, so they stay in step with them even when a frame is late.
-     */
-    private void updateFrameStep() {
-        long now = SystemClock.uptimeMillis();
-        float dt = lastSyncMs == 0 ? 16.7f : Math.min(100f, now - lastSyncMs);
-        lastSyncMs = now;
-        float sc = animScale();
-        frameStep = sc <= 0.01f ? 10f : Math.max(0.5f, Math.min(6f, (dt / 16.667f) / sc));
-    }
-
-    private static final class PillClip {
-        boolean set;
-        int top, bottom, width;
-    }
-
-    private final PillClip contPillClip = new PillClip(), appsPillClip = new PillClip();
-    private final Rect pillScratch = new Rect();
-
     private void syncContinueRow() {
-        updateFrameStep();
         syncDock();
         syncAppsPanel();
         syncDockPng();
@@ -3097,49 +3040,37 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         // In dock state the row is invisible but overlaps the dock's neighbourhood, so keys like Up must not find it.
         int want = active && allAppsMode ? ViewGroup.FOCUS_AFTER_DESCENDANTS : ViewGroup.FOCUS_BLOCK_DESCENDANTS;
         if (continueRow.getDescendantFocusability() != want) continueRow.setDescendantFocusability(want);
-        boolean sections = sectionsActive();
-        RecyclerView.ViewHolder first = sections ? grid.findViewHolderForAdapterPosition(COLUMNS) : null;
-        RecyclerView.ViewHolder last = sections && active
-                ? grid.findViewHolderForAdapterPosition(adapter.getItemCount() - 1) : null;
-        if (first == null && last == null) {
+        RecyclerView.ViewHolder vh = sectionsActive() ? grid.findViewHolderForAdapterPosition(COLUMNS) : null;
+        if (vh == null) {
             if (continueRow.getAlpha() != 0f) continueRow.setAlpha(0f);
             hidePills();
             return;
         }
+        float itemY = grid.getTop() + grid.getTranslationY() + vh.itemView.getTop();
+        float y = itemY - continueGapPx;
+        if (continueRow.getTranslationY() != y) continueRow.setTranslationY(y);
+        float alpha = grid.getAlpha() * (allAppsPanel != null ? allAppsPanel.getAlpha() : 1f);
+        if (snapRising || (!allAppsMode && !snapActive)) alpha = 0f;   // never over the dock
+        if (!active) alpha = 0f;
+        if (continueRow.getAlpha() != alpha) continueRow.setAlpha(alpha);
         Rect gc = grid.getClipBounds();
+        int side = (int) (CONT_CLIP_DP * density);
+        int cl = Math.max(gc == null ? 0 : gc.left, side);
+        int cr = Math.min(gc == null ? root.getWidth() : gc.right, root.getWidth() - side);
+        int ct = gc == null ? Math.round(-y) : Math.round(gc.top - y);
+        int cb = gc == null ? continueRow.getHeight() : Math.round(gc.bottom - y);
+        if (!contClipSet || contClip.left != cl || contClip.top != ct || contClip.right != cr || contClip.bottom != cb) {
+            contClip.set(cl, ct, cr, cb);
+            contClipSet = true;
+            continueRow.setClipBounds(new Rect(contClip));
+        }
+
+        // Pills: "Continue watching" above the posters, "All apps" above the first row of apps.
         float pillAlpha = grid.getAlpha() * (allAppsPanel != null ? allAppsPanel.getAlpha() : 1f);
-        if (snapRising || (!allAppsMode && !snapActive)) pillAlpha = 0f;   // never over the dock
+        if (snapRising || (!allAppsMode && !snapActive)) pillAlpha = 0f;
         float px = CONT_PAD_DP * density;
-
-        // "All apps" pill: above the first row of apps.
-        if (first != null) {
-            float itemY = grid.getTop() + grid.getTranslationY() + first.itemView.getTop();
-            placePill(appsPill, pillAlpha, px, itemY - appsPillBlockPx(), gc, appsPillClip);
-        } else if (appsPill != null && appsPill.getAlpha() != 0f) {
-            appsPill.setAlpha(0f);
-        }
-
-        // "Continue watching": pill and posters sit under the last row of apps and follow the grid (scroll, fades, clip).
-        if (last == null) {
-            if (continueRow.getAlpha() != 0f) continueRow.setAlpha(0f);
-            if (contPill != null && contPill.getAlpha() != 0f) contPill.setAlpha(0f);
-        } else {
-            float pillY = grid.getTop() + grid.getTranslationY() + last.itemView.getBottom() + CONT_TOP_GAP_DP * density;
-            float y = pillY + contPillBlockPx();
-            if (continueRow.getTranslationY() != y) continueRow.setTranslationY(y);
-            if (continueRow.getAlpha() != pillAlpha) continueRow.setAlpha(pillAlpha);
-            int side = (int) (CONT_CLIP_DP * density);
-            int cl = Math.max(gc == null ? 0 : gc.left, side);
-            int cr = Math.min(gc == null ? root.getWidth() : gc.right, root.getWidth() - side);
-            int ct = gc == null ? Math.round(-y) : Math.round(gc.top - y);
-            int cb = gc == null ? continueRow.getHeight() : Math.round(gc.bottom - y);
-            if (!contClipSet || contClip.left != cl || contClip.top != ct || contClip.right != cr || contClip.bottom != cb) {
-                contClip.set(cl, ct, cr, cb);
-                contClipSet = true;
-                continueRow.setClipBounds(contClip);          // View copies the rect: nothing is allocated per frame
-            }
-            placePill(contPill, pillAlpha, px, pillY, gc, contPillClip);
-        }
+        placePill(contPill, active ? pillAlpha : 0f, px, y - contPillBlockPx(), gc);
+        placePill(appsPill, pillAlpha, px, itemY - appsPillBlockPx(), gc);
         boolean run = pillAlpha > 0.05f;
         if (run != pillsRunning) {
             pillsRunning = run;
@@ -3148,26 +3079,16 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         }
     }
 
-    private void placePill(TextView pill, float alpha, float x, float y, Rect gc, PillClip cache) {
+    private void placePill(TextView pill, float alpha, float x, float y, Rect gc) {
         if (pill == null) return;
         if (pill.getAlpha() != alpha) pill.setAlpha(alpha);
         if (pill.getTranslationX() != x) pill.setTranslationX(x);
         if (pill.getTranslationY() != y) pill.setTranslationY(y);
         if (gc == null) {
-            if (cache.set) {
-                pill.setClipBounds(null);
-                cache.set = false;
-            }
+            if (pill.getClipBounds() != null) pill.setClipBounds(null);
         } else {
-            int top = Math.round(gc.top - y), bottom = Math.round(gc.bottom - y), w = pill.getWidth();
-            if (!cache.set || cache.top != top || cache.bottom != bottom || cache.width != w) {
-                cache.set = true;
-                cache.top = top;
-                cache.bottom = bottom;
-                cache.width = w;
-                pillScratch.set(0, top, w, bottom);
-                pill.setClipBounds(pillScratch);
-            }
+            Rect c = new Rect(0, Math.round(gc.top - y), pill.getWidth(), Math.round(gc.bottom - y));
+            if (!c.equals(pill.getClipBounds())) pill.setClipBounds(c);
         }
     }
 
@@ -3247,6 +3168,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     public void onPosterFocused(int index, View card, int color) {
         if (restorePending || arranging) return;
         if (snapActive) endSnap();
+        boolean entering = !allAppsMode;
         allAppsMode = true;
         syncContinueRow();                                 // the row must be in place before the cursor is measured against it
         glass.setColor(posterCursorColor(), glassShown);   // red cursor on the posters (light when the wallpaper is red too)
@@ -3255,11 +3177,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         trackUntil = SystemClock.uptimeMillis() + 900;
         refreshChrome();
         hideHero();
-        RecyclerView.ViewHolder vh = grid.findViewHolderForAdapterPosition(adapter.getItemCount() - 1);
+        RecyclerView.ViewHolder vh = grid.findViewHolderForAdapterPosition(COLUMNS);
         if (vh == null) return;
-        // The section sits under the last row of apps: scroll just enough to bring the pill and the posters on screen.
-        int pillTop = vh.itemView.getBottom() + (int) (CONT_TOP_GAP_DP * density);
-        ensureVisible(pillTop, pillTop + contPillBlockPx() + continueRowPx + (int) (8 * density));
+        int rowTop = vh.itemView.getTop() - continueGapPx;
+        int pillTop = rowTop - contPillBlockPx();
+        if (entering) scrollGridBy(pillTop - allTopPx());
+        else ensureVisible(pillTop, rowTop + continueRowPx);
     }
 
     @Override
@@ -3340,7 +3263,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         grid.post(() -> {
             int n = continueAdapter.posterCount();
             if (n > 0) focusPoster(Math.min(focusIndex, n - 1));
-            else focusTile(adapter.getItemCount() - 1);
+            else focusTile(COLUMNS);
         });
     }
 
@@ -3351,11 +3274,24 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
                 : continueRow.findViewHolderForAdapterPosition(index).itemView.findViewById(R.id.card);
         float cx = centerX(card);
         if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-            // Back up into the last row of apps, the tile nearest above.
-            int lastRowStart = ((adapter.getItemCount() - 1) / COLUMNS) * COLUMNS;
-            int best = adapter.getItemCount() - 1;
+            // Back up to the dock tile above.
+            int best = 0;
             float bestDist = Float.MAX_VALUE;
-            for (int i = lastRowStart; i < adapter.getItemCount(); i++) {
+            for (int i = 0; i < Math.min(COLUMNS, adapter.getItemCount()); i++) {
+                View c = cardAt(i);
+                if (c == null) continue;
+                float dist = Math.abs(centerX(c) - cx);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    best = i;
+                }
+            }
+            focusTile(best);
+        } else {
+            // Down into the first row of apps, the one nearest below.
+            int best = COLUMNS;
+            float bestDist = Float.MAX_VALUE;
+            for (int i = COLUMNS; i < Math.min(2 * COLUMNS, adapter.getItemCount()); i++) {
                 View c = cardAt(i);
                 if (c == null) continue;
                 float dist = Math.abs(centerX(c) - cx);
@@ -3366,7 +3302,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             }
             focusTile(best);
         }
-        // Down: the Continue watching section is the last thing in the list, nothing below it.
         return true;
     }
 
