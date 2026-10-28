@@ -2868,7 +2868,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         if (continueRow.getPaddingRight() != padEnd) {
             continueRow.setPadding(padL, 0, padEnd, 0);
         }
-        int block = lh + (int) (74 * density);                 // 8 air + card + title + description + 8 air
+        int block = lh + (int) (64 * density);                 // 8 air + card + title + description + 8 air
         continueGapPx = block + (int) (6 * density) + appsPillBlockPx();   // poster row top -> first row of apps
         if (continueRowPx != block) {
             continueRowPx = block;

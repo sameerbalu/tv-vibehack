@@ -160,7 +160,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
             cp.height = ch;
             h.card.setLayoutParams(cp);
         }
-        int below = ch + (int) (20 * d);               // 8dp air + the poster + room for its focus growth
+        int below = ch + (int) (10 * d);               // just clear of the cursor's border under the poster
         FrameLayout.LayoutParams np = (FrameLayout.LayoutParams) h.name.getLayoutParams();
         FrameLayout.LayoutParams dp = (FrameLayout.LayoutParams) h.desc.getLayoutParams();
         if (np.topMargin != below || np.width != largeW) {       // fixed width: nothing to lay out while the card grows
@@ -421,7 +421,10 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
             }
         });
         h.card.setClipToOutline(true);
-        h.card.setForeground(new RimLight(d, RADIUS_DP, true));
+        // The same light as on the app tiles: the soft sheen from the top, a touch of shade below, and the rim light.
+        android.graphics.drawable.Drawable sheen = ctx.getResources().getDrawable(R.drawable.tile_highlight, ctx.getTheme()).mutate();
+        h.card.setForeground(new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[]{
+                sheen, new RimLight(d, RADIUS_DP, false, false)}));
         h.scrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[]{0x00000000, 0xB8000000}));
         h.card.setOnKeyListener((view, keyCode, event) -> {

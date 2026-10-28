@@ -168,8 +168,9 @@ final class AppsPanelDecoration extends RecyclerView.ItemDecoration {
         float bottom = haveLast ? lastBottom + v + extra : parent.getHeight() + beyond;
         top = Math.min(Math.max(top, ct), cb - 2 * radius);
         bottom = Math.max(Math.min(bottom, cb), top + 2 * radius);
-        float left = Float.isNaN(cardsLeft) ? cl : Math.max(cl, cardsLeft - reachX - gap);
-        float right = Float.isNaN(cardsRight) ? cr : Math.min(cr, cardsRight + reachX + gap);
+        // The sides use the same gap as the top and the bottom (measured from the tiles), so it is even all round.
+        float left = Float.isNaN(cardsLeft) ? cl : Math.max(cl, cardsLeft - v);
+        float right = Float.isNaN(cardsRight) ? cr : Math.min(cr, cardsRight + v);
         rect.set(left, top, right, bottom);
 
         int a = Math.round(alpha * 255);
