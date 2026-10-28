@@ -289,7 +289,30 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         });
     }
 
+    private static final String KEY_OFF = "cw_off";
+
+    /** Packages whose titles are hidden from Continue watching. */
+    static java.util.Set<String> offApps(Context c) {
+        return new java.util.HashSet<>(c.getSharedPreferences(MainActivity.PREFS, Context.MODE_PRIVATE)
+                .getStringSet(KEY_OFF, new java.util.HashSet<String>()));
+    }
+
+    static void setOff(Context c, String pkg, boolean off) {
+        java.util.Set<String> set = offApps(c);
+        if (off) set.add(pkg); else set.remove(pkg);
+        c.getSharedPreferences(MainActivity.PREFS, Context.MODE_PRIVATE).edit().putStringSet(KEY_OFF, set).apply();
+    }
+
     private boolean applyFresh(List<NuvioHistory.Entry> fresh, String pkg, long wallpaperStampNow) {
+        java.util.Set<String> off = offApps(ctx);
+        if (!off.isEmpty()) {
+            List<NuvioHistory.Entry> kept = new ArrayList<>();
+            for (NuvioHistory.Entry e : fresh) {
+                String p = e.pkg != null && !e.pkg.isEmpty() ? e.pkg : pkg;
+                if (p == null || !off.contains(p)) kept.add(e);
+            }
+            fresh = kept;
+        }
         StringBuilder sig = new StringBuilder();
         for (NuvioHistory.Entry e : fresh) {
             sig.append(e.key).append('|').append(e.poster).append('|').append(e.position / 15000L)

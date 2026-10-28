@@ -1059,8 +1059,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     // ---- glass highlight -------------------------------------------------------------------------
 
     /** Puts the glass over a tile. Returns the tile's rect in root coordinates (layout position, no scale). */
+    private final Rect glassRect = new Rect();
+
     private Rect moveGlassTo(View card, boolean animate) {
-        Rect r = new Rect(0, 0, card.getWidth(), card.getHeight());
+        Rect r = glassRect;
+        r.set(0, 0, card.getWidth(), card.getHeight());
         root.offsetDescendantRectToMyCoords(card, r);
         // That call ignores translation, and the Continue watching row is positioned with translationY.
         boolean poster = continueRow != null && card.getParent() instanceof View
@@ -1120,6 +1123,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             hideHero();
             ensureVisible(item);
             return;
+        }
+        if (!leavingAll) {
+            // The tile scales up, the list may scroll and the glow relayouts while the focus lands: for a moment the
+            // cursor is re-aimed at the tile's real position every frame, so it never stays at a stale spot.
+            trackedPoster = card;
+            trackUntil = SystemClock.uptimeMillis() + 900;
         }
 
         boolean entering = alignNext || (!allAppsMode && position >= COLUMNS);
@@ -1947,6 +1956,17 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             askWeatherCity(curCity);
         });
         rows.addView(cityRow);
+        final View contRow = getLayoutInflater().inflate(R.layout.item_input, rows, false);
+        setMenuIcon(contRow, MenuIcons.EYE);
+        ((TextView) contRow.findViewById(R.id.title)).setText("Continue watching apps");
+        int offCount = ContinueAdapter.offApps(this).size();
+        ((TextView) contRow.findViewById(R.id.status)).setText(offCount == 0 ? "All" : offCount + " hidden");
+        noIndicator(contRow);
+        contRow.setOnClickListener(v -> {
+            popup.dismiss();
+            handler.postDelayed(this::showContinueApps, 160);
+        });
+        rows.addView(contRow);
         for (final String id : WidgetPanel.IDS) {
             final View row = getLayoutInflater().inflate(R.layout.item_input, rows, false);
             setMenuIcon(row, MenuIcons.WIDGETS);
@@ -1964,6 +1984,58 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             rows.addView(row);
         }
         fitScroll(panel);
+        showDropdown(popup, panel, anchor, minWidth, true);
+    }
+
+    /** Which video apps show up in Continue watching: turn an app off and its titles leave the row. */
+    private void showContinueApps() {
+        View anchor = findViewById(R.id.btnSettings);
+        View panel = getLayoutInflater().inflate(R.layout.popup_apps, root, false);
+        ((TextView) panel.findViewById(R.id.title)).setText("Apps shown in Continue watching");
+        LinearLayout rows = panel.findViewById(R.id.rows);
+        View scroll = panel.findViewById(R.id.scroll);
+        int minWidth = (int) (320 * density);
+        final PopupWindow popup = newDropdown(panel, minWidth);
+        final java.util.Set<String> off = ContinueAdapter.offApps(this);
+        final java.util.Set<String> seen = new java.util.HashSet<>();
+        for (NuvioHistory.Entry e : NuvioHistory.load(this)) if (e.pkg != null && !e.pkg.isEmpty()) seen.add(e.pkg);
+        final boolean[] changed = {false};
+        for (AppAdapter.AppRef app : adapter.allApps()) {
+            final String pkg = app.pkg;
+            // Video and streaming apps, anything that already has a title in the row, and anything switched off before.
+            if (!MediaListener.isVideoApp(pkg, 0) && !seen.contains(pkg) && !off.contains(pkg)) continue;
+            final View row = getLayoutInflater().inflate(R.layout.item_input, rows, false);
+            ImageView icon = row.findViewById(R.id.icon);
+            icon.setImageTintList(null);
+            icon.setImageDrawable(app.icon);
+            ViewGroup.LayoutParams ilp = icon.getLayoutParams();
+            ilp.width = (int) (26 * density);
+            ilp.height = (int) (26 * density);
+            ((TextView) row.findViewById(R.id.title)).setText(app.label);
+            updateHideRow(row, off.contains(pkg));
+            row.setOnClickListener(v -> {
+                boolean nowOff = !off.contains(pkg);
+                if (nowOff) off.add(pkg); else off.remove(pkg);
+                ContinueAdapter.setOff(this, pkg, nowOff);
+                changed[0] = true;
+                updateHideRow(row, nowOff);
+            });
+            rows.addView(row);
+        }
+        if (rows.getChildCount() == 0) {
+            toast("No video apps found", false);
+            return;
+        }
+        rows.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
+        ViewGroup.LayoutParams slp = scroll.getLayoutParams();
+        slp.height = Math.min(rows.getMeasuredHeight(), (int) (root.getHeight() * 0.6f));
+        scroll.setLayoutParams(slp);
+        popup.setOnDismissListener(() -> {
+            if (changed[0]) continueAdapter.refreshAsync(() -> {
+                layoutContinue();
+                grid.invalidateItemDecorations();
+            });
+        });
         showDropdown(popup, panel, anchor, minWidth, true);
     }
 
@@ -2784,6 +2856,17 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         // A shelf: the current title large (16:9) with its name and description, the next ones small beside it.
         int lw = (int) (contentW * 0.37f);
         int lh = Math.round(lw * 9f / 16f);
+        // The shelf must leave room for everything under it (the All apps pill and one full row of apps with its
+        // dark panel) inside the glass panel, whatever the screen height: otherwise the apps stick out at the bottom.
+        if (grid.getHeight() > 0) {
+            float below = (6 + PILL_H_DP + APPS_PILL_GAP_DP + 138 + 13) * density;     // gap, pill, app row with its names, panel padding
+            int maxBlock = (int) (grid.getHeight() - allTopPx() - (PANEL_BOTTOM_DP + 11 + 4) * density - contPillBlockPx() - below);
+            int maxLh = Math.max((int) (64 * density), maxBlock - (int) (74 * density));
+            if (lh > maxLh) {
+                lh = maxLh;
+                lw = Math.round(lh * 16f / 9f);
+            }
+        }
         int sh = lh;                                   // the small (portrait) cards are as tall as the large one
         int sw = Math.round(sh * 0.66f);
         continueAdapter.setSizes(lw, lh, sw, sh, gap);
