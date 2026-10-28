@@ -1529,13 +1529,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
             if (position < COLUMNS) return false;          // dock row: let focus move to the top bar
             if (position < 2 * COLUMNS && continueActive()) {   // first row of apps: up to Continue watching
-                focusPoster(nearestPoster(centerX(cardAt(position))));
+                focusPoster(continueAdapter.currentIndex());     // the large card, like a shelf's current pick
                 return true;
             }
             target = position - COLUMNS;
         } else {
             if (position < COLUMNS && continueActive()) {   // dock: down to Continue watching first
-                focusPoster(nearestPoster(centerX(cardAt(position))));
+                focusPoster(continueAdapter.currentIndex());     // the large card, like a shelf's current pick
                 return true;
             }
             int lastRowStart = ((count - 1) / COLUMNS) * COLUMNS;
@@ -2603,7 +2603,14 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         continueAdapter = new ContinueAdapter(this, this);
         continueAdapter.setAppSource(adapter);
         continueRow = new RecyclerView(this);
-        continueRow.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false));
+        continueRow.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false) {
+            // The adapter glides the row itself so the large card stays at the left; no automatic "reveal" scroll.
+            @Override
+            public boolean requestChildRectangleOnScreen(@NonNull RecyclerView parent, @NonNull View child,
+                                                         @NonNull Rect rect, boolean immediate, boolean focusedChildVisible) {
+                return false;
+            }
+        });
         continueRow.setClipChildren(false);
         continueRow.setClipToPadding(false);
         continueRow.setItemAnimator(null);
@@ -2771,12 +2778,21 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     /** Poster size: three full posters and a peek of the next one fit across the screen. */
     private void layoutContinue() {
         if (continueRow == null || grid == null || grid.getWidth() == 0) return;
-        int contentW = grid.getWidth() - 2 * (int) (CONT_PAD_DP * density);
-        int gap = (int) (18 * density);
-        int w = (int) ((contentW - 2 * gap) / 3.2f);
-        int h = Math.round(w * 9f / 16f);
-        continueAdapter.setSize(w, h, gap);
-        int block = h + (int) (52 * density);                  // 8 air + poster + title line + 8 air
+        int padL = (int) (CONT_PAD_DP * density);
+        int contentW = grid.getWidth() - 2 * padL;
+        int gap = (int) (16 * density);
+        // A shelf: the current title large (16:9) with its name and description, the next ones small beside it.
+        int lw = (int) (contentW * 0.37f);
+        int lh = Math.round(lw * 9f / 16f);
+        int sh = Math.round(lh * 0.78f);
+        int sw = Math.round(sh * 0.66f);
+        continueAdapter.setSizes(lw, lh, sw, sh, gap);
+        // Room on the right so even the last title can sit at the left edge as the large card.
+        int padEnd = Math.max(padL, grid.getWidth() - padL - continueAdapter.heroSlotPx());
+        if (continueRow.getPaddingRight() != padEnd) {
+            continueRow.setPadding(padL, 0, padEnd, 0);
+        }
+        int block = lh + (int) (74 * density);                 // 8 air + card + title + description + 8 air
         continueGapPx = block + (int) (6 * density) + appsPillBlockPx();   // poster row top -> first row of apps
         if (continueRowPx != block) {
             continueRowPx = block;

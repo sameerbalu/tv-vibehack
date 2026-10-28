@@ -2,6 +2,8 @@
 <resources>
     <string name="app_name">Home</string>
     <string name="inputs">Quellen</string>
+    <string name="kind_movie">Film</string>
+    <string name="kind_series">Serie</string>
     <string name="continue_watching">Weiterschauen</string>
     <string name="all_apps_title">Alle Apps</string>
     <string name="bluetooth">Bluetooth</string>

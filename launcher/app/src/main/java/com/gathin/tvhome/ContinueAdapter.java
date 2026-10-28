@@ -26,6 +26,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.io.File;
@@ -34,8 +35,10 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * The "Continue watching" row at the top of All apps: big 16:9 posters in a sideways list
- * with a progress bar for how much was watched.
+ * The "Continue watching" row at the top of All apps, laid out like a "For You" shelf: the current title is a
+ * large 16:9 card with its name and a one-line description under it, the next titles are small cards beside it.
+ * Moving along the row grows the new title, shrinks the old one and glides the row so the large card always
+ * sits at the left. A progress bar on each card shows how much was watched.
  * Items come from NuvioHistory (filled by MediaListener).
  */
 final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
@@ -69,7 +72,15 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
     void setAppSource(AppAdapter apps) {
         this.apps = apps;
     }
-    private int cardW, cardH, gapPx;
+    private int largeW, largeH, smallW, smallH, gapPx;
+    /** The title shown large. It stays large while the focus is somewhere else, like a shelf's current pick. */
+    private int current;
+    /** The title that was large and is shrinking (-1 when no change is running). */
+    private int prev = -1;
+    private float prevStart = 1f;      // how large the shrinking title was when its change began (0..1)
+    private float heroT = 1f;          // progress of the running change, 1 = settled
+    private android.animation.ValueAnimator heroAnim;
+    private RecyclerView rv;
 
     ContinueAdapter(Context ctx, Host host) {
         this.ctx = ctx;
@@ -78,13 +89,179 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         setHasStableIds(true);
     }
 
-    /** Poster size in px (16:9) and the space after each poster. Rebinds only when it changed. */
-    void setSize(int w, int h, int gap) {
-        if (w == cardW && h == cardH && gap == gapPx) return;
-        cardW = w;
-        cardH = h;
+    /** Card sizes in px: the large (16:9) one, the small (portrait) ones, and the space between cards. */
+    void setSizes(int lw, int lh, int sw, int sh, int gap) {
+        if (lw == largeW && lh == largeH && sw == smallW && sh == smallH && gap == gapPx) return;
+        largeW = lw;
+        largeH = lh;
+        smallW = sw;
+        smallH = sh;
         gapPx = gap;
         notifyDataSetChanged();
+        if (rv != null) rv.post(this::pin);
+    }
+
+    /** Width of the large card plus its gap: what the row's right padding has to leave free so it can sit at the left. */
+    int heroSlotPx() {
+        return largeW + gapPx;
+    }
+
+    int currentIndex() {
+        return entries.isEmpty() ? 0 : Math.max(0, Math.min(current, entries.size() - 1));
+    }
+
+    @Override
+    public void onAttachedToRecyclerView(@NonNull RecyclerView recyclerView) {
+        super.onAttachedToRecyclerView(recyclerView);
+        rv = recyclerView;
+    }
+
+    @Override
+    public void onDetachedFromRecyclerView(@NonNull RecyclerView recyclerView) {
+        super.onDetachedFromRecyclerView(recyclerView);
+        if (heroAnim != null) heroAnim.cancel();
+        rv = null;
+    }
+
+    // ---- the large card ------------------------------------------------------------------------------
+
+    private static int lerp(int a, int b, float t) {
+        return Math.round(a + (b - a) * t);
+    }
+
+    /** 0 = small card, 1 = large card, for the title at this position. */
+    private float amtFor(int pos) {
+        if (pos == current) return heroT;
+        if (pos == prev) return prevStart * (1f - heroT);
+        return 0f;
+    }
+
+    /** Titles left of the large one are scrolled out of view: hide them so no sliver shows at the edge. */
+    private float alphaFor(int pos) {
+        if (pos == current) return prev > current ? Math.max(heroT, 0.001f) : 1f;      // coming in from the left
+        if (pos == prev) return prev < current ? 1f - heroT : 1f;                        // leaving to the left
+        return pos < current ? 0f : 1f;
+    }
+
+    /** Applies the size, text and fade for this title's place in the row (cheap: called every frame of a change). */
+    private void applyAmt(PosterHolder h, int pos) {
+        if (largeW == 0) return;
+        float amt = amtFor(pos);
+        int cw = lerp(smallW, largeW, amt), ch = lerp(smallH, largeH, amt);
+        RecyclerView.LayoutParams ilp = (RecyclerView.LayoutParams) h.itemView.getLayoutParams();
+        if (ilp == null) ilp = new RecyclerView.LayoutParams(cw, ViewGroup.LayoutParams.WRAP_CONTENT);
+        boolean changed = ilp.width != cw || ilp.getMarginEnd() != gapPx;
+        ilp.width = cw;
+        ilp.setMarginEnd(gapPx);
+        if (changed) h.itemView.setLayoutParams(ilp);
+        ViewGroup.LayoutParams cp = h.card.getLayoutParams();
+        if (cp.width != cw || cp.height != ch) {
+            cp.width = cw;
+            cp.height = ch;
+            h.card.setLayoutParams(cp);
+        }
+        int below = ch + (int) (20 * d);               // 8dp air + the poster + room for its focus growth
+        FrameLayout.LayoutParams np = (FrameLayout.LayoutParams) h.name.getLayoutParams();
+        FrameLayout.LayoutParams dp = (FrameLayout.LayoutParams) h.desc.getLayoutParams();
+        if (np.topMargin != below || np.width != cw) {
+            np.width = cw;
+            np.topMargin = below;
+            h.name.setLayoutParams(np);
+            dp.width = cw;
+            dp.topMargin = below + (int) (24 * d);
+            h.desc.setLayoutParams(dp);
+        }
+        float textA = Math.max(0f, (amt - 0.35f) / 0.65f);        // the words appear once the card is mostly large
+        h.name.setAlpha(textA);
+        h.desc.setAlpha(textA * 0.85f);
+        h.itemView.setAlpha(alphaFor(pos));
+        if (h.matrix) h.poster.setImageMatrix(coverMatrix(h.bw, h.bh, cw, ch));
+        if (h.iconTile) {
+            int size = Math.round(ch * 0.46f);
+            int padX = Math.max(0, (cw - size) / 2), padY = Math.max(0, (ch - size) / 2);
+            h.poster.setPadding(padX, padY, padX, padY);
+        }
+    }
+
+    private void applyVisible() {
+        if (rv == null) return;
+        for (int i = 0; i < rv.getChildCount(); i++) {
+            RecyclerView.ViewHolder vh = rv.getChildViewHolder(rv.getChildAt(i));
+            int pos = vh.getBindingAdapterPosition();
+            if (vh instanceof PosterHolder && pos != RecyclerView.NO_POSITION) applyAmt((PosterHolder) vh, pos);
+        }
+    }
+
+    /** Keeps the large card at the left edge (after the list changed or the screen was resized). */
+    void pin() {
+        if (rv == null || entries.isEmpty()) return;
+        RecyclerView.LayoutManager lm = rv.getLayoutManager();
+        if (lm instanceof LinearLayoutManager) ((LinearLayoutManager) lm).scrollToPositionWithOffset(currentIndex(), 0);
+    }
+
+    /** The focus moved to this title: it becomes the large one, the old one shrinks, the row glides. */
+    private void makeCurrent(final int idx) {
+        if (idx < 0 || idx >= entries.size() || (idx == current && heroAnim == null)) return;
+        float running = heroT;
+        boolean wasRunning = heroAnim != null;
+        if (wasRunning) {
+            heroAnim.cancel();
+            heroAnim = null;
+        }
+        final int old = current;
+        int dropped = prev;                           // a title that was still shrinking just snaps small
+        current = idx;
+        if (rv == null || !rv.isAttachedToWindow() || largeW == 0) {
+            prev = -1;
+            heroT = 1f;
+            applyVisible();
+            return;
+        }
+        RecyclerView.ViewHolder target = rv.findViewHolderForAdapterPosition(idx);
+        if (target == null || old == idx) {
+            prev = -1;
+            heroT = 1f;
+            applyVisible();
+            pin();
+            return;
+        }
+        final int startOffset = target.itemView.getLeft() - rv.getPaddingLeft();
+        prev = old;
+        prevStart = wasRunning ? running : 1f;
+        heroT = 0f;
+        if (dropped >= 0 && dropped != old) {
+            RecyclerView.ViewHolder dv = rv.findViewHolderForAdapterPosition(dropped);
+            if (dv instanceof PosterHolder) applyAmt((PosterHolder) dv, dropped);
+        }
+        final LinearLayoutManager lm = rv.getLayoutManager() instanceof LinearLayoutManager
+                ? (LinearLayoutManager) rv.getLayoutManager() : null;
+        heroAnim = android.animation.ValueAnimator.ofFloat(0f, 1f);
+        heroAnim.setDuration(360);
+        heroAnim.setInterpolator(new android.view.animation.DecelerateInterpolator(2f));
+        heroAnim.addUpdateListener(an -> {
+            heroT = (Float) an.getAnimatedValue();
+            applyVisible();
+            if (lm != null) lm.scrollToPositionWithOffset(idx, Math.round(startOffset * (1f - heroT)));
+        });
+        heroAnim.addListener(new android.animation.AnimatorListenerAdapter() {
+            private boolean cancelled;
+
+            @Override
+            public void onAnimationCancel(android.animation.Animator animation) {
+                cancelled = true;
+            }
+
+            @Override
+            public void onAnimationEnd(android.animation.Animator animation) {
+                if (cancelled) return;
+                heroAnim = null;
+                prev = -1;
+                heroT = 1f;
+                applyVisible();
+                if (lm != null) lm.scrollToPositionWithOffset(idx, 0);
+            }
+        });
+        heroAnim.start();
     }
 
     /** Reloads the list from disk. Only rebinds when something changed. Returns true when it did. */
@@ -121,7 +298,15 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         signature = sig.toString();
         entries.clear();
         entries.addAll(fresh);
+        if (heroAnim != null) {
+            heroAnim.cancel();
+            heroAnim = null;
+        }
+        prev = -1;
+        heroT = 1f;
+        current = entries.isEmpty() ? 0 : Math.max(0, Math.min(current, entries.size() - 1));
         notifyDataSetChanged();
+        main.post(this::pin);
         return true;
     }
 
@@ -178,8 +363,11 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
     private static final class PosterHolder extends RecyclerView.ViewHolder {
         final View card, scrim;
         final ImageView poster, posterBg;
-        final TextView name;
+        final TextView name, desc;
         final ColorBar progress;
+        int bw, bh;                 // size of the artwork when it is placed with a matrix
+        boolean matrix;             // artwork is placed with coverMatrix (re-done as the card changes size)
+        boolean iconTile;           // the app's icon in the middle of a colour tile (padding follows the card size)
 
         PosterHolder(View v) {
             super(v);
@@ -188,6 +376,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
             poster = v.findViewById(R.id.poster);
             posterBg = v.findViewById(R.id.posterBg);
             name = v.findViewById(R.id.name);
+            desc = v.findViewById(R.id.desc);
             progress = v.findViewById(R.id.progress);
         }
     }
@@ -230,9 +419,11 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
                     .setDuration(focused ? 260 : 180)
                     .setInterpolator(new OvershootInterpolator(focused ? 1.6f : 0f))
                     .start();
-            h.name.animate().alpha(1f).setDuration(200).start();
             int p = h.getBindingAdapterPosition();
-            if (focused && p != RecyclerView.NO_POSITION) host.onPosterFocused(p, view, 0xFFE50914);
+            if (focused && p != RecyclerView.NO_POSITION) {
+                makeCurrent(p);
+                host.onPosterFocused(p, view, 0xFFE50914);
+            }
         });
         h.card.setOnLongClickListener(view -> {
             int p = h.getBindingAdapterPosition();
@@ -251,27 +442,18 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         PosterHolder h = (PosterHolder) holder;
         NuvioHistory.Entry e = entries.get(position);
 
-        // Item = 8dp air, the poster, a title line, 8dp air. Width is poster + the gap to the next one.
-        int w = cardW > 0 ? cardW : (int) (260 * d), ht = cardH > 0 ? cardH : (int) (146 * d);
-        RecyclerView.LayoutParams ilp = new RecyclerView.LayoutParams(w, ViewGroup.LayoutParams.WRAP_CONTENT);
-        ilp.setMarginEnd(gapPx > 0 ? gapPx : (int) (18 * d));
-        h.itemView.setLayoutParams(ilp);
-        ViewGroup.LayoutParams cp = h.card.getLayoutParams();
-        cp.width = w;
-        cp.height = ht;
-        h.card.setLayoutParams(cp);
-        FrameLayout.LayoutParams np = (FrameLayout.LayoutParams) h.name.getLayoutParams();
-        np.width = w;
-        np.topMargin = ht + (int) (14 * d);       // 8dp padding + 6dp below the poster
-        h.name.setLayoutParams(np);
-
+        // Item = 8dp air, the card, then (for the large one) a title and a description line.
+        int w = lerp(smallW > 0 ? smallW : (int) (100 * d), largeW > 0 ? largeW : (int) (300 * d), amtFor(position));
+        int ht = lerp(smallH > 0 ? smallH : (int) (150 * d), largeH > 0 ? largeH : (int) (170 * d), amtFor(position));
+        h.matrix = false;
+        h.iconTile = false;
         h.poster.setPadding(0, 0, 0, 0);
         h.poster.setImageMatrix(null);
         Bitmap bmp = null;
         if (!e.poster.isEmpty()) {
             bmp = posters.get(e.poster);
             if (bmp == null) {
-                bmp = decode(e, w);
+                bmp = decode(e, largeW > 0 ? largeW : w);
                 if (bmp != null) posters.put(e.poster, bmp);
             }
         }
@@ -284,6 +466,9 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
                 h.poster.setScaleType(ImageView.ScaleType.MATRIX);
                 h.poster.setImageBitmap(bmp);
                 h.poster.setImageMatrix(coverMatrix(bmp.getWidth(), bmp.getHeight(), w, ht));
+                h.matrix = true;
+                h.bw = bmp.getWidth();
+                h.bh = bmp.getHeight();
             } else {
                 // Square-ish artwork (VLC and similar): shown whole, not zoomed, over a soft blurred copy of itself.
                 h.poster.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -300,6 +485,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
                 h.posterBg.setImageBitmap(bl);
             }
         } else if (applyAppTile(h, e, w, ht)) {
+            h.iconTile = h.poster.getScaleType() == ImageView.ScaleType.FIT_CENTER;
             // The app's own thumbnail, exactly as the apps list shows it.
         } else {
             h.posterBg.setImageDrawable(null);
@@ -310,7 +496,8 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
             h.poster.setImageDrawable(new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{c1, c2}));
         }
         h.name.setText(e.title);
-        h.name.setAlpha(1f);
+        h.desc.setText(describe(e));
+        applyAmt(h, position);
         if (e.duration > 0) {
             h.progress.setVisibility(View.VISIBLE);
             h.progress.set(e.position / (float) e.duration, 0xFFE50914, 0xFFFF4D4D);
@@ -319,6 +506,23 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
             h.progress.setVisibility(View.GONE);
             h.scrim.setVisibility(View.GONE);
         }
+    }
+
+    /** One line under the large card: what it is, which episode, and where it plays, e.g. "Series · S2 E5 · Nuvio". */
+    private String describe(NuvioHistory.Entry e) {
+        StringBuilder sb = new StringBuilder();
+        if ("movie".equals(e.kind)) sb.append(ctx.getString(R.string.kind_movie));
+        else if ("series".equals(e.kind)) sb.append(ctx.getString(R.string.kind_series));
+        if (e.subtitle != null && !e.subtitle.trim().isEmpty()) {
+            if (sb.length() > 0) sb.append(" \u00B7 ");
+            sb.append(e.subtitle.trim());
+        }
+        String app = appLabel(e);
+        if (app != null && !app.isEmpty()) {
+            if (sb.length() > 0) sb.append(" \u00B7 ");
+            sb.append(app);
+        }
+        return sb.toString();
     }
 
     /** A copy of the drawable, so the tile in the apps list and this poster never fight over its bounds. */
