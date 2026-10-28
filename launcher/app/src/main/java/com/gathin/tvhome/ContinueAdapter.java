@@ -163,11 +163,11 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         int below = ch + (int) (20 * d);               // 8dp air + the poster + room for its focus growth
         FrameLayout.LayoutParams np = (FrameLayout.LayoutParams) h.name.getLayoutParams();
         FrameLayout.LayoutParams dp = (FrameLayout.LayoutParams) h.desc.getLayoutParams();
-        if (np.topMargin != below || np.width != cw) {
-            np.width = cw;
+        if (np.topMargin != below || np.width != largeW) {       // fixed width: nothing to lay out while the card grows
+            np.width = largeW;
             np.topMargin = below;
             h.name.setLayoutParams(np);
-            dp.width = cw;
+            dp.width = largeW;
             dp.topMargin = below + (int) (24 * d);
             h.desc.setLayoutParams(dp);
         }
@@ -175,6 +175,9 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         h.name.setAlpha(textA);
         h.desc.setAlpha(textA * 0.85f);
         h.itemView.setAlpha(alphaFor(pos));
+        if (h.lastCw == cw && h.lastCh == ch) return;               // same size as last time: the artwork is already fitted
+        h.lastCw = cw;
+        h.lastCh = ch;
         if (h.matrix) h.poster.setImageMatrix(coverMatrix(h.bw, h.bh, cw, ch));
         if (h.iconTile) {
             int size = Math.round(ch * 0.46f);
@@ -368,6 +371,7 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         int bw, bh;                 // size of the artwork when it is placed with a matrix
         boolean matrix;             // artwork is placed with coverMatrix (re-done as the card changes size)
         boolean iconTile;           // the app's icon in the middle of a colour tile (padding follows the card size)
+        int lastCw = -1, lastCh = -1;   // the size the artwork was last fitted to (skips the work while it is unchanged)
 
         PosterHolder(View v) {
             super(v);
@@ -447,6 +451,8 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
         int ht = lerp(smallH > 0 ? smallH : (int) (150 * d), largeH > 0 ? largeH : (int) (170 * d), amtFor(position));
         h.matrix = false;
         h.iconTile = false;
+        h.lastCw = -1;
+        h.lastCh = -1;
         h.poster.setPadding(0, 0, 0, 0);
         h.poster.setImageMatrix(null);
         Bitmap bmp = null;

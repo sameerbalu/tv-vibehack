@@ -91,11 +91,21 @@ final class AppsPanelDecoration extends RecyclerView.ItemDecoration {
 
         float firstTop = Float.MAX_VALUE, lastTop = Float.MAX_VALUE, lastBottom = -Float.MAX_VALUE;
         float firstCardTop = Float.MAX_VALUE;
+        float cardsLeft = Float.NaN, cardsRight = Float.NaN;       // outer edges of the first and last column of tiles
         boolean haveFirst = false, haveLast = false;
         for (int i = 0; i < parent.getChildCount(); i++) {
             View child = parent.getChildAt(i);
             int pos = parent.getChildAdapterPosition(child);
             if (pos < columns) continue;                                // the dock row (and unbound views)
+            if (Float.isNaN(cardsLeft)) {
+                View card = child.findViewById(R.id.card);
+                if (card != null && child.getWidth() > 0) {
+                    float cell = child.getWidth();
+                    float col0 = child.getLeft() + card.getLeft() - ((pos - columns) % columns) * cell;
+                    cardsLeft = col0;
+                    cardsRight = col0 + (columns - 1) * cell + card.getWidth();
+                }
+            }
             float t = child.getTop() + child.getTranslationY();
             float b = child.getBottom() + child.getTranslationY();
             if (pos < columns * 2) {
@@ -137,7 +147,9 @@ final class AppsPanelDecoration extends RecyclerView.ItemDecoration {
         float cl = glass.left + margin, ct = glass.top + margin, cr = glass.right - margin, cb = glass.bottom - margin;
         top = Math.min(Math.max(top, ct), cb - 2 * radius);
         bottom = Math.max(Math.min(bottom, cb), top + 2 * radius);
-        rect.set(cl, top, cr, bottom);
+        float left = Float.isNaN(cardsLeft) ? cl : Math.max(cl, cardsLeft - innerGap);
+        float right = Float.isNaN(cardsRight) ? cr : Math.min(cr, cardsRight + innerGap);
+        rect.set(left, top, right, bottom);
 
         int a = Math.round(alpha * 255);
         base.setColor(0xFF0C0C0E);

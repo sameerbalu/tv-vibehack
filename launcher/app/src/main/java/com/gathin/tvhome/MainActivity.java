@@ -757,7 +757,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         } else {
             int dockRow = (int) ((145 + 6 + 12) * density);   // item height plus DockDecoration offsets
             top = Math.max(0, h - dockRow - (int) (30 * density));
-            bottom = Math.max((int) (40 * density), h - (int) (145 * density) - allTopPx());
+            bottom = Math.max((int) (40 * density), h - (int) (117 * density) - allTopPx());
         }
         if (grid.getPaddingTop() != top || grid.getPaddingBottom() != bottom) {
             grid.setPadding(grid.getPaddingLeft(), top, grid.getPaddingRight(), bottom);
@@ -1048,7 +1048,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             bottomLimit = grid.getHeight() - (int) (16 * density);
         } else {
             topLimit = panelTopPx() + (int) (10 * density);
-            bottomLimit = grid.getHeight() - (int) ((PANEL_BOTTOM_DP + 8) * density);
+            bottomLimit = grid.getHeight() - (int) ((PANEL_BOTTOM_DP + 9) * density);
         }
         int dy = 0;
         if (itemTop < topLimit) dy = itemTop - topLimit;
@@ -2784,7 +2784,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         // A shelf: the current title large (16:9) with its name and description, the next ones small beside it.
         int lw = (int) (contentW * 0.37f);
         int lh = Math.round(lw * 9f / 16f);
-        int sh = Math.round(lh * 0.78f);
+        int sh = lh;                                   // the small (portrait) cards are as tall as the large one
         int sw = Math.round(sh * 0.66f);
         continueAdapter.setSizes(lw, lh, sw, sh, gap);
         // Room on the right so even the last title can sit at the left edge as the large card.
@@ -2815,7 +2815,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         if (grid == null || dockDecoration == null) return;
         float target = allAppsMode && !arranging && !snapRising && sectionsActive() ? 0f : 1f;
         if (dockFade == target && !dockTouched) return;
-        float next = target > dockFade ? Math.min(target, dockFade + 0.25f) : Math.max(target, dockFade - 0.2f);
+        float next = target > dockFade ? Math.min(target, dockFade + 0.2f) : Math.max(target, dockFade - 0.12f);
         boolean changed = next != dockFade;
         dockFade = next;
         dockTouched = dockFade != 1f;
@@ -2835,7 +2835,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         float target = allAppsMode && allUiApplied && !arranging && sectionsActive() ? 1f : 0f;
         if (appsPanelFade == target) return;
         appsPanelFade = target > appsPanelFade ? Math.min(target, appsPanelFade + 0.1f)
-                : Math.max(target, appsPanelFade - 0.2f);
+                : Math.max(target, appsPanelFade - 0.14f);
         appsPanel.setAlpha(appsPanelFade);
         grid.invalidate();
     }
@@ -2844,9 +2844,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private void syncAppsPanelBounds() {
         if (appsPanel == null || allAppsPanel == null) return;
         float inset = density;                                            // GlassPanelView draws 1dp inside its bounds
-        float margin = 10 * density;
-        // The first row sits ROW_INSET inside the panel and its tiles another 8dp (item padding) below that.
-        float innerGap = (ROW_INSET_DP + 8 - 1 - 10) * density;
+        float margin = 8 * density;
+        // The first row sits ROW_INSET inside the panel and its tiles another 8dp (item padding) below that;
+        // the same gap is used around the tiles on every side.
+        float innerGap = (ROW_INSET_DP + 8 - 1 - 8) * density;
         appsPanel.setGlass(allAppsPanel.getLeft() + inset, allAppsPanel.getTop() + inset,
                 allAppsPanel.getRight() - inset, allAppsPanel.getBottom() - inset, margin, innerGap);
     }
@@ -2900,8 +2901,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         // Also while snapping back to the dock: the bottom apps must stay faded the whole way, not pop to full.
         boolean on = ((allAppsMode && allUiApplied) || snapActive) && !arranging && sectionsActive();
         if (!on && !rowsFaded) return;
-        float bottomLimit = grid.getHeight() - (PANEL_BOTTOM_DP + 8) * density;
-        float topLimit = panelTopPx() + 6 * density;
+        // The same edges the dark panel is cut at (8dp inside the glass panel): a row is fully shown only inside them.
+        float bottomLimit = grid.getHeight() - (PANEL_BOTTOM_DP + 9) * density;
+        float topLimit = panelTopPx() + 9 * density;
         boolean any = false;
         for (int i = 0; i < grid.getChildCount(); i++) {
             View c = grid.getChildAt(i);

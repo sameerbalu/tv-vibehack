@@ -26,6 +26,7 @@ final class GlassStyle {
     private final int veilBottom;
     private Shader sheenShader;
     private float sheenTop, sheenBottom;
+    private final Matrix sheenMatrix = new Matrix();
     private Bitmap backdrop;
     private BitmapShader backdropShader;
 
@@ -68,12 +69,14 @@ final class GlassStyle {
             c.drawRoundRect(rect, radius, radius, image);
             c.drawRoundRect(rect, radius, radius, dim);
         }
-        if (sheenShader == null || sheenTop != rect.top || sheenBottom != rect.bottom) {
-            sheenTop = rect.top;
-            sheenBottom = rect.bottom;
-            sheenShader = new LinearGradient(0, rect.top, 0, rect.bottom, veilTop, veilBottom, Shader.TileMode.CLAMP);
+        float sheenH = rect.height();
+        if (sheenShader == null || sheenBottom != sheenH) {             // only a new size needs a new gradient
+            sheenBottom = sheenH;
+            sheenShader = new LinearGradient(0, 0, 0, sheenH, veilTop, veilBottom, Shader.TileMode.CLAMP);
             sheen.setShader(sheenShader);
         }
+        sheenMatrix.setTranslate(0, rect.top);                          // scrolling just moves it: no new shader per frame
+        sheenShader.setLocalMatrix(sheenMatrix);
         c.drawRoundRect(rect, radius, radius, sheen);
         c.drawRoundRect(rect, radius, radius, edge);
     }

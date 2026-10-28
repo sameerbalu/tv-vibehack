@@ -400,7 +400,8 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
     public void onBindViewHolder(@NonNull Holder h, int position) {
         Entry e = items.get(position);
         h.name.setText(e.label);
-        h.name.setVisibility(position < dockSize ? View.INVISIBLE : View.VISIBLE);
+        // The dock keeps its (invisible) name line so its height stays; in All apps the name is gone altogether.
+        h.name.setVisibility(position < dockSize ? View.INVISIBLE : View.GONE);
         boolean focused = h.card.isFocused();
         h.name.setAlpha(focused ? 1f : 0f);
         h.card.setScaleX(focused ? FOCUS_SCALE : 1f);
