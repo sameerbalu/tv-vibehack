@@ -2632,7 +2632,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private static final int PILL_H_DP = 34;          // height of the "Continue watching" / "All apps" pills
     private static final int TOP_BUF_DP = 40;         // hidden space above the first pill: the dock never reaches the panel
     private static final int CONT_PILL_GAP_DP = 18;   // pill -> posters
-    private static final int APPS_PILL_GAP_DP = 14 + AppsPanelDecoration.TITLE_DP;   // pill -> first row of apps
+    private static final int APPS_PILL_GAP_DP = 22;   // pill -> first row of apps
     private TextView contPill, appsPill;
     private PillIcon.Film contPillIcon;
     private PillIcon.Apps appsPillIcon;
@@ -2856,17 +2856,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         // A shelf: the current title large (16:9) with its name and description, the next ones small beside it.
         int lw = (int) (contentW * 0.37f);
         int lh = Math.round(lw * 9f / 16f);
-        // The shelf must leave room for everything under it (the All apps pill and one full row of apps with its
-        // dark panel) inside the glass panel, whatever the screen height: otherwise the apps stick out at the bottom.
-        if (grid.getHeight() > 0) {
-            float below = (6 + PILL_H_DP + APPS_PILL_GAP_DP + 138 + 13) * density;     // gap, pill, app row with its names, panel padding
-            int maxBlock = (int) (grid.getHeight() - allTopPx() - (PANEL_BOTTOM_DP + 11 + 4) * density - contPillBlockPx() - below);
-            int maxLh = Math.max((int) (64 * density), maxBlock - (int) (74 * density));
-            if (lh > maxLh) {
-                lh = maxLh;
-                lw = Math.round(lh * 16f / 9f);
-            }
-        }
         int sh = lh;                                   // the small (portrait) cards are as tall as the large one
         int sw = Math.round(sh * 0.66f);
         continueAdapter.setSizes(lw, lh, sw, sh, gap);

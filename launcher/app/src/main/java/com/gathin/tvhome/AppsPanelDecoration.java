@@ -22,7 +22,7 @@ import androidx.recyclerview.widget.RecyclerView;
 final class AppsPanelDecoration extends RecyclerView.ItemDecoration {
 
     /** Card bottom -> bottom of the app name; the same amount is added above so the panel is even all round. */
-    static final int TITLE_DP = 29;
+    static final int TITLE_DP = 0;
     private final int columns;
     private final float d;
     private final Paint base = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -90,7 +90,7 @@ final class AppsPanelDecoration extends RecyclerView.ItemDecoration {
         int lastStart = columns + (rows - 1) * columns;
 
         float firstTop = Float.MAX_VALUE, lastTop = Float.MAX_VALUE, lastBottom = -Float.MAX_VALUE;
-        float firstCardTop = Float.MAX_VALUE;
+        float firstCardTop = Float.MAX_VALUE, lastCardBottom = -Float.MAX_VALUE, cardW = 0f, cardH = 0f;
         float cardsLeft = Float.NaN, cardsRight = Float.NaN;       // outer edges of the first and last column of tiles
         boolean haveFirst = false, haveLast = false;
         for (int i = 0; i < parent.getChildCount(); i++) {
@@ -116,7 +116,17 @@ final class AppsPanelDecoration extends RecyclerView.ItemDecoration {
             if (pos >= lastStart) {
                 haveLast = true;
                 lastTop = Math.min(lastTop, t);
-                lastBottom = Math.max(lastBottom, b - child.getPaddingBottom());       // down to the app name
+                View card = child.findViewById(R.id.card);
+                View name = child.findViewById(R.id.name);
+                float cardBottom = card != null ? t + card.getBottom() : b - child.getPaddingBottom();
+                if (card != null) {
+                    cardW = card.getWidth();
+                    cardH = card.getHeight();
+                }
+                // Down to the app name only when the name really takes room (it is gone in All apps).
+                float bottomOfTile = name != null && name.getVisibility() == View.VISIBLE ? t + name.getBottom() : cardBottom;
+                lastCardBottom = Math.max(lastCardBottom, cardBottom);
+                lastBottom = Math.max(lastBottom, bottomOfTile);
             }
         }
 
@@ -140,15 +150,20 @@ final class AppsPanelDecoration extends RecyclerView.ItemDecoration {
 
         float radius = 22 * d;
         float beyond = 3 * radius;                                      // an end that is off screen is pushed out of view
-        float top = haveFirst ? firstCardTop - innerGap - TITLE_DP * d : -beyond;
-        float bottom = haveLast ? lastBottom + innerGap + extra : parent.getHeight() + beyond;
-        // Same distance from the glass panel on all four sides. The panel is squeezed into that area instead of being
-        // clipped by it, so it always keeps four rounded corners (and its edge stroke is never cut off).
+        // The focused tile grows (FOCUS_SCALE) and its cursor reaches a little further (glow). The panel keeps one
+        // even gap G from that reach on all four sides, so the cursor never leaves the dark panel.
         float cl = glass.left + margin, ct = glass.top + margin, cr = glass.right - margin, cb = glass.bottom - margin;
+        float grow = (AppAdapter.FOCUS_SCALE - 1f) / 2f;
+        float reachX = grow * (cardW > 0 ? cardW : 180 * d) + 6 * d;             // scaled tile + the cursor's border (3dp gap + stroke)
+        float reachY = grow * (cardH > 0 ? cardH : 101 * d) + 6 * d;
+        float gap = 8 * d;
+        if (!Float.isNaN(cardsLeft)) gap = Math.max(4 * d, Math.min(10 * d, cardsLeft - cl - reachX));
+        float top = haveFirst ? firstCardTop - reachY - gap : -beyond;
+        float bottom = haveLast ? lastBottom + reachY + gap + extra : parent.getHeight() + beyond;
         top = Math.min(Math.max(top, ct), cb - 2 * radius);
         bottom = Math.max(Math.min(bottom, cb), top + 2 * radius);
-        float left = Float.isNaN(cardsLeft) ? cl : Math.max(cl, cardsLeft - innerGap);
-        float right = Float.isNaN(cardsRight) ? cr : Math.min(cr, cardsRight + innerGap);
+        float left = Float.isNaN(cardsLeft) ? cl : Math.max(cl, cardsLeft - reachX - gap);
+        float right = Float.isNaN(cardsRight) ? cr : Math.min(cr, cardsRight + reachX + gap);
         rect.set(left, top, right, bottom);
 
         int a = Math.round(alpha * 255);
