@@ -101,7 +101,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private static final int PANEL_TOP_DP = 28;
     private static final long MUSIC_CYCLE_MS = 13000L;      // time between album colours
     private static final int PANEL_BOTTOM_DP = 24;
-    private static final int ROW_INSET_DP = 14;          // first row of apps sits this far inside the panel
+    private static final int ROW_INSET_DP = 8;           // first row of apps sits this far inside the panel
     /** Top padding of the grid while arranging, so the dock row and the rows below are all visible. */
     private static final int ARRANGE_TOP_DP = 36;
     private String liveTvPkg;
@@ -1047,7 +1047,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             topLimit = (int) (12 * density);
             bottomLimit = grid.getHeight() - (int) (16 * density);
         } else {
-            topLimit = panelTopPx() + (int) (10 * density);
+            // Never above where the list is parked, so moving between apps of the parked row does not nudge the list.
+            topLimit = Math.min(panelTopPx() + (int) (10 * density), allTopPx() - (int) (2 * density));
             bottomLimit = grid.getHeight() - (int) ((PANEL_BOTTOM_DP + 9) * density);
         }
         int dy = 0;
@@ -1150,7 +1151,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
                 // from an app and the list is already where it was).
                 if (!keepScroll) scrollGridBy(item.getTop() - firstRowGap(position) - allTopPx());
             } else {
-                ensureVisible(item.getTop() - firstRowGap(position), item.getBottom());
+                // The first row sits parked where the list opened: moving along it never scrolls, so the dark panel stays put.
+                boolean parked = position < 2 * COLUMNS
+                        && Math.abs(item.getTop() - firstRowGap(position) - allTopPx()) <= 3 * density;
+                if (!parked) ensureVisible(item.getTop() - firstRowGap(position), item.getBottom());
             }
         }
     }
@@ -2631,7 +2635,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private static final int CONT_CLIP_DP = 46;
     private static final int PILL_H_DP = 34;          // height of the "Continue watching" / "All apps" pills
     private static final int TOP_BUF_DP = 40;         // hidden space above the first pill: the dock never reaches the panel
-    private static final int CONT_PILL_GAP_DP = 18;   // pill -> posters
+    private static final int CONT_PILL_GAP_DP = 14;   // pill -> posters
     private static final int APPS_PILL_GAP_DP = 22;   // pill -> first row of apps
     private TextView contPill, appsPill;
     private PillIcon.Film contPillIcon;
@@ -2919,7 +2923,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         float margin = 8 * density;
         // The first row sits ROW_INSET inside the panel and its tiles another 8dp (item padding) below that;
         // the same gap is used around the tiles on every side.
-        float innerGap = (ROW_INSET_DP + 8 - 1 - 8) * density;
+        // Room between the "All apps" pill and the first tiles (item padding 8dp + pill gap, minus a 4dp breathing space).
+        float innerGap = (APPS_PILL_GAP_DP + 8 - 4) * density;
         appsPanel.setGlass(allAppsPanel.getLeft() + inset, allAppsPanel.getTop() + inset,
                 allAppsPanel.getRight() - inset, allAppsPanel.getBottom() - inset, margin, innerGap);
     }

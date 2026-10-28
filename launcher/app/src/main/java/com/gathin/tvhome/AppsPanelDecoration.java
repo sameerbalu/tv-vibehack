@@ -158,8 +158,14 @@ final class AppsPanelDecoration extends RecyclerView.ItemDecoration {
         float reachY = grow * (cardH > 0 ? cardH : 101 * d) + 6 * d;
         float gap = 8 * d;
         if (!Float.isNaN(cardsLeft)) gap = Math.max(4 * d, Math.min(10 * d, cardsLeft - cl - reachX));
-        float top = haveFirst ? firstCardTop - reachY - gap : -beyond;
-        float bottom = haveLast ? lastBottom + reachY + gap + extra : parent.getHeight() + beyond;
+        // One vertical gap above and below the tiles, so top and bottom are always equal: as much as the cursor and the
+        // design want, but never more than the room under the "All apps" pill (innerGap) or above the glass panel's bottom.
+        float v = reachY + gap;
+        if (haveFirst && innerGap > 0) v = Math.min(v, innerGap);
+        if (haveLast) v = Math.min(v, Math.max(0f, cb - lastBottom - extra));
+        v = Math.max(v, 3 * d);
+        float top = haveFirst ? firstCardTop - v : -beyond;
+        float bottom = haveLast ? lastBottom + v + extra : parent.getHeight() + beyond;
         top = Math.min(Math.max(top, ct), cb - 2 * radius);
         bottom = Math.max(Math.min(bottom, cb), top + 2 * radius);
         float left = Float.isNaN(cardsLeft) ? cl : Math.max(cl, cardsLeft - reachX - gap);
