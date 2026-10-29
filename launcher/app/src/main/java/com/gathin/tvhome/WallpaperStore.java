@@ -117,4 +117,20 @@ final class WallpaperStore {
         dst.delete();
         if (!tmp.renameTo(dst)) throw new IOException("Cannot save image");
     }
+
+    // ---- default pictures shipped inside the app (assets/default) ----
+
+    /** Copies a picture from the app's assets over the matching private file. which: 0 wallpaper, 1 depth, 2 dock. */
+    static void seedFromAssets(Context c, String assetName, int which) throws IOException {
+        File dst = which == 0 ? file(c) : which == 1 ? front(c) : dock(c);
+        File tmp = new File(c.getFilesDir(), "seed.tmp");
+        try (InputStream in = c.getAssets().open("default/" + assetName);
+             OutputStream out = new FileOutputStream(tmp)) {
+            byte[] buf = new byte[64 * 1024];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+        }
+        dst.delete();
+        if (!tmp.renameTo(dst)) throw new IOException("Cannot save default picture");
+    }
 }

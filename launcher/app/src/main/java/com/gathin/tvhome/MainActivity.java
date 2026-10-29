@@ -326,6 +326,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         particles = findViewById(R.id.particles);
         depthWidgets = findViewById(R.id.depthWidgets);
         dockPng = findViewById(R.id.dockPng);
+        seedDefaultArt();                                          // first start: the built-in pictures become the saved ones
+        stage = new Stage(new View[]{wallpaperView, wallpaperBlurView, wallpaperFront, wallpaperFrontTop, dockPng}, this::onStageFrame);
         dockPngOn = getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_DOCK_PNG_ON, false);
         wallpaperShown = !WallpaperStore.exists(this);             // the depth layers wait for the saved wallpaper
         if (!wallpaperShown) handler.postDelayed(this::markWallpaperReady, 6000);   // never wait forever
@@ -472,6 +474,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
                 if (allAppsMode && !paused && !restorePending) {
                     allAppsMode = false;
                     refreshChrome();
+                    stageFor(lastFocused);
                 }
             }
         });
@@ -559,6 +562,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         if (keepAll) stopClockLoop();
         else startClockLoop();
         if (wallpaperView.getVisibility() != View.VISIBLE) restoreWallpaper();   // safety net after a restart
+        stageIntro(keepAll, quick);
         widgets.animate().cancel();
         widgets.setAlpha(keepAll ? 0f : 1f);
         widgets.setVisibility(keepAll ? View.INVISIBLE : View.VISIBLE);
@@ -735,6 +739,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        handler.removeCallbacks(stageSettle);
         handler.removeCallbacks(clipRunnable);
     }
 
@@ -1130,6 +1135,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         if (arranging) {
             hideHero();
             ensureVisible(item);
+            stageFor(position);
             return;
         }
         if (!leavingAll) {
@@ -1144,6 +1150,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         allAppsMode = position >= COLUMNS;
         depthFollowDock = leavingAll;
         refreshChrome();
+        stageFor(position);
         if (position < COLUMNS) {
             // Dock: park it at the bottom of the screen and show the top shelf for this app.
             int decoratedTop = item.getTop() - (int) (6 * density);
@@ -1596,7 +1603,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
 
     @Override
     public boolean onTileClick(int position) {
-        if (!arranging) return false;
+        if (!arranging) {
+            stagePush();
+            return false;
+        }
         finishArrange(true);
         return true;
     }
@@ -2406,8 +2416,114 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         if (left == null || wallpaperFrontTop == null || left.getWidth() == 0) return;
         Rect r = new Rect(0, 0, left.getWidth(), left.getHeight());
         root.offsetDescendantRectToMyCoords(left, r);
-        wallpaperFrontTop.setClipBounds(r);
+        clockRect.set(r);
+        clockRectSet = true;
+        applyFrontTopClip();
     }
+
+    // ---- stage: the wallpaper layers move together (zoom + shift) with what you do on the dock ----------------
+
+    private static final String KEY_DEFAULT_ART = "default_art_seeded";
+    private static final float STAGE_DOCK = 1.04f, STAGE_ALL = 1.09f, STAGE_INTRO = 1.13f;
+    private Stage stage;
+    private boolean stageAll;
+    private final float[] stageT = new float[3];
+    private final Rect clockRect = new Rect(), clipLocal = new Rect();
+    private boolean clockRectSet;
+
+    /** On the very first start the three built-in pictures are saved like picked ones; own pictures are never replaced. */
+    private void seedDefaultArt() {
+        android.content.SharedPreferences sp = getSharedPreferences(PREFS, MODE_PRIVATE);
+        if (sp.getBoolean(KEY_DEFAULT_ART, false)) return;
+        sp.edit().putBoolean(KEY_DEFAULT_ART, true).apply();       // marked first: a failure can never loop
+        if (WallpaperStore.exists(this) || WallpaperStore.hasFront(this) || WallpaperStore.hasDock(this)
+                || sp.getString(WALLPAPER_URI, null) != null) return;
+        try {
+            WallpaperStore.seedFromAssets(this, "wallpaper.jpg", 0);
+            WallpaperStore.seedFromAssets(this, "front.png", 1);
+            WallpaperStore.seedFromAssets(this, "dock.png", 2);
+            sp.edit().putBoolean(KEY_DOCK_PNG_ON, true).apply();
+        } catch (Exception e) {
+            WallpaperStore.delete(this);
+            WallpaperStore.deleteFront(this);
+            WallpaperStore.deleteDock(this);
+        }
+    }
+
+    /** Called for every animation frame of the stage: the clipped depth copies keep up with the moving pictures. */
+    private void onStageFrame() {
+        if (depthWidgets != null) depthWidgets.setStage(stage.zoom(), stage.tx(), stage.ty());
+        applyFrontTopClip();
+    }
+
+    /** The clock cut-out is fixed on screen, so it is mapped back into the (moving) layer's own coordinates. */
+    private void applyFrontTopClip() {
+        if (!clockRectSet || wallpaperFrontTop == null || stage == null || root == null) return;
+        float cx = root.getWidth() / 2f, cy = root.getHeight() / 2f;
+        float z = Math.max(0.5f, stage.zoom()), tx = stage.tx(), ty = stage.ty();
+        clipLocal.set((int) Math.floor(cx + (clockRect.left - cx - tx) / z),
+                (int) Math.floor(cy + (clockRect.top - cy - ty) / z),
+                (int) Math.ceil(cx + (clockRect.right - cx - tx) / z),
+                (int) Math.ceil(cy + (clockRect.bottom - cy - ty) / z));
+        wallpaperFrontTop.setClipBounds(clipLocal);
+    }
+
+    /** Where the pictures rest for a focused tile: dock = slight zoom that slides with the app, list = closer, follows the row. */
+    private void stageTarget(int position, boolean all) {
+        float w = Math.max(1, root.getWidth()), h = Math.max(1, root.getHeight());
+        int cols = Math.max(1, COLUMNS);
+        int pos = Math.max(0, position);
+        if (!all) {
+            float f = cols > 1 ? Math.min(pos, cols - 1) / (float) (cols - 1) : 0.5f;
+            stageT[0] = STAGE_DOCK;
+            stageT[1] = -(f - 0.5f) * 2f * 0.012f * w;
+            stageT[2] = 0f;
+        } else {
+            float f = cols > 1 ? (pos % cols) / (float) (cols - 1) : 0.5f;
+            int row = Math.max(0, pos / cols - 1);
+            stageT[0] = STAGE_ALL;
+            stageT[1] = -(f - 0.5f) * 2f * 0.016f * w;
+            stageT[2] = -Math.min(row, 6) * 0.004f * h;
+        }
+    }
+
+    private void stageFor(int position) {
+        if (stage == null || root == null || root.getWidth() == 0) return;
+        boolean all = allAppsMode || arranging;
+        stageTarget(position, all);
+        long ms = all != stageAll ? 560 : 420;                     // switching between dock and list takes a little longer
+        stageAll = all;
+        stage.to(stageT[0], stageT[1], stageT[2], ms);
+    }
+
+    /** Coming back to the home screen: the pictures start close and settle back. */
+    private void stageIntro(final boolean all, final boolean quick) {
+        if (stage == null || root == null) return;
+        handler.removeCallbacks(stageSettle);
+        root.post(() -> {
+            if (root.getWidth() == 0) return;
+            stageAll = all;
+            stageTarget(Math.max(0, lastFocused), all);
+            if (quick) {
+                stage.jump(stageT[0], stageT[1], stageT[2]);
+                return;
+            }
+            stage.jump(STAGE_INTRO, 0f, 0f);
+            stage.to(stageT[0], stageT[1], stageT[2], 750);
+        });
+    }
+
+    /** Opening an app: the pictures push in a little. */
+    private void stagePush() {
+        if (stage == null) return;
+        stage.to(stage.zoom() + 0.06f, stage.tx(), stage.ty(), 300, new android.view.animation.AccelerateDecelerateInterpolator());
+        handler.removeCallbacks(stageSettle);
+        handler.postDelayed(stageSettle, 1300);                    // the app did not open: settle back
+    }
+
+    private final Runnable stageSettle = () -> {
+        if (!paused) stageFor(Math.max(0, lastFocused));
+    };
 
     private int dockGen;
 
