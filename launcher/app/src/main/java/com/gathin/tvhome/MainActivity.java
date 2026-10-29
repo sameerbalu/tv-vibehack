@@ -151,6 +151,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private int fxParticles = 0;            // 0 off, then stars, snow, fireflies, rain, bubbles, embers
     private int widgetsDepth;               // widgets behind the depth PNG: 0 off, 1 right, 2 left, 3 both
     private ParticlesView particles;
+    private WebFxView webFx;
+    private boolean fxWebOn = true;            // Settings > Glow & effects > Spider web effects
     private DepthOverlayView depthWidgets;
     private DockPngView dockPng;
     private boolean dockPngOn;
@@ -326,8 +328,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         particles = findViewById(R.id.particles);
         depthWidgets = findViewById(R.id.depthWidgets);
         dockPng = findViewById(R.id.dockPng);
+        webFx = findViewById(R.id.webFx);
         seedDefaultArt();                                          // first start: the built-in pictures become the saved ones
-        stage = new Stage(new View[]{wallpaperView, wallpaperBlurView, wallpaperFront, wallpaperFrontTop, dockPng}, this::onStageFrame);
         dockPngOn = getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_DOCK_PNG_ON, false);
         wallpaperShown = !WallpaperStore.exists(this);             // the depth layers wait for the saved wallpaper
         if (!wallpaperShown) handler.postDelayed(this::markWallpaperReady, 6000);   // never wait forever
@@ -474,7 +476,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
                 if (allAppsMode && !paused && !restorePending) {
                     allAppsMode = false;
                     refreshChrome();
-                    stageFor(lastFocused);
+                    webFx.setAllMode(false, root.getWidth() / 2f, root.getHeight() * 0.8f);
                 }
             }
         });
@@ -562,7 +564,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         if (keepAll) stopClockLoop();
         else startClockLoop();
         if (wallpaperView.getVisibility() != View.VISIBLE) restoreWallpaper();   // safety net after a restart
-        stageIntro(keepAll, quick);
         widgets.animate().cancel();
         widgets.setAlpha(keepAll ? 0f : 1f);
         widgets.setVisibility(keepAll ? View.INVISIBLE : View.VISIBLE);
@@ -592,6 +593,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         fxPos = Math.max(0, Math.min(FX_POS.length - 1, fx.getInt("fx_pos", 1)));
         fxParticles = Math.max(0, Math.min(ParticlesView.COUNT - 1, fx.getInt("fx_particles", 0)));
         widgetsDepth = Math.max(0, Math.min(3, fx.getInt("widgets_depth_side", 0)));
+        fxWebOn = fx.getBoolean("fx_web", true);
+        webFx.setFxEnabled(fxWebOn);
+        webFx.setHeroArt(isDefaultArt());
+        webFx.reset(keepAll);
         particles.setMode(fxParticles);
         if (Perf.paused) pauseBackground(false);
         else syncPulse();
@@ -739,7 +744,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        handler.removeCallbacks(stageSettle);
         handler.removeCallbacks(clipRunnable);
     }
 
@@ -1135,7 +1139,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         if (arranging) {
             hideHero();
             ensureVisible(item);
-            stageFor(position);
             return;
         }
         if (!leavingAll) {
@@ -1150,7 +1153,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         allAppsMode = position >= COLUMNS;
         depthFollowDock = leavingAll;
         refreshChrome();
-        stageFor(position);
+        webFx.setAllMode(allAppsMode, r.centerX(), r.centerY());
         if (position < COLUMNS) {
             // Dock: park it at the bottom of the screen and show the top shelf for this app.
             int decoratedTop = item.getTop() - (int) (6 * density);
@@ -1158,6 +1161,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             if (leavingAll) snapToDock(dy);
             else scrollGridBy(dy);
             showHero(position, r.top - dy);
+            webFx.setHeroArt(isDefaultArt());
+            webFx.shoot(r.centerX(), r.centerY() - dy, Math.max(r.width(), r.height()) / 2f);   // a hero looks at this app
         } else {
             hideHero();
             if (entering) {
@@ -1603,10 +1608,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
 
     @Override
     public boolean onTileClick(int position) {
-        if (!arranging) {
-            stagePush();
-            return false;
-        }
+        if (!arranging) return false;
         finishArrange(true);
         return true;
     }
@@ -2095,6 +2097,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         updateWidgetRow(glowRow, fxGlowOn);
         rows.addView(glowRow);
 
+        final View webRow = getLayoutInflater().inflate(R.layout.item_input, rows, false);
+        setMenuIcon(webRow, MenuIcons.GLOW);
+        ((TextView) webRow.findViewById(R.id.title)).setText("Spider web effects");
+        updateWidgetRow(webRow, fxWebOn);
+        rows.addView(webRow);
+
         final View styleRow = getLayoutInflater().inflate(R.layout.item_input, rows, false);
         setMenuIcon(styleRow, MenuIcons.BRUSH);
         ((TextView) styleRow.findViewById(R.id.title)).setText(R.string.fx_style);
@@ -2137,6 +2145,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             getSharedPreferences(PREFS, MODE_PRIVATE).edit().putInt("fx_particles", fxParticles).apply();
             particles.setMode(fxParticles);
             updateFxRows(colorRow, posRow, partRow);
+        });
+        webRow.setOnClickListener(v -> {
+            fxWebOn = !fxWebOn;
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean("fx_web", fxWebOn).apply();
+            updateWidgetRow(webRow, fxWebOn);
+            webFx.setFxEnabled(fxWebOn);
         });
         glowRow.setOnClickListener(v -> {
             fxGlowOn = !fxGlowOn;
@@ -2416,20 +2430,17 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         if (left == null || wallpaperFrontTop == null || left.getWidth() == 0) return;
         Rect r = new Rect(0, 0, left.getWidth(), left.getHeight());
         root.offsetDescendantRectToMyCoords(left, r);
-        clockRect.set(r);
-        clockRectSet = true;
-        applyFrontTopClip();
+        wallpaperFrontTop.setClipBounds(r);
     }
 
-    // ---- stage: the wallpaper layers move together (zoom + shift) with what you do on the dock ----------------
-
     private static final String KEY_DEFAULT_ART = "default_art_seeded";
-    private static final float STAGE_DOCK = 1.04f, STAGE_ALL = 1.09f, STAGE_INTRO = 1.13f;
-    private Stage stage;
-    private boolean stageAll;
-    private final float[] stageT = new float[3];
-    private final Rect clockRect = new Rect(), clipLocal = new Rect();
-    private boolean clockRectSet;
+    private static final String KEY_DEFAULT_LEN = "default_art_len";
+
+    /** True while the wallpaper is still the built-in picture (the web heroes only know their places in that one). */
+    private boolean isDefaultArt() {
+        long len = getSharedPreferences(PREFS, MODE_PRIVATE).getLong(KEY_DEFAULT_LEN, -1L);
+        return len > 0 && WallpaperStore.exists(this) && WallpaperStore.length(this) == len;
+    }
 
     /** On the very first start the three built-in pictures are saved like picked ones; own pictures are never replaced. */
     private void seedDefaultArt() {
@@ -2440,6 +2451,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
                 || sp.getString(WALLPAPER_URI, null) != null) return;
         try {
             WallpaperStore.seedFromAssets(this, "wallpaper.jpg", 0);
+            sp.edit().putLong(KEY_DEFAULT_LEN, WallpaperStore.length(this)).apply();
             WallpaperStore.seedFromAssets(this, "front.png", 1);
             WallpaperStore.seedFromAssets(this, "dock.png", 2);
             sp.edit().putBoolean(KEY_DOCK_PNG_ON, true).apply();
@@ -2450,80 +2462,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         }
     }
 
-    /** Called for every animation frame of the stage: the clipped depth copies keep up with the moving pictures. */
-    private void onStageFrame() {
-        if (depthWidgets != null) depthWidgets.setStage(stage.zoom(), stage.tx(), stage.ty());
-        applyFrontTopClip();
-    }
-
-    /** The clock cut-out is fixed on screen, so it is mapped back into the (moving) layer's own coordinates. */
-    private void applyFrontTopClip() {
-        if (!clockRectSet || wallpaperFrontTop == null || stage == null || root == null) return;
-        float cx = root.getWidth() / 2f, cy = root.getHeight() / 2f;
-        float z = Math.max(0.5f, stage.zoom()), tx = stage.tx(), ty = stage.ty();
-        clipLocal.set((int) Math.floor(cx + (clockRect.left - cx - tx) / z),
-                (int) Math.floor(cy + (clockRect.top - cy - ty) / z),
-                (int) Math.ceil(cx + (clockRect.right - cx - tx) / z),
-                (int) Math.ceil(cy + (clockRect.bottom - cy - ty) / z));
-        wallpaperFrontTop.setClipBounds(clipLocal);
-    }
-
-    /** Where the pictures rest for a focused tile: dock = slight zoom that slides with the app, list = closer, follows the row. */
-    private void stageTarget(int position, boolean all) {
-        float w = Math.max(1, root.getWidth()), h = Math.max(1, root.getHeight());
-        int cols = Math.max(1, COLUMNS);
-        int pos = Math.max(0, position);
-        if (!all) {
-            float f = cols > 1 ? Math.min(pos, cols - 1) / (float) (cols - 1) : 0.5f;
-            stageT[0] = STAGE_DOCK;
-            stageT[1] = -(f - 0.5f) * 2f * 0.012f * w;
-            stageT[2] = 0f;
-        } else {
-            float f = cols > 1 ? (pos % cols) / (float) (cols - 1) : 0.5f;
-            int row = Math.max(0, pos / cols - 1);
-            stageT[0] = STAGE_ALL;
-            stageT[1] = -(f - 0.5f) * 2f * 0.016f * w;
-            stageT[2] = -Math.min(row, 6) * 0.004f * h;
-        }
-    }
-
-    private void stageFor(int position) {
-        if (stage == null || root == null || root.getWidth() == 0) return;
-        boolean all = allAppsMode || arranging;
-        stageTarget(position, all);
-        long ms = all != stageAll ? 560 : 420;                     // switching between dock and list takes a little longer
-        stageAll = all;
-        stage.to(stageT[0], stageT[1], stageT[2], ms);
-    }
-
-    /** Coming back to the home screen: the pictures start close and settle back. */
-    private void stageIntro(final boolean all, final boolean quick) {
-        if (stage == null || root == null) return;
-        handler.removeCallbacks(stageSettle);
-        root.post(() -> {
-            if (root.getWidth() == 0) return;
-            stageAll = all;
-            stageTarget(Math.max(0, lastFocused), all);
-            if (quick) {
-                stage.jump(stageT[0], stageT[1], stageT[2]);
-                return;
-            }
-            stage.jump(STAGE_INTRO, 0f, 0f);
-            stage.to(stageT[0], stageT[1], stageT[2], 750);
-        });
-    }
-
-    /** Opening an app: the pictures push in a little. */
-    private void stagePush() {
-        if (stage == null) return;
-        stage.to(stage.zoom() + 0.06f, stage.tx(), stage.ty(), 300, new android.view.animation.AccelerateDecelerateInterpolator());
-        handler.removeCallbacks(stageSettle);
-        handler.postDelayed(stageSettle, 1300);                    // the app did not open: settle back
-    }
-
-    private final Runnable stageSettle = () -> {
-        if (!paused) stageFor(Math.max(0, lastFocused));
-    };
 
     private int dockGen;
 

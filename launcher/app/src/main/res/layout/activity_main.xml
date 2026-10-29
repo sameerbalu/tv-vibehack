@@ -86,6 +86,15 @@
         android:visibility="gone"
         android:contentDescription="@null" />
 
+    <!-- Spider-web effects: over the wallpaper and the depth PNG (which covers almost the whole picture), under the app tiles. -->
+    <com.gathin.tvhome.WebFxView
+        android:id="@+id/webFx"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:focusable="false"
+        android:clickable="false"
+        android:importantForAccessibility="no" />
+
     <!-- Frosted-glass panel behind the all-apps list (all-apps state only). Top margin is set in code. -->
     <com.gathin.tvhome.GlassPanelView
         android:id="@+id/allAppsPanel"

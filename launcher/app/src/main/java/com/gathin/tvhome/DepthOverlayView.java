@@ -24,7 +24,6 @@ public class DepthOverlayView extends View {
     private final Matrix matrix = new Matrix();
     private final List<Rect> rects = new ArrayList<>();
     private Bitmap bitmap;
-    private float stageZ = 1f, stageX, stageY;
 
     public DepthOverlayView(Context c, AttributeSet a) {
         super(c, a);
@@ -41,15 +40,6 @@ public class DepthOverlayView extends View {
         return bitmap != null;
     }
 
-    /** Same zoom/shift as the other picture layers; the cut-out rectangles themselves do not move. */
-    void setStage(float z, float tx, float ty) {
-        if (z == stageZ && tx == stageX && ty == stageY) return;
-        stageZ = z;
-        stageX = tx;
-        stageY = ty;
-        if (getVisibility() == VISIBLE && bitmap != null && !rects.isEmpty()) invalidate();
-    }
-
     void setRects(List<Rect> list) {
         rects.clear();
         rects.addAll(list);
@@ -64,8 +54,6 @@ public class DepthOverlayView extends View {
         float dy = (getHeight() - bitmap.getHeight() * s) / 2f;
         matrix.setScale(s, s);
         matrix.postTranslate(dx, dy);
-        matrix.postScale(stageZ, stageZ, getWidth() / 2f, getHeight() / 2f);
-        matrix.postTranslate(stageX, stageY);
         for (Rect r : rects) {
             canvas.save();
             canvas.clipRect(r);
