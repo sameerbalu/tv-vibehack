@@ -183,6 +183,10 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
             }
             sig.append(';');
         }
+        // Hiding or showing an app changes the list too: a later reload must not mistake it for "nothing changed".
+        java.util.List<String> hiddenNow = new java.util.ArrayList<>(userHidden);
+        Collections.sort(hiddenNow);
+        sig.append('#').append(hiddenNow);
         return sig.toString();
     }
 
