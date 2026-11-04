@@ -656,7 +656,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             resumeInAll = allAppsMode && !arranging && lastFocused >= COLUMNS;
             if (resumeInAll) {
                 RecyclerView.ViewHolder vh = grid.findViewHolderForAdapterPosition(lastFocused);
-                if (vh != null) resumeTileTop = vh.itemView.getTop() - firstRowGap(lastFocused);
+                // The decorated top (the gap above the first row included) is exactly what scrollToPositionWithOffset
+                // takes back; the old value was 40dp too low for the first row, so the whole list sat lower after Home.
+                if (vh != null) resumeTileTop = ((GridLayoutManager) grid.getLayoutManager()).getDecoratedTop(vh.itemView);
             }
         }
         paused = true;
