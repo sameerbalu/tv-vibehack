@@ -59,13 +59,13 @@ final class ContinueAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
     private final float d;
     private final List<NuvioHistory.Entry> entries = new ArrayList<>();
     // Limited by memory used, not by number of pictures.
-    private final android.util.LruCache<String, Bitmap> posters = new android.util.LruCache<String, Bitmap>(24 * 1024 * 1024) {
+    private final android.util.LruCache<String, Bitmap> posters = new android.util.LruCache<String, Bitmap>(16 * 1024 * 1024) {
         @Override
         protected int sizeOf(String key, Bitmap value) {
             return value.getAllocationByteCount();
         }
     };
-    private final android.util.LruCache<String, Bitmap> blurs = new android.util.LruCache<String, Bitmap>(4 * 1024 * 1024) {
+    private final android.util.LruCache<String, Bitmap> blurs = new android.util.LruCache<String, Bitmap>(3 * 1024 * 1024) {
         @Override
         protected int sizeOf(String key, Bitmap value) {
             return value.getAllocationByteCount();

@@ -27,10 +27,6 @@ final class WallpaperStore {
         return f.isFile() && f.length() > 0;
     }
 
-    static long length(Context c) {
-        return file(c).length();
-    }
-
     static Uri uri(Context c) {
         return Uri.fromFile(file(c));
     }
