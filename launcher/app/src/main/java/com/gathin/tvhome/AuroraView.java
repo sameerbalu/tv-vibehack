@@ -171,6 +171,6 @@ public class AuroraView extends View {
         }
 
         frame++;
-        postInvalidateOnAnimation();   // every screen refresh (60 fps); motion is time based, so speed stays the same
+        postInvalidateDelayed(33);   // 30 fps; motion is time based, so speed stays the same
     }
 }

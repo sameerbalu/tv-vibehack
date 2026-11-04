@@ -151,8 +151,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     private int fxParticles = 0;            // 0 off, then stars, snow, fireflies, rain, bubbles, embers
     private int widgetsDepth;               // widgets behind the depth PNG: 0 off, 1 right, 2 left, 3 both
     private ParticlesView particles;
-    private WebFxView webFx;
-    private boolean fxWebOn = true;            // Settings > Glow & effects > Spider web effects
     private DepthOverlayView depthWidgets;
     private DockPngView dockPng;
     private boolean dockPngOn;
@@ -220,6 +218,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     // Static so they survive the activity being destroyed while another app is open (low-memory TVs,
     // or Developer options → "Don't keep activities"); they only reset when the process dies.
     private static int lastFocused = 0;
+    private static int lastDockPos = 0;        // last focused slot of the dock row
     /** App of the last focused tile, so focus follows it when the app list changes. */
     private static String lastFocusedKey;
     private float density;
@@ -328,7 +327,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         particles = findViewById(R.id.particles);
         depthWidgets = findViewById(R.id.depthWidgets);
         dockPng = findViewById(R.id.dockPng);
-        webFx = findViewById(R.id.webFx);
         seedDefaultArt();                                          // first start: the built-in pictures become the saved ones
         dockPngOn = getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_DOCK_PNG_ON, false);
         wallpaperShown = !WallpaperStore.exists(this);             // the depth layers wait for the saved wallpaper
@@ -369,7 +367,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             }
         });
         grid.setHasFixedSize(true);
-        grid.setItemViewCacheSize(COLUMNS * 3);   // rows just scrolled off come back without being re-bound
         grid.setItemAnimator(null);
         dockDecoration = new DockDecoration(COLUMNS, density);
         grid.addItemDecoration(dockDecoration);
@@ -476,7 +473,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
                 if (allAppsMode && !paused && !restorePending) {
                     allAppsMode = false;
                     refreshChrome();
-                    webFx.setAllMode(false, root.getWidth() / 2f, root.getHeight() * 0.8f);
                 }
             }
         });
@@ -547,7 +543,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         } else {
             adapter.reloadIfChangedAsync(() -> {
                 if (paused || isFinishing()) return;
-                grid.scheduleLayoutAnimation();
+                if (!keepAll) grid.scheduleLayoutAnimation();   // All apps stays exactly where it was
                 grid.post(restoreFocus);
             });
         }
@@ -593,10 +589,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         fxPos = Math.max(0, Math.min(FX_POS.length - 1, fx.getInt("fx_pos", 1)));
         fxParticles = Math.max(0, Math.min(ParticlesView.COUNT - 1, fx.getInt("fx_particles", 0)));
         widgetsDepth = Math.max(0, Math.min(3, fx.getInt("widgets_depth_side", 0)));
-        fxWebOn = fx.getBoolean("fx_web", true);
-        webFx.setFxEnabled(fxWebOn);
-        webFx.setHeroArt(isDefaultArt());
-        webFx.reset(keepAll);
         particles.setMode(fxParticles);
         if (Perf.paused) pauseBackground(false);
         else syncPulse();
@@ -1125,6 +1117,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         if (restorePending) return;                    // focus jumps while the list rebinds; the restore sets the real one
         if (snapActive) endSnap();
         lastFocused = position;
+        if (position < COLUMNS) lastDockPos = position;
         lastFocusedKey = adapter.keyAt(position);
         boolean leavingAll = !arranging && allAppsMode && position < COLUMNS;
         boolean glassWasShown = glassShown;
@@ -1153,7 +1146,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         allAppsMode = position >= COLUMNS;
         depthFollowDock = leavingAll;
         refreshChrome();
-        webFx.setAllMode(allAppsMode, r.centerX(), r.centerY());
         if (position < COLUMNS) {
             // Dock: park it at the bottom of the screen and show the top shelf for this app.
             int decoratedTop = item.getTop() - (int) (6 * density);
@@ -1161,8 +1153,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             if (leavingAll) snapToDock(dy);
             else scrollGridBy(dy);
             showHero(position, r.top - dy);
-            webFx.setHeroArt(isDefaultArt());
-            webFx.shoot(r.centerX(), r.centerY() - dy, Math.max(r.width(), r.height()) / 2f);   // a hero looks at this app
         } else {
             hideHero();
             if (entering) {
@@ -1333,7 +1323,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         ambientPulse.addUpdateListener(a -> {
             pulseT = (Float) a.getAnimatedValue();
             long now = android.os.SystemClock.uptimeMillis();
-            if (now - lastPulseDraw < 12) return;      // every screen refresh (60 fps)
+            if (now - lastPulseDraw < 66) return;      // ~15 fps: a slow glow does not need more, and every redraw repaints the whole screen
             lastPulseDraw = now;
             if (heroShown) setAmbient(ambientColor);
         });
@@ -2097,12 +2087,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         updateWidgetRow(glowRow, fxGlowOn);
         rows.addView(glowRow);
 
-        final View webRow = getLayoutInflater().inflate(R.layout.item_input, rows, false);
-        setMenuIcon(webRow, MenuIcons.GLOW);
-        ((TextView) webRow.findViewById(R.id.title)).setText("Spider web effects");
-        updateWidgetRow(webRow, fxWebOn);
-        rows.addView(webRow);
-
         final View styleRow = getLayoutInflater().inflate(R.layout.item_input, rows, false);
         setMenuIcon(styleRow, MenuIcons.BRUSH);
         ((TextView) styleRow.findViewById(R.id.title)).setText(R.string.fx_style);
@@ -2145,12 +2129,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
             getSharedPreferences(PREFS, MODE_PRIVATE).edit().putInt("fx_particles", fxParticles).apply();
             particles.setMode(fxParticles);
             updateFxRows(colorRow, posRow, partRow);
-        });
-        webRow.setOnClickListener(v -> {
-            fxWebOn = !fxWebOn;
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean("fx_web", fxWebOn).apply();
-            updateWidgetRow(webRow, fxWebOn);
-            webFx.setFxEnabled(fxWebOn);
         });
         glowRow.setOnClickListener(v -> {
             fxGlowOn = !fxGlowOn;
@@ -2434,13 +2412,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     }
 
     private static final String KEY_DEFAULT_ART = "default_art_seeded";
-    private static final String KEY_DEFAULT_LEN = "default_art_len";
-
-    /** True while the wallpaper is still the built-in picture (the web heroes only know their places in that one). */
-    private boolean isDefaultArt() {
-        long len = getSharedPreferences(PREFS, MODE_PRIVATE).getLong(KEY_DEFAULT_LEN, -1L);
-        return len > 0 && WallpaperStore.exists(this) && WallpaperStore.length(this) == len;
-    }
 
     /** On the very first start the three built-in pictures are saved like picked ones; own pictures are never replaced. */
     private void seedDefaultArt() {
@@ -2451,7 +2422,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
                 || sp.getString(WALLPAPER_URI, null) != null) return;
         try {
             WallpaperStore.seedFromAssets(this, "wallpaper.jpg", 0);
-            sp.edit().putLong(KEY_DEFAULT_LEN, WallpaperStore.length(this)).apply();
             WallpaperStore.seedFromAssets(this, "front.png", 1);
             WallpaperStore.seedFromAssets(this, "dock.png", 2);
             sp.edit().putBoolean(KEY_DOCK_PNG_ON, true).apply();
@@ -2751,7 +2721,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
         continueRow.setClipChildren(false);
         continueRow.setClipToPadding(false);
         continueRow.setItemAnimator(null);
-        continueRow.setItemViewCacheSize(8);
         continueRow.setOverScrollMode(View.OVER_SCROLL_NEVER);
         continueRow.setHorizontalScrollBarEnabled(false);
         continueRow.setAdapter(continueAdapter);
@@ -4054,6 +4023,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, C
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         dismissOpenPopup();         // Home pressed while a menu is open
+        if (!paused && !restorePending && allAppsMode && !arranging && adapter.getItemCount() > 0) {
+            focusTile(Math.min(lastDockPos, COLUMNS - 1));   // Home from All apps: the normal glide back to the dock
+        }
     }
 
     private void addSeparator(LinearLayout rows) {
